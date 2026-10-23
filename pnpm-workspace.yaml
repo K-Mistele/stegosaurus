@@ -1,0 +1,57 @@
+packages:
+  - apps/*
+  - packages/*
+  - tools/*
+
+catalogMode: prefer
+
+catalog:
+  "@effect/platform-bun": 4.0.6
+  "@effect/platform-node": 4.0.6
+  "@effect/tsgo": 0.56.0
+  "@effect/vitest": 4.0.6
+  "@opentui/core": 0.6.8
+  "@oxlint/plugins": 1.89.0
+  "@types/bun": 1.4.4
+  "@types/node": ^24
+  alchemy: 2.0.0-beta.83
+  effect: 4.0.6
+  oxlint: 1.89.0
+  oxlint-tsgolint: 7.0.2004
+  typescript: ^7.0.2
+  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
+  vite-plus: 1.4.0
+  vitest: 5.0.5
+overrides:
+  vite: "catalog:"
+  vitest: "catalog:"
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"
+    capnp-es>typescript: "*"
+    bun-ffi-structs>typescript: "*"
+allowBuilds:
+  workerd: true
+minimumReleaseAgeExclude:
+  - "@voidzero-dev/vite-plus-core@1.4.0"
+  - "@voidzero-dev/vite-plus-darwin-arm64@1.4.0"
+  - "@voidzero-dev/vite-plus-darwin-x64@1.4.0"
+  - "@voidzero-dev/vite-plus-linux-arm64-gnu@1.4.0"
+  - "@voidzero-dev/vite-plus-linux-arm64-musl@1.4.0"
+  - "@voidzero-dev/vite-plus-linux-x64-gnu@1.4.0"
+  - "@voidzero-dev/vite-plus-linux-x64-musl@1.4.0"
+  - "@voidzero-dev/vite-plus-win32-arm64-msvc@1.4.0"
+  - "@voidzero-dev/vite-plus-win32-x64-msvc@1.4.0"
+  - vite-plus@1.4.0
+  - "@opentui/core-darwin-arm64@0.6.8"
+  - "@opentui/core-darwin-x64@0.6.8"
+  - "@opentui/core-linux-arm64-musl@0.6.8"
+  - "@opentui/core-linux-arm64@0.6.8"
+  - "@opentui/core-linux-x64-musl@0.6.8"
+  - "@opentui/core-linux-x64@0.6.8"
+  - "@opentui/core-win32-arm64@0.6.8"
+  - "@opentui/core-win32-x64@0.6.8"
+  - "@opentui/core@0.6.8"
+  - "@types/bun@1.4.4"

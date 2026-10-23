@@ -1,0 +1,26 @@
+{
+  "name": "@everything/anti-slop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Vendored anti-slop Oxlint rules (from github.com/k-mistele/anti-slop).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./effect": "./src/effect/index.ts"
+  },
+  "scripts": {
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@oxlint/plugins": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  }
+}
