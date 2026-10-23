@@ -1,4 +1,4 @@
-import type { LogEntry } from "./Model.ts";
+import type { LogEntry } from "./Model";
 
 const CAPTURE_BYTES = 256 * 1024;
 const TOTAL_BYTES = 16 * 1024 * 1024;

@@ -1,11 +1,11 @@
 import { defineConfig } from "vite-plus";
-import { ignorePatterns } from "./tooling/ignores.ts";
-import { antiSlopEffectRules, antiSlopPlugins, antiSlopRules } from "./tooling/lint/anti-slop.ts";
-import { automationPlugins, automationRules } from "./tooling/lint/automation.ts";
-import { builtinCategories, builtinRules } from "./tooling/lint/builtin.ts";
-import { effectTsgoPresets, effectTsgoRules } from "./tooling/lint/effect-tsgo.ts";
-import { overrides } from "./tooling/lint/overrides.ts";
-import { tailwindPlugins, tailwindRules } from "./tooling/lint/tailwind.ts";
+import { ignorePatterns } from "./tooling/ignores";
+import { antiSlopEffectRules, antiSlopPlugins, antiSlopRules } from "./tooling/lint/anti-slop";
+import { automationPlugins, automationRules } from "./tooling/lint/automation";
+import { builtinCategories, builtinRules } from "./tooling/lint/builtin";
+import { effectTsgoPresets, effectTsgoRules } from "./tooling/lint/effect-tsgo";
+import { overrides } from "./tooling/lint/overrides";
+import { tailwindPlugins, tailwindRules } from "./tooling/lint/tailwind";
 
 export default defineConfig({
   staged: {
@@ -23,7 +23,7 @@ export default defineConfig({
       ...automationPlugins,
       ...tailwindPlugins,
     ],
-    plugins: ["typescript"],
+    plugins: ["typescript", "import"],
     categories: builtinCategories,
     rules: {
       "vite-plus/prefer-vite-plus-imports": "error",

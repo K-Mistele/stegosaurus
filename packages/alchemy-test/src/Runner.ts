@@ -22,12 +22,12 @@ import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Semaphore from "effect/Semaphore";
-import { makeCapture } from "./Capture.ts";
-import { makeFileLog, type FileLog } from "./FileLog.ts";
-import type { FileSuite, Hook, LogEntry, Suite, TestCase } from "./Model.ts";
-import { containsOnly, forEachTest, makeFileSuite, titlePath } from "./Model.ts";
-import type { TestPlan } from "./Plan.ts";
-import * as Registry from "./Registry.ts";
+import { makeCapture } from "./Capture";
+import { makeFileLog, type FileLog } from "./FileLog";
+import type { FileSuite, Hook, LogEntry, Suite, TestCase } from "./Model";
+import { containsOnly, forEachTest, makeFileSuite, titlePath } from "./Model";
+import type { TestPlan } from "./Plan";
+import * as Registry from "./Registry";
 import {
   Reporter,
   type RunController,
@@ -35,8 +35,8 @@ import {
   type TestEvent,
   type TestMeta,
   type TestResult,
-} from "./Reporter.ts";
-import { compileTagsFilter, type TagsFilter } from "./Tags.ts";
+} from "./Reporter";
+import { compileTagsFilter, type TagsFilter } from "./Tags";
 
 export interface RunOptions {
   /** Directory the run is rooted at (usually `packages/alchemy`). */

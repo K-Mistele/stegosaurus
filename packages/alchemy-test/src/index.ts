@@ -32,7 +32,7 @@ export {
   type Tester,
   type TestFn,
   type TestOptions,
-} from "./Api.ts";
+} from "./Api";
 export {
   assert,
   AssertionError,
@@ -42,7 +42,7 @@ export {
   type Assert,
   type Expect,
   type Matchers,
-} from "./Expect.ts";
-export { currentFile } from "./Registry.ts";
-export type { Tags, TestTag, TestTags } from "./Tags.ts";
-export type { FileSuite, Hook, LogEntry, Mode, Suite, TestBody, TestCase } from "./Model.ts";
+} from "./Expect";
+export { currentFile } from "./Registry";
+export type { Tags, TestTag, TestTags } from "./Tags";
+export type { FileSuite, Hook, LogEntry, Mode, Suite, TestBody, TestCase } from "./Model";

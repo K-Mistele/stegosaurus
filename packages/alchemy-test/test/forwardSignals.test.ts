@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { pollUntil } from "../src/DevCli.ts";
+import { pollUntil } from "../src/DevCli";
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   test(`forwards ${signal} to DevCli and waits for cleanup`, async () => {

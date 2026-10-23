@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { describe, it } from "../src/Api.ts";
-import { forEachTest, type TestCase } from "../src/Model.ts";
-import { collect } from "../src/Registry.ts";
-import { compileTagsFilter, mergeTags } from "../src/Tags.ts";
+import { describe, it } from "../src/Api";
+import { forEachTest, type TestCase } from "../src/Model";
+import { collect } from "../src/Registry";
+import { compileTagsFilter, mergeTags } from "../src/Tags";
 
 test("opt-in tags require exact positive selection of every required tag", () => {
   const matches = (expressions: string[], optInTags = ["slow"]) =>

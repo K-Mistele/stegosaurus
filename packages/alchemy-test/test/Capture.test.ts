@@ -1,5 +1,5 @@
 import { expect, it } from "alchemy-test";
-import { makeCapture } from "../src/Capture.ts";
+import { makeCapture } from "../src/Capture";
 
 it("bounds previews while persisting every complete original message", () => {
   const capture = makeCapture({ capture: 4096, total: 8192 });

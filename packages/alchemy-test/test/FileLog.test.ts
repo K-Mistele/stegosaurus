@@ -3,7 +3,7 @@ import { expect, it } from "alchemy-test";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { makeFileLog } from "../src/FileLog.ts";
+import { makeFileLog } from "../src/FileLog";
 
 it.live("preserves stray output appended between captured log writes", () =>
   Effect.gen(function* () {

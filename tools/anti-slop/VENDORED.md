@@ -11,3 +11,7 @@ Tests run with `vp test` (Vitest globals); upstream runs each test file with `ts
 ## Additions
 
 `src/effect/rules/prefer-tagged-error-handling.ts` and its test match anti-slop `main`. The rule started in the monorepo template (https://github.com/humanlayer/typescript-monorepo-template, originally from Fold; see `PROVENANCE.md`) as a text-matching check; anti-slop rewrote it on the AST.
+
+## Local changes
+
+- `tsconfig.json` sets `allowImportingTsExtensions`: the root tsconfig doesn't, and upstream source imports `./x.ts`.

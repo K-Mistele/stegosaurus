@@ -1,4 +1,4 @@
-import type { Categories, Rules } from "./types.ts";
+import type { Categories, Rules } from "./types";
 
 export const builtinCategories = {
   correctness: "error",
@@ -11,6 +11,7 @@ export const builtinRules = {
   "no-empty-function": "warn",
   "no-eq-null": "error",
   "oxc/no-accumulating-spread": "error",
+  "import/extensions": ["error", "never", { ignorePackages: true }],
   "no-unused-vars": "warn",
   "unicorn/filename-case": "error",
   "require-yield": "off",

@@ -32,12 +32,12 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Runtime from "effect/Runtime";
 import packageJson from "../package.json" with { type: "json" };
-import { PlainReporterLive, printSummary } from "./PlainReporter.ts";
-import { parsePlan } from "./Plan.ts";
-import { Reporter } from "./Reporter.ts";
-import { run, type RunOptions } from "./Runner.ts";
-import { captureStrayOutput } from "./StrayOutput.ts";
-import { TuiReporter } from "./Tui.ts";
+import { PlainReporterLive, printSummary } from "./PlainReporter";
+import { parsePlan } from "./Plan";
+import { Reporter } from "./Reporter";
+import { run, type RunOptions } from "./Runner";
+import { captureStrayOutput } from "./StrayOutput";
+import { TuiReporter } from "./Tui";
 
 const paths = Argument.String("paths").pipe(
   Argument.withDescription("Test files or directories (default: ./test)"),

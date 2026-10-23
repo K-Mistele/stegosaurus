@@ -72,7 +72,7 @@ it(
           resolve(root, `local-${name}.test.ts`),
           `
       import { it, expect, afterAll } from ${api};
-      import {local, cleaned, barrier} from './state.ts';
+      import {local, cleaned, barrier} from './state';
       it('local ${name}', async () => { await barrier('local'); local.add('${name}'); }, {tags:['local']});
       afterAll(() => { cleaned.add('${name}'); });
     `,
@@ -82,7 +82,7 @@ it(
           resolve(root, `${provider}.test.ts`),
           `
       import { it, expect } from ${api};
-      import {local, cleaned, live, calls, barrier} from './state.ts';
+      import {local, cleaned, live, calls, barrier} from './state';
       it('${provider}', async () => {
         expect(local.size).toBe(2); expect(cleaned.size).toBe(2);
         expect(calls.has('${provider}')).toBe(false); calls.add('${provider}');
@@ -94,7 +94,7 @@ it(
         resolve(root, "shared.test.ts"),
         `
       import { it, expect, beforeAll, afterAll } from ${api};
-      import {local, live} from './state.ts';
+      import {local, live} from './state';
       let setups = 0, early = false, late = false;
       beforeAll(() => { setups++; expect(setups).toBe(1); });
       afterAll(() => { expect(early).toBe(true); expect(late).toBe(true); });

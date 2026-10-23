@@ -13,7 +13,7 @@
  * The state lives on `globalThis` so that a duplicated module instance
  * (e.g. two resolutions of the package) still shares one registry.
  */
-import { makeFileSuite, type FileSuite, type Suite } from "./Model.ts";
+import { makeFileSuite, type FileSuite, type Suite } from "./Model";
 
 interface FileContext {
   /** Suite that `describe`/`test` calls currently attach to. */

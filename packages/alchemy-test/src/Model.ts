@@ -6,7 +6,7 @@
  * runner then walks the tree and executes every test as an Effect.
  */
 import type * as Effect from "effect/Effect";
-import { mergeTags, type Tags } from "./Tags.ts";
+import { mergeTags, type Tags } from "./Tags";
 
 /** Execution mode attached to a suite or test at registration time. */
 export type Mode = "run" | "skip" | "only" | "todo";

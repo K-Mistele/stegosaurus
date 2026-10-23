@@ -1,4 +1,4 @@
-import type { JsPlugin, Rules } from "./types.ts";
+import type { JsPlugin, Rules } from "./types";
 
 export const antiSlopPlugins = [
   { name: "anti-slop", specifier: "./tools/anti-slop/src/index.ts" },

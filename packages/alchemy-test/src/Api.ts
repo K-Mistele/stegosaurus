@@ -10,10 +10,10 @@ import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
 import * as TestConsole from "effect/testing/TestConsole";
-import type { Hook, Mode, TestBody } from "./Model.ts";
-import { makeSuite } from "./Model.ts";
-import { currentFileSuite, currentSuite, withSuite } from "./Registry.ts";
-import { mergeTags, type Tags } from "./Tags.ts";
+import type { Hook, Mode, TestBody } from "./Model";
+import { makeSuite } from "./Model";
+import { currentFileSuite, currentSuite, withSuite } from "./Registry";
+import { mergeTags, type Tags } from "./Tags";
 
 // ---------------------------------------------------------------------------
 // Shared option handling (vitest accepts `number | { timeout?: number, ... }`)

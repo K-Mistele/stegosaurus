@@ -1,4 +1,4 @@
-import type { JsPlugin, Rules } from "./types.ts";
+import type { JsPlugin, Rules } from "./types";
 
 export const tailwindPlugins = [
   { name: "better-tailwindcss", specifier: "eslint-plugin-better-tailwindcss" },

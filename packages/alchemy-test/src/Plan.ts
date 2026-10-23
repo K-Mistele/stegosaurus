@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { compileTagsFilter } from "./Tags.ts";
+import { compileTagsFilter } from "./Tags";
 
 const Branch = Schema.Struct({
   /** Tag expressions are ANDed, just like repeated --tags flags. Empty selects all. */
@@ -31,7 +31,7 @@ export const parsePlan = (json: string): TestPlan => {
 
 /** Shared plain/TUI/log representation of a dry-run plan. */
 export const formatPlanPreview = (
-  phases: Extract<import("./Reporter.ts").TestEvent, { _tag: "PlanPreview" }>["phases"],
+  phases: Extract<import("./Reporter").TestEvent, { _tag: "PlanPreview" }>["phases"],
 ): string =>
   [
     "Dry run — no tests or hooks executed",

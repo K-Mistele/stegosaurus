@@ -10,7 +10,7 @@ import * as Path from "effect/Path";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
-import type { FileSuite } from "../src/Model.ts";
+import type { FileSuite } from "../src/Model";
 import {
   Reporter,
   type ReporterService,
@@ -18,8 +18,8 @@ import {
   type RunSummary,
   type TestMeta,
   type TestResult,
-} from "../src/Reporter.ts";
-import { run } from "../src/Runner.ts";
+} from "../src/Reporter";
+import { run } from "../src/Runner";
 
 const api = new URL("../src/index.ts", import.meta.url).href;
 const registry = new URL("../src/Registry.ts", import.meta.url).href;
@@ -42,7 +42,7 @@ const setup = Effect.fn(function* (files: Record<string, string>) {
       import { it, describe, registerHook, registerFileCleanup } from ${JSON.stringify(api)};
       import { currentFileSuite } from ${JSON.stringify(registry)};
       import * as Effect from ${JSON.stringify(effect)};
-      import { events, roots, pids } from "./state.ts";
+      import { events, roots, pids } from "./state";
       roots.push(currentFileSuite());
       pids.add(process.pid);
       const mark = (label) => Effect.sync(() => { events.push(label); });

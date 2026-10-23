@@ -10,10 +10,10 @@
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { LogEntry } from "./Model.ts";
-import { formatPlanPreview } from "./Plan.ts";
-import { Reporter, type RunSummary, type TestEvent, type TestResult } from "./Reporter.ts";
-import { writeDirect } from "./StrayOutput.ts";
+import type { LogEntry } from "./Model";
+import { formatPlanPreview } from "./Plan";
+import { Reporter, type RunSummary, type TestEvent, type TestResult } from "./Reporter";
+import { writeDirect } from "./StrayOutput";
 
 const isTty = process.stdout.isTTY === true;
 

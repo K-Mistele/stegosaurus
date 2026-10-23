@@ -49,6 +49,7 @@ pnpm destroy       # alchemy destroy
 
 - Add deps as `"catalog:"` and pin the version in the `pnpm-workspace.yaml` catalog.
 - Import Effect modules as namespaces: `import * as Effect from "effect/Effect"`.
+- Write relative imports without an extension (`./foo`, not `./foo.ts`). Resolution is `bundler`; lint rule `import/extensions` enforces it.
 - Write Effect tests with `it.effect` from `@effect/vitest`.
 - Lint treats every `@effect/tsgo` diagnostic and every anti-slop and automation rule as an error. Fix the code; don't disable the rule.
 - Put per-package lint overrides in `tooling/lint/overrides.ts`, not in a package's `vite.config.ts`.

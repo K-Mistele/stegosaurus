@@ -54,7 +54,7 @@ import {
 } from "@opentui/core";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { LogEntry } from "./Model.ts";
+import type { LogEntry } from "./Model";
 import {
   Reporter,
   type RunController,
@@ -62,8 +62,8 @@ import {
   type TestEvent,
   type TestMeta,
   type TestResult,
-} from "./Reporter.ts";
-import { captureStrayOutput } from "./StrayOutput.ts";
+} from "./Reporter";
+import { captureStrayOutput } from "./StrayOutput";
 
 type Status = "queued" | "running" | "pass" | "fail" | "skip" | "todo";
 

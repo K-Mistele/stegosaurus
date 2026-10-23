@@ -8,9 +8,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import type { LogEntry } from "./Model.ts";
-import { formatPlanPreview } from "./Plan.ts";
-import type { TestEvent } from "./Reporter.ts";
+import type { LogEntry } from "./Model";
+import { formatPlanPreview } from "./Plan";
+import type { TestEvent } from "./Reporter";
 
 const formatDuration = (ms: number): string =>
   ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;

@@ -1,4 +1,4 @@
-import type { JsPlugin, Rules } from "./types.ts";
+import type { JsPlugin, Rules } from "./types";
 
 export const automationPlugins = [
   { name: "automation", specifier: "./tools/automation/src/index.ts" },

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseOutputUrl, parseOutputValue } from "../src/DevCli.ts";
+import { parseOutputUrl, parseOutputValue } from "../src/DevCli";
 
 describe("parseOutputUrl", () => {
   test("parses aligned and legacy stack output formats", () => {
