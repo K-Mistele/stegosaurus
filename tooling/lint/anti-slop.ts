@@ -1,9 +1,5 @@
-import type { OxlintConfig } from "vite-plus/lint";
+import type { JsPlugin, Rules } from "./types.ts";
 
-type JsPlugin = NonNullable<OxlintConfig["jsPlugins"]>[number];
-type Rules = NonNullable<OxlintConfig["rules"]>;
-
-/** Vendored plugins in `tools/anti-slop`. Specifiers resolve from the root config. */
 export const antiSlopPlugins = [
   { name: "anti-slop", specifier: "./tools/anti-slop/src/index.ts" },
   { name: "anti-slop-effect", specifier: "./tools/anti-slop/src/effect/index.ts" },
@@ -36,4 +32,5 @@ export const antiSlopEffectRules = {
   "anti-slop-effect/no-manual-tagged-type": "error",
   "anti-slop-effect/no-service-constructor-imports": "error",
   "anti-slop-effect/prefer-effect-match": "error",
+  "anti-slop-effect/prefer-tagged-error-handling": "error",
 } satisfies Rules;

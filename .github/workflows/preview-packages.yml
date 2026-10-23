@@ -1,0 +1,62 @@
+name: Preview packages
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+      pull-requests: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out pull request head
+        if: github.event_name == 'pull_request'
+        run: git checkout "${{ github.event.pull_request.head.sha }}"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Pack changed packages
+        id: pack
+        env:
+          PKG_REGISTRY: ${{ vars.PKG_REGISTRY }}
+        run: |
+          pnpm exec pkg pack \
+            --group 'Everything=./packages/*' \
+            --group 'Everything=./apps/*' \
+            --registry "${PKG_REGISTRY:?set the PKG_REGISTRY repository variable}" \
+            --out .pkg
+
+      - name: Upload manifest
+        if: steps.pack.outputs.package-count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ steps.pack.outputs.artifact-name }}"
+          path: .pkg
+
+      - name: Publish preview packages
+        if: steps.pack.outputs.package-count != '0'
+        env:
+          PKG_REGISTRY: ${{ vars.PKG_REGISTRY }}
+        run: pnpm exec pkg publish --dir .pkg --registry "${PKG_REGISTRY}"

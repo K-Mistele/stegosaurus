@@ -1,5 +1,5 @@
 {
-  "name": "@everything/anti-slop",
+  "name": "@stegosaurus/anti-slop",
   "version": "0.0.0",
   "private": true,
   "description": "Vendored anti-slop Oxlint rules (from github.com/k-mistele/anti-slop).",

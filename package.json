@@ -1,10 +1,18 @@
 {
-  "name": "everything",
+  "name": "stegosaurus",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "ready": "vp check && vp run -r test",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "lint": "vp lint",
+    "lint:fix": "vp lint --fix",
+    "typecheck": "for p in . apps/*/; do [ -f \"$p/tsconfig.json\" ] || continue; tsc -p \"$p\" || exit 1; done",
+    "typed:check": "bun tools/typed-lint/src/cli.ts check",
+    "check": "vp run format && vp run lint && vp run typecheck && vp run typed:check",
+    "test": "vp run -r test",
+    "ready": "vp run check && vp run test",
     "deploy": "alchemy deploy",
     "destroy": "alchemy destroy",
     "dev": "alchemy dev",
@@ -12,15 +20,21 @@
     "test:stack": "bun alchemy-test test"
   },
   "dependencies": {
+    "@alchemy.run/pkg": "catalog:",
     "@effect/platform-node": "catalog:",
     "alchemy": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/tsgo": "catalog:",
+    "@stegosaurus/alchemy-test": "workspace:*",
+    "@stegosaurus/automation": "workspace:*",
+    "@stegosaurus/typed-lint": "workspace:*",
     "@types/node": "catalog:",
-    "alchemy-test": "workspace:*",
+    "alchemy-test": "workspace:@stegosaurus/alchemy-test@*",
+    "eslint-plugin-better-tailwindcss": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:"

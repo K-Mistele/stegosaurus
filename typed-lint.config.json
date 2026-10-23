@@ -1,0 +1,19 @@
+{
+  "projects": ["tsconfig.json", "apps/*/tsconfig.json", "packages/*/tsconfig.json"],
+  "projectExcludes": ["packages/alchemy-test/**"],
+  "sourceExcludes": [
+    "**/*.d.ts",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/coverage/**",
+    "packages/alchemy-test/**",
+    "tools/**"
+  ],
+  "rules": {
+    "no-svg-files": "error",
+    "no-xstate-derived-boolean-context": "error",
+    "prefer-effect-array-match": "error",
+    "prefer-typed-schema-apis": "error"
+  }
+}

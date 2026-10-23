@@ -1,6 +1,4 @@
-/** Paths that lint and format both skip. */
 export const ignorePatterns = [
-  // Agent tooling
   ".agent/**",
   ".agents/**",
   ".claude/**",
@@ -13,7 +11,8 @@ export const ignorePatterns = [
   ".pi/**",
   ".roo/**",
   ".windsurf/**",
-  // Vendored code, kept close to upstream
   "packages/alchemy-test/**",
   "tools/anti-slop/**",
+  "tools/automation/**",
+  "tools/typed-lint/**",
 ];

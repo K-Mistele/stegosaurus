@@ -7,3 +7,7 @@
 This copy is ours to change. Upstream wants rules edited in place to fit the repo, so don't treat it as read-only.
 
 Tests run with `vp test` (Vitest globals); upstream runs each test file with `tsx`.
+
+## Additions
+
+`src/effect/rules/prefer-tagged-error-handling.ts` and its test match anti-slop `main`. The rule started in the monorepo template (https://github.com/humanlayer/typescript-monorepo-template, originally from Fold; see `PROVENANCE.md`) as a text-matching check; anti-slop rewrote it on the AST.

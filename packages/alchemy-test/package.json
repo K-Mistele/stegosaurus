@@ -1,5 +1,5 @@
 {
-  "name": "alchemy-test",
+  "name": "@stegosaurus/alchemy-test",
   "version": "0.0.0",
   "private": true,
   "description": "Minimal Effect-native, vitest-compatible test harness and single-process runner for alchemy",

@@ -148,11 +148,8 @@ vite.config.ts.timestamp-*
 # Turbo Repo
 .turbo
 
-# Riptide artifacts (cloud-synced)
-.humanlayer/tasks/
-
-# Riptide artifacts (cloud-synced)
-.humanlayer/tasks/
-
 # Alchemy state
 .alchemy/
+
+# Riptide artifacts (cloud-synced)
+.humanlayer/tasks/

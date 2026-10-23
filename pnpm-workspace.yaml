@@ -6,6 +6,7 @@ packages:
 catalogMode: prefer
 
 catalog:
+  "@alchemy.run/pkg": 2.0.0-beta.83
   "@effect/platform-bun": 4.0.6
   "@effect/platform-node": 4.0.6
   "@effect/tsgo": 0.56.0
@@ -16,9 +17,13 @@ catalog:
   "@types/node": ^24
   alchemy: 2.0.0-beta.83
   effect: 4.0.6
+  eslint-plugin-better-tailwindcss: 4.10.0
+  fast-glob: 3.3.3
   oxlint: 1.89.0
   oxlint-tsgolint: 7.0.2004
+  tailwindcss: 4.3.3
   typescript: ^7.0.2
+  typescript-api: npm:typescript@5.9.3
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vite-plus: 1.4.0
   vitest: 5.0.5

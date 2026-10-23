@@ -1,0 +1,17 @@
+{
+  "name": "@stegosaurus/typed-lint",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Vendored TypeOnce typed lint (via humanlayer/typescript-monorepo-template).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "typed-lint": "./src/cli.ts"
+  },
+  "dependencies": {
+    "fast-glob": "catalog:",
+    "typescript-api": "catalog:"
+  }
+}
