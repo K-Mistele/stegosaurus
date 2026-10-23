@@ -8,4 +8,5 @@ const { beforeAll, afterAll, deploy, destroy } = Test.make({
 });
 
 export const stack = beforeAll(deploy(Stack));
+
 afterAll(destroy(Stack));

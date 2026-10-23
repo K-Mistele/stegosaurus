@@ -10,6 +10,7 @@ export const builtinRules = {
   "no-empty": "error",
   "no-empty-function": "warn",
   "no-eq-null": "error",
+  "oxc/no-accumulating-spread": "error",
   "no-unused-vars": "warn",
   "unicorn/filename-case": "error",
   "require-yield": "off",

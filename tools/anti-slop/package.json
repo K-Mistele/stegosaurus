@@ -10,7 +10,7 @@
     "./effect": "./src/effect/index.ts"
   },
   "scripts": {
-    "test": "vp test"
+    "test": "vp test && bun src/rules/require-readable-spacing-cli.test.ts"
   },
   "dependencies": {
     "@oxlint/plugins": "catalog:"
