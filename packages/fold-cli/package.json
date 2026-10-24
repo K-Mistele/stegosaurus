@@ -44,6 +44,7 @@
         "@opentui/core": "catalog:",
         "@opentui/keymap": "catalog:",
         "@opentui/solid": "catalog:",
+        "@silvia-odwyer/photon-node": "catalog:",
         "@stegosaurus/fold-agent": "workspace:*",
         "@stegosaurus/fold-codex": "workspace:*",
         "@stegosaurus/fold-core": "workspace:*",

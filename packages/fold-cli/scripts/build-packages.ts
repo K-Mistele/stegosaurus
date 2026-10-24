@@ -5,8 +5,9 @@
  *
  * - The vendored effect-ai providers: tsc emits JavaScript and declarations.
  * - Every other package: Bun bundles each entry point (dependencies stay external), tsc emits declarations.
- * - fold-cli: bundled with its dependencies (except `@opentui/core`, which ships native code) through the
- *   OpenTUI Solid plugin, with `FOLD_VERSION` defined.
+ * - fold-cli: bundled with its dependencies through the OpenTUI Solid plugin, with `FOLD_VERSION` defined.
+ *   `@opentui/core` and `@silvia-odwyer/photon-node` stay external: they load native or wasm files from their
+ *   install path, which bundling would freeze to the build machine's.
  *
  * Usage: `bun packages/fold-cli/scripts/build-packages.ts [--version x.y.z]` (root script: `pnpm build:packages`).
  */
@@ -84,7 +85,8 @@ for (const name of libraries) {
             target: 'node',
             format: 'esm',
             packages: cli ? 'bundle' : 'external',
-            external: cli ? ['@opentui/core', '@opentui/core/*'] : [],
+            // Packages that load native or wasm files from their own install path stay external.
+            external: cli ? ['@opentui/core', '@opentui/core/*', '@silvia-odwyer/photon-node'] : [],
             sourcemap: 'external',
             plugins: cli ? [createSolidTransformPlugin()] : [],
             define: cli ? { FOLD_VERSION: JSON.stringify(version) } : {},
