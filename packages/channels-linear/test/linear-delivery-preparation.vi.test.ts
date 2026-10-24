@@ -12,10 +12,10 @@ import {
 	deliveryMailboxKey,
 	type DeliveryAdmission,
 	type DeliveryContext,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Match, Option, Ref, type Schema } from 'effect'
 
-import { makeTestDeliveryExecution } from '../../delivery/test/delivery-execution'
+import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution'
 import { LinearApi } from '../src/LinearApi'
 import type { LinearCallbackHandlers } from '../src/LinearCallbacks'
 import { makeLinearEventProcessor } from '../src/LinearEventProcessor'

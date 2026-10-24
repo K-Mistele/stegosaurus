@@ -41,7 +41,7 @@ import {
 	StoredActiveDelivery,
 	Timestamp,
 	mailboxSchedulerStatus,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Clock, Effect, Match, Option, Predicate, Schema, Struct } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as SqlError from 'effect/sql/SqlError'

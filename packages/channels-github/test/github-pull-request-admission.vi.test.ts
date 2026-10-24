@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest'
-import { DeliveryAdmission, ProviderWebhookEvent, ProviderWebhookIgnored } from '@humanlayer/channels-delivery'
+import { DeliveryAdmission, ProviderWebhookEvent, ProviderWebhookIgnored } from '@stegosaurus/channels-delivery'
 import { Effect } from 'effect'
 
 import {

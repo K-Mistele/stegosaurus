@@ -23,6 +23,7 @@ pnpm release:validate --version x.y.z  # check the staged release, including fre
 pnpm release:publish --version x.y.z   # npm publish each staged package (--dry-run to try it)
 pnpm test:stack    # test/stack.test.ts: runs the alchemy stack in local workerd (Bun)
 pnpm test:conformance  # Durable Streams conformance suite against the Worker in local workerd
+pnpm test:backends     # channels Postgres and Redis suites against throwaway Docker containers (Bun, local Unix-socket Docker)
 pnpm alchemy:dev       # alchemy dev
 pnpm alchemy:deploy    # alchemy deploy --stage prod (not `pnpm deploy`, a pnpm built-in)
 pnpm alchemy:destroy   # alchemy destroy
@@ -61,6 +62,8 @@ pnpm alchemy:destroy   # alchemy destroy
 - `alchemy.run.ts` - the one alchemy stack: Secrets Store copies of the GitHub App secrets in every stage, plus the pkg registry Worker in `prod`. State lives on Cloudflare.
 - `apps/` - apps. Empty for now.
 - `packages/durable-streams-*` - Durable Streams server, from github.com/K-Mistele/durable-object-durable-streams: `protocol` (wire schemas), `server` (protocol engine), `cloudflare` (Workers + Durable Objects host, with its own local-state stack in `alchemy.run.ts`), and empty `cluster` and `client` stubs.
+- `packages/channels-*` - Channels, copied from github.com/humanlayer/channels at 9b74803 (MIT, `LICENSE` in each package): `delivery` (mailbox delivery engine and `DeliveryHttpApi`; every other package depends on it), the `github`, `linear` and `slack` providers, `redis` and `sql` backends, and `alchemy-cloudflare` (Durable Object mailbox host). The `sql` and `redis` suites in `test-backends/` need Postgres and Redis, so `pnpm test` skips them; run `pnpm test:backends`.
+- `scripts/` - root scripts. `test-backends.ts` starts the channels backend containers and runs their suites.
 - `patches/` - pnpm patches, listed under `patchedDependencies` in `pnpm-workspace.yaml`. Edit one with `pnpm patch <pkg>@<version>`, then `pnpm patch-commit <dir>`. The conformance-suite patch lets its SSE tests accept `data: ` (upstream PR #285).
 - `packages/alchemy-test` - vendored copy of alchemy's test harness. Runs on Bun. See its `VENDORED.md`.
 - `packages/effect-ai-{anthropic,openai,openai-compat}` - vendored Effect AI providers with fold's fixes. Each `UPSTREAM.md` lists the source and local changes. Their `typecheck` also writes `.d.ts` files to `dist/`, which consumers type against, so `vp run -r` must build them first.

@@ -45,7 +45,7 @@ export class GitHubAppCredentials extends Context.Service<
 		/** Forget the repository's cached token, after GitHub refused it. */
 		readonly invalidateInstallationToken: (repository: GitHubRepositoryRef) => Effect.Effect<void>
 	}
->()('@humanlayer/channels-github/internal/GitHubAppCredentials', {
+>()('@stegosaurus/channels-github/internal/GitHubAppCredentials', {
 	make: Effect.gen(function* () {
 		const client = yield* HttpClient.HttpClient
 		const signer = yield* GitHubAppSigner

@@ -68,7 +68,7 @@ export * from './SlackApiContract'
  *
  * `layer` needs `SlackHttpClient` and `HttpClient`; `SlackApiLive` provides both.
  */
-export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@humanlayer/channels-slack/SlackApi', {
+export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@stegosaurus/channels-slack/SlackApi', {
 	/** Reads the optional `SLACK_BOT_USER_ID`; without it the first call that needs the bot's user ID asks `auth.test`. */
 	make: Effect.gen(function* () {
 		const client = yield* SlackHttpClient

@@ -24,4 +24,4 @@ export class LinearCredentialResolver extends Context.Service<
 		readonly resolve: Effect.Effect<LinearVerifiedCredential, LinearApiError>
 		readonly invalidate: Effect.Effect<void>
 	}
->()('@humanlayer/channels-linear/LinearCredentialResolver') {}
+>()('@stegosaurus/channels-linear/LinearCredentialResolver') {}

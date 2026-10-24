@@ -1,6 +1,6 @@
 import { NodeCrypto } from '@effect/platform-node'
 import { describe, it } from '@effect/vitest'
-import { DeliveryReceipt, MailboxDelivery, webhookRoutes } from '@humanlayer/channels-delivery'
+import { DeliveryReceipt, MailboxDelivery, webhookRoutes } from '@stegosaurus/channels-delivery'
 import { Clock, Context, Effect, Redacted } from 'effect'
 import { HttpRouter } from 'effect/http'
 

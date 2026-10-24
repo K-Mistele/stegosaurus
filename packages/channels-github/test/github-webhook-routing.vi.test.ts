@@ -5,7 +5,7 @@ import {
 	type DeliveryAdmission,
 	MailboxSubscriptions,
 	ProviderEventHandled,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Deferred, Effect, Layer } from 'effect'
 import { vi } from 'vite-plus/test'
 

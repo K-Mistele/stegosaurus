@@ -3,7 +3,7 @@ import {
 	MailboxSubscriptionCreatedResult,
 	type MailboxSubscriptionError,
 	MailboxSubscriptions,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Predicate } from 'effect'
 import { vi } from 'vite-plus/test'
 

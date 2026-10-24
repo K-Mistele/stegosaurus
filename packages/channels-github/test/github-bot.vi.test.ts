@@ -6,7 +6,7 @@ import {
 	QueueDeliveryMode,
 	makeDeliveryClient,
 	type DeliveryContext,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Config, ConfigProvider, Deferred, Effect, Layer, Queue, Redacted, Schema, Scope } from 'effect'
 import {
 	HttpClient,

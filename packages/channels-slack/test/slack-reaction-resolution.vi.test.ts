@@ -1,6 +1,6 @@
 import { NodeCrypto } from '@effect/platform-node'
 import { describe, it } from '@effect/vitest'
-import { DeliveryAdmission, ProviderWebhookEvent } from '@humanlayer/channels-delivery'
+import { DeliveryAdmission, ProviderWebhookEvent } from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Redacted } from 'effect'
 
 import { SlackApi, SlackApiError } from '../src/SlackApi'

@@ -16,7 +16,7 @@ import {
 	readDeliverySlotStatus,
 	type ApplyDeliveryMutation,
 	type ReadDeliveryStatus,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Effect, Layer, Option, type Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as SqlError from 'effect/sql/SqlError'

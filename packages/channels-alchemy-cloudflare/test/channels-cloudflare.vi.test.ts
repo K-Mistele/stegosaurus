@@ -24,7 +24,7 @@ import {
 	type DeliveryAdmissionBatch,
 	type ProviderOutputOperation,
 	type UpdateMessagePayload,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Context, Effect, Layer, Option, Predicate, Redacted, Ref, Schema } from 'effect'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 

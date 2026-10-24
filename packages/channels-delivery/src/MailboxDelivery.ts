@@ -78,4 +78,4 @@ export class MailboxDelivery extends Context.Service<
 	{
 		readonly deliver: (admission: DeliveryAdmission) => Effect.Effect<DeliveryReceipt, MailboxDeliveryError>
 	}
->()('@humanlayer/channels-delivery/MailboxDelivery') {}
+>()('@stegosaurus/channels-delivery/MailboxDelivery') {}

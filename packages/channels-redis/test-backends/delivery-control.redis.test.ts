@@ -26,7 +26,6 @@ import {
 	QueueDeliveryMode,
 	RecoverableMailbox,
 	Timestamp,
-	WaitingMailbox,
 	deliveryMailboxKey,
 	makeDeliveryId,
 	parseDeliveryId,
@@ -34,7 +33,7 @@ import {
 	type DeliveryId,
 	type MailboxProcessingBackendError,
 	type ProviderOutputAttempt,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Clock, Context, Effect, Fiber, Layer, Option, Queue, Redacted, Schema } from 'effect'
 import * as Redis from 'effect/persistence/Redis'
 import { TestClock } from 'effect/testing'

@@ -47,7 +47,7 @@ import {
 	type RenewDeliveryOutput,
 	type RenewMailboxClaim,
 	type SettleDeliveryOutput,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Clock, Effect, Layer, Match, Option, Predicate, Random, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as SqlError from 'effect/sql/SqlError'

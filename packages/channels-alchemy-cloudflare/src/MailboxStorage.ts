@@ -38,7 +38,7 @@ const eraseAlchemyRuntimeContext = <A, E>(effect: Effect.Effect<A, E, RuntimeCon
 export type MailboxStorageLayer = Layer.Layer<MailboxStorage, never, Cloudflare.DurableObjectState>
 
 export class MailboxStorage extends Context.Service<MailboxStorage, MailboxStorageOperations>()(
-	'@humanlayer/channels-alchemy-cloudflare/MailboxStorage',
+	'@stegosaurus/channels-alchemy-cloudflare/MailboxStorage',
 	{
 		/** Mailbox storage over the current Durable Object's persistent storage. */
 		make: Effect.gen(function* () {

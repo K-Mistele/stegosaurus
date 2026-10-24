@@ -8,7 +8,7 @@ import {
 	MailboxDeliveryUnavailable,
 	Timestamp,
 	requestDeliveryInterrupt,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Effect, Layer, Option, Predicate, Schema } from 'effect'
 import * as Redis from 'effect/persistence/Redis'
 

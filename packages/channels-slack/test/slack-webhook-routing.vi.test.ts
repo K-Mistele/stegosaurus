@@ -4,7 +4,7 @@ import {
 	type DeliveryAdmission,
 	ProviderEventHandled,
 	MailboxSubscriptionsMemory,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Predicate } from 'effect'
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { vi } from 'vite-plus/test'

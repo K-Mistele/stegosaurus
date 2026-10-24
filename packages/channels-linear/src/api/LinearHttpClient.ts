@@ -102,7 +102,7 @@ const executeApiRequest = (
  * sends one known token and cannot refresh.
  */
 export class LinearHttpClient extends Context.Service<LinearHttpClient, LinearHttpClientOperations>()(
-	'@humanlayer/channels-linear/LinearHttpClient',
+	'@stegosaurus/channels-linear/LinearHttpClient',
 	{
 		make: Effect.gen(function* () {
 			const credentials = yield* LinearCredentialResolver

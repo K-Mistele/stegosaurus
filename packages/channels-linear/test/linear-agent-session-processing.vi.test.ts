@@ -4,10 +4,10 @@ import {
 	ProviderEventHandled,
 	ProviderEventIgnored,
 	ProviderEventInvalid,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Ref } from 'effect'
 
-import { TEST_DELIVERY_IDEMPOTENCY_KEY, makeTestDeliveryExecution } from '../../delivery/test/delivery-execution'
+import { TEST_DELIVERY_IDEMPOTENCY_KEY, makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution'
 import { LinearApi, LinearApiError } from '../src/LinearApi'
 import type { LinearCallbackHandlers } from '../src/LinearCallbacks'
 import { makeLinearEventProcessor } from '../src/LinearEventProcessor'

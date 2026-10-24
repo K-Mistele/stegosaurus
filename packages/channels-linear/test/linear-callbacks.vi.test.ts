@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest'
-import { MailboxSubscriptions, ProviderEventExecutionFailed } from '@humanlayer/channels-delivery'
+import { MailboxSubscriptions, ProviderEventExecutionFailed } from '@stegosaurus/channels-delivery'
 import { Cause, Effect, Exit, Layer } from 'effect'
 
 import { LinearApi } from '../src/LinearApi'

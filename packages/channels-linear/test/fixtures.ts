@@ -8,11 +8,11 @@ import {
 	processProviderEvent,
 	type ProviderEventProcessor,
 	type RawWebhookInput,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Match, Queue, Redacted, Schema } from 'effect'
 import { Headers } from 'effect/http'
 
-import { makeTestDeliveryExecution } from '../../delivery/test/delivery-execution'
+import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution'
 import { LinearOrganizationId, LinearUserId, LinearWebhookDeliveryId } from '../src/LinearIdentity'
 import { LinearAgentSessionEventWebhook, type LinearIssueCreateWebhook } from '../src/LinearWebhookEventSchemas'
 import { makeLinearWebhookProvider } from '../src/LinearWebhookProvider'

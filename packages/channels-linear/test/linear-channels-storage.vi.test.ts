@@ -1,6 +1,6 @@
 import { NodeCrypto } from '@effect/platform-node'
 import { describe, it } from '@effect/vitest'
-import { Channels, ChannelsMemory } from '@humanlayer/channels-delivery'
+import { Channels, ChannelsMemory } from '@stegosaurus/channels-delivery'
 import { Config, Deferred, Effect, Layer, Redacted } from 'effect'
 import { HttpRouter, HttpServerRequest } from 'effect/http'
 import { TestClock } from 'effect/testing'

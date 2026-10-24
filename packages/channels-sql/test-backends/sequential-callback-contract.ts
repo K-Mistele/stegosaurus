@@ -10,7 +10,7 @@ import {
 	Timestamp,
 	makeDeliveryId,
 	parseDeliveryId,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Effect, Option, type Layer } from 'effect'
 import { TestClock } from 'effect/testing'
 
@@ -22,7 +22,7 @@ import {
 	leaseMs,
 	mailboxKey,
 	settle,
-} from '../../delivery/test/backend-contract'
+} from '../../channels-delivery/test/backend-contract'
 
 type Store = MailboxDelivery | MailboxProcessingBackend | DeliveryControlBackend
 

@@ -1,4 +1,4 @@
-import { type ChannelsProvider, SerialDeliveryMode } from '@humanlayer/channels-delivery'
+import { type ChannelsProvider, SerialDeliveryMode } from '@stegosaurus/channels-delivery'
 import { Effect, Match, Option, Schema } from 'effect'
 import type { Config, Redacted } from 'effect'
 

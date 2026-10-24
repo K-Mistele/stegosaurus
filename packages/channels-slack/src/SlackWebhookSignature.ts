@@ -1,4 +1,4 @@
-import { WebhookAuthenticationError } from '@humanlayer/channels-delivery'
+import { WebhookAuthenticationError } from '@stegosaurus/channels-delivery'
 import { Clock, Crypto, Effect, Redacted, Schema } from 'effect'
 import { Hex } from 'effect/encoding'
 

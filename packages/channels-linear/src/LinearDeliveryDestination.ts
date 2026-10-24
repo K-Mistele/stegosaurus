@@ -8,7 +8,7 @@ import {
 	DeliveryOperationKind,
 	DeliveryReactionTargetKind,
 	PreparedDeliveryInvocation,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Match, Predicate, Schema } from 'effect'
 
 import { LinearCallbackName } from './LinearCallbacks'

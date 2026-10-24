@@ -12,7 +12,7 @@ export class GitHubAppSigner extends Context.Service<
 			readonly data: string
 		}) => Effect.Effect<string, GitHubSigningError>
 	}
->()('@humanlayer/channels-github/internal/GitHubAppSigner', {
+>()('@stegosaurus/channels-github/internal/GitHubAppSigner', {
 	make: Effect.sync(() => {
 		const encoder = new TextEncoder()
 		return {

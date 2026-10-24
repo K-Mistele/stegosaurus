@@ -42,4 +42,4 @@ export class MailboxSubscriptions extends Context.Service<
 		readonly isSubscribed: (input: MailboxSubscriptionInput) => Effect.Effect<boolean, MailboxSubscriptionError>
 		readonly unsubscribe: (input: MailboxSubscriptionInput) => Effect.Effect<void, MailboxSubscriptionError>
 	}
->()('@humanlayer/channels-delivery/MailboxSubscriptions') {}
+>()('@stegosaurus/channels-delivery/MailboxSubscriptions') {}

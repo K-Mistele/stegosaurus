@@ -7,7 +7,7 @@ import {
 	WebhookPayloadInvalidError,
 	type RawWebhookInput,
 	type WebhookProvider,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import {
 	Array as Arr,
 	Crypto,

@@ -8,7 +8,7 @@ import {
 	QueueDeliveryMode,
 	makeDeliveryClient,
 	type DeliveryContext,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Config, Deferred, Effect, Layer, Queue, Redacted, Ref, Schedule } from 'effect'
 import { FetchHttpClient, HttpRouter, HttpServerRequest } from 'effect/http'
 import { TestClock } from 'effect/testing'

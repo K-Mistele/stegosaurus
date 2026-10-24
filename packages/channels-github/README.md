@@ -1,6 +1,6 @@
 # GitHub
 
-`@humanlayer/channels-github` turns GitHub App webhooks into durable issue and pull-request callbacks. It verifies webhook signatures, stores accepted events in provider-neutral mailboxes, normalizes GitHub payloads, and exposes issue, pull-request, comment, review, label, check-run, GitHub Actions job, and merge operations through typed resource classes and `GitHubApi`.
+`@stegosaurus/channels-github` turns GitHub App webhooks into durable issue and pull-request callbacks. It verifies webhook signatures, stores accepted events in provider-neutral mailboxes, normalizes GitHub payloads, and exposes issue, pull-request, comment, review, label, check-run, GitHub Actions job, and merge operations through typed resource classes and `GitHubApi`.
 
 ## Create a GitHub App
 
@@ -94,8 +94,8 @@ Never commit the webhook secret or private key.
 ## Configure a provider
 
 ```ts
-import { DebounceDeliveryMode } from '@humanlayer/channels-delivery'
-import { GitHubBot, GitHubId } from '@humanlayer/channels-github'
+import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery'
+import { GitHubBot, GitHubId } from '@stegosaurus/channels-github'
 import { Config, Effect } from 'effect'
 
 const github = GitHubBot.make({

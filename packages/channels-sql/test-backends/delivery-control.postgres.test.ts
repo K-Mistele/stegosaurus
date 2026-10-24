@@ -24,7 +24,6 @@ import {
 	QueueDeliveryMode,
 	RecoverableMailbox,
 	Timestamp,
-	WaitingMailbox,
 	deliveryMailboxKey,
 	makeDeliveryId,
 	parseDeliveryId,
@@ -32,7 +31,7 @@ import {
 	type DeliveryId,
 	type MailboxProcessingBackendError,
 	type ProviderOutputAttempt,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Clock, Context, Deferred, Effect, Fiber, Layer, Option, Queue, Redacted, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { TestClock } from 'effect/testing'

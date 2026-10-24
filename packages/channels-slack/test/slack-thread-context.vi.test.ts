@@ -3,7 +3,7 @@ import {
 	MailboxSubscriptionAlreadyExistsResult,
 	MailboxSubscriptionCreatedResult,
 	MailboxSubscriptionsMemory,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Option, Queue, Stream } from 'effect'
 
 import { SlackApi } from '../src/SlackApi'

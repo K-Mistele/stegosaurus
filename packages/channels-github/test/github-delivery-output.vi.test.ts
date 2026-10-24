@@ -24,7 +24,7 @@ import {
 	makeDeliveryId,
 	MessageId,
 	type ProviderOutputOperation,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Match, Option, Ref, Result, Schema } from 'effect'
 
 import {
@@ -32,7 +32,7 @@ import {
 	planCommentScenarios,
 	type CommentOutputFault,
 	type CommentOutputHarness,
-} from '../../delivery/test/comment-output-scenarios'
+} from '../../channels-delivery/test/comment-output-scenarios'
 import {
 	GitHubActivationTarget,
 	GitHubActivationTargetJson,

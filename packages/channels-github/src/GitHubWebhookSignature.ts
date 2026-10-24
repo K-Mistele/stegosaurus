@@ -1,4 +1,4 @@
-import { WebhookAuthenticationError } from '@humanlayer/channels-delivery'
+import { WebhookAuthenticationError } from '@stegosaurus/channels-delivery'
 import { Crypto, Effect, Redacted, Schema } from 'effect'
 
 const GitHubSignatureInput = Schema.Struct({

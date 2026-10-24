@@ -21,7 +21,7 @@ export class GitHubGitCredentials extends Context.Service<
 			readonly repository: GitHubRepositoryRef
 		}) => Effect.Effect<Redacted.Redacted<string>, GitHubApiError>
 	}
->()('@humanlayer/channels-github/GitHubGitCredentials', {
+>()('@stegosaurus/channels-github/GitHubGitCredentials', {
 	make: Effect.gen(function* () {
 		const credentials = yield* GitHubAppCredentials
 		return {

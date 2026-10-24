@@ -16,7 +16,7 @@ import {
 	DeliveryStatus,
 	DeliveryStatusError,
 	parseDeliveryId,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Data, Effect, Layer, Match, Redacted, Schema } from 'effect'
 
 import { DeliveryMailboxes } from './MailboxDelivery'

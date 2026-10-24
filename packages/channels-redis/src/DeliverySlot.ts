@@ -38,7 +38,7 @@ import {
 	Timestamp,
 	emptyDeliverySlot,
 	mailboxSchedulerStatus,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Clock, Effect, Option, Predicate, Schedule, Schema, Struct } from 'effect'
 import * as Redis from 'effect/persistence/Redis'
 

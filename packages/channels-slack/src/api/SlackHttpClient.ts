@@ -85,7 +85,7 @@ const rejected = (operation: SlackApiOperation, status: typeof SlackResponseStat
 
 /** One bot-token-authenticated transport for Slack Web API methods and private file downloads. */
 export class SlackHttpClient extends Context.Service<SlackHttpClient, SlackHttpClientOperations>()(
-	'@humanlayer/channels-slack/SlackHttpClient',
+	'@stegosaurus/channels-slack/SlackHttpClient',
 	{
 		/** Reads `SLACK_BOT_TOKEN` and the optional `SLACK_API_ORIGIN`. Construction performs no I/O. */
 		make: Effect.gen(function* () {

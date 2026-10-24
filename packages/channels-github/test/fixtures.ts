@@ -12,7 +12,7 @@ import {
 	type ProviderEventProcessor,
 	webhookRoutes,
 	type RawWebhookInput,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Context, Effect, Layer, Match, Predicate, Queue, Redacted, Schema } from 'effect'
 import {
 	FetchHttpClient,
@@ -27,7 +27,7 @@ import {
 } from 'effect/http'
 import { NetAddress } from 'effect/net'
 
-import { makeTestDeliveryExecution } from '../../delivery/test/delivery-execution'
+import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution'
 import { AddIssueLabelsBody } from '../src/api/AddIssueLabels'
 import { CloseIssueBody } from '../src/api/CloseIssue'
 import { ClosePullRequestBody } from '../src/api/ClosePullRequest'

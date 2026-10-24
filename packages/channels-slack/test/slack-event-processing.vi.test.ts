@@ -16,11 +16,11 @@ import {
 	ProviderEventInvalid,
 	ProviderWebhookEvent,
 	MailboxSubscriptionsMemory,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Cause, Effect, Exit, Layer, Option, Redacted, Ref, Schema } from 'effect'
 import { vi } from 'vite-plus/test'
 
-import { makeTestDeliveryExecution } from '../../delivery/test/delivery-execution'
+import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution'
 import { SlackApi, SlackApiError } from '../src/SlackApi'
 import {
 	SlackConversationStopped,

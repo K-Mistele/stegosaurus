@@ -7,7 +7,7 @@ import {
 	ProviderWebhookResponse,
 	WebhookAuthenticationError,
 	WebhookPayloadInvalidError,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Redacted } from 'effect'
 import { Headers } from 'effect/http'
 

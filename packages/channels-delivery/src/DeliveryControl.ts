@@ -252,7 +252,7 @@ export class DeliveryControlBackend extends Context.Service<
 			input: ApplyDeliveryMutation,
 		) => Effect.Effect<DeliveryMutationReceipt, DeliveryMutationError>
 	}
->()('@humanlayer/channels-delivery/DeliveryControlBackend') {}
+>()('@stegosaurus/channels-delivery/DeliveryControlBackend') {}
 
 /**
  * What a remote worker can do to its delivery, whatever store holds it.
@@ -271,7 +271,7 @@ export class DeliveryControl extends Context.Service<
 			readonly mutation: DeliveryMutation
 		}) => Effect.Effect<DeliveryMutationReceipt, DeliveryMutationError>
 	}
->()('@humanlayer/channels-delivery/DeliveryControl', {
+>()('@stegosaurus/channels-delivery/DeliveryControl', {
 	/** Delivery control over the store's own `DeliveryControlBackend`. */
 	make: Effect.gen(function* () {
 		const backend = yield* DeliveryControlBackend

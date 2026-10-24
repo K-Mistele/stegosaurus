@@ -5,7 +5,7 @@ import {
 	type MailboxSubscriptionOperation,
 	type MailboxSubscriptionResult,
 	MailboxSubscriptions,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Exit, Layer, Predicate, Schema } from 'effect'
 
 import { MailboxStorage } from './MailboxStorage'

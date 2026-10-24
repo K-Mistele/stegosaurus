@@ -1,8 +1,8 @@
 import { describe, it } from '@effect/vitest'
-import { DeliveryHandoff, type DeliveryContext } from '@humanlayer/channels-delivery'
+import { DeliveryHandoff, type DeliveryContext } from '@stegosaurus/channels-delivery'
 import { Cause, Context, Effect, Exit, Layer, Ref, Schema } from 'effect'
 
-import { makeTestDeliveryExecution } from '../../delivery/test/delivery-execution'
+import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution'
 import {
 	SlackCallbackError,
 	type SlackCallbackOperations,
@@ -24,7 +24,7 @@ import {
 } from '../src'
 
 class CallbackDependency extends Context.Service<CallbackDependency, { readonly value: string }>()(
-	'@humanlayer/channels-slack/test/CallbackDependency',
+	'@stegosaurus/channels-slack/test/CallbackDependency',
 ) {}
 
 class ApplicationFailure extends Schema.TaggedError<ApplicationFailure>()('ApplicationFailure', {}) {}

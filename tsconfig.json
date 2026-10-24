@@ -20,5 +20,5 @@
             }
         ]
     },
-    "include": ["alchemy.run.ts", "test", "tooling", "vite.config.ts"]
+    "include": ["alchemy.run.ts", "scripts", "test", "tooling", "vite.config.ts"]
 }

@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest'
-import { MailboxSubscriptions, ProviderEventHandled, ProviderEventIgnored } from '@humanlayer/channels-delivery'
+import { MailboxSubscriptions, ProviderEventHandled, ProviderEventIgnored } from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Schema } from 'effect'
 import { vi } from 'vite-plus/test'
 

@@ -14,7 +14,7 @@ import {
 	ProviderEventIgnored,
 	ProviderEventInvalid,
 	type ProviderEventProcessor,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Data, Effect, Match, Option, Predicate, Schema } from 'effect'
 
 import { reviewComment } from './api/GitHubApiProjections'

@@ -20,14 +20,14 @@ import {
 	DeliveryPlanItemState,
 	makeDeliveryId,
 	type ProviderOutputOperation,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Match, Ref, Result, Schema } from 'effect'
 
 import {
 	commentOutputScenarios,
 	planCommentScenarios,
 	type CommentOutputHarness,
-} from '../../delivery/test/comment-output-scenarios'
+} from '../../channels-delivery/test/comment-output-scenarios'
 import {
 	LinearAgentActivityReceipt,
 	LinearCommentRef,

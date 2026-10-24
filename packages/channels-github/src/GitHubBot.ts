@@ -1,7 +1,7 @@
 /**
  * This file defines `GitHubBot.make`: the GitHub provider as `Channels.make` takes it.
  */
-import { type ChannelsProvider, type DeliveryMode } from '@humanlayer/channels-delivery'
+import { type ChannelsProvider, type DeliveryMode } from '@stegosaurus/channels-delivery'
 import { Effect, Schema } from 'effect'
 import type { Config, Redacted } from 'effect'
 

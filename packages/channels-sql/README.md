@@ -1,9 +1,9 @@
 # SQL
 
-`@humanlayer/channels-sql` stores [Channels](https://github.com/humanlayer/effect-channels#readme) mailboxes in Postgres.
+`@stegosaurus/channels-sql` stores [Channels](https://github.com/humanlayer/effect-channels#readme) mailboxes in Postgres.
 
 ```sh
-npm install @humanlayer/channels-sql @humanlayer/channels-delivery effect @effect/sql-pg
+npm install @stegosaurus/channels-sql @stegosaurus/channels-delivery effect @effect/sql-pg
 ```
 
 ```ts

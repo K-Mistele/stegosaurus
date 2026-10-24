@@ -15,11 +15,11 @@ import {
 	ProviderEventHandled,
 	ProviderEventIgnored,
 	ProviderEventInvalid,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Cause, Context, Effect, Exit, Layer, Match, Option, Ref } from 'effect'
 import { vi } from 'vite-plus/test'
 
-import { makeTestDeliveryExecution } from '../../delivery/test/delivery-execution'
+import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution'
 import { GitHubApi } from '../src/GitHubApi'
 import type { GitHubMentioned } from '../src/GitHubCallbackEvents'
 import type { GitHubCallbackHandler, GitHubCallbackHandlers } from '../src/GitHubCallbacks'

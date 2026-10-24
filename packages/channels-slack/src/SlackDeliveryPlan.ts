@@ -5,7 +5,7 @@
  * status. The first plan posts the message; each later plan replaces the whole block with `chat.update`,
  * so the message stays where it is and any change, such as a removed task, is shown as it is.
  */
-import type { DeliveryPlan, DeliveryPlanItem } from '@humanlayer/channels-delivery'
+import type { DeliveryPlan, DeliveryPlanItem } from '@stegosaurus/channels-delivery'
 import { Match, Predicate, Schema } from 'effect'
 
 import { SlackMessageRef, SlackPlan, SlackPlanTask } from './SlackModels'

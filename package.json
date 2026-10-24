@@ -13,6 +13,7 @@
         "check": "vp run format && vp run lint && vp run typecheck && vp run typed:check",
         "test": "vp run -r test",
         "test:conformance": "vp run @stegosaurus/durable-streams-cloudflare#test:conformance",
+        "test:backends": "bun scripts/test-backends.ts",
         "ready": "vp run check && vp run test",
         "alchemy:deploy": "alchemy deploy --stage prod",
         "alchemy:destroy": "alchemy destroy",

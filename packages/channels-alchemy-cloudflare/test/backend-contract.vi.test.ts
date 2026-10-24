@@ -17,13 +17,13 @@ import {
 	deliveryMailboxKey,
 	makeDeliveryId,
 	parseDeliveryId,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Effect, Layer, Option, Schema } from 'effect'
 import { TestClock } from 'effect/testing'
 
-import { mailboxBackendContract, nextBatchIdentity, preparation } from '../../delivery/test/backend-contract'
-import { deliveryHandoffContract } from '../../delivery/test/delivery-handoff-contract'
-import { sequentialCallbackContract } from '../../sql/test-backends/sequential-callback-contract'
+import { mailboxBackendContract, nextBatchIdentity, preparation } from '../../channels-delivery/test/backend-contract'
+import { deliveryHandoffContract } from '../../channels-delivery/test/delivery-handoff-contract'
+import { sequentialCallbackContract } from '../../channels-sql/test-backends/sequential-callback-contract'
 import {
 	DeliveryControlBackendFromDurableObjectStorage,
 	MailboxProcessingBackendFromDurableObjectStorage,

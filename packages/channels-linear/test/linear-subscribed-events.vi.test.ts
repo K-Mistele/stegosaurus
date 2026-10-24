@@ -4,7 +4,7 @@ import {
 	MailboxSubscriptions,
 	ProviderEventHandled,
 	ProviderEventIgnored,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer } from 'effect'
 import { vi } from 'vite-plus/test'
 

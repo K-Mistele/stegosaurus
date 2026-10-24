@@ -62,7 +62,7 @@ const uploadedAttachmentSubtitle = (size: number) => `${(size / 1024).toFixed(1)
  * `LinearHttpClient` and `HttpClient` in context.
  */
 export class LinearApi extends Context.Service<LinearApi, LinearApiOperations>()(
-	'@humanlayer/channels-linear/LinearApi',
+	'@stegosaurus/channels-linear/LinearApi',
 	{
 		make: Effect.fnUntraced(function* (filePolicy: LinearFileTransferPolicy = defaultLinearFileTransferPolicy) {
 			const client = yield* LinearHttpClient

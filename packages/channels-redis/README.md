@@ -1,9 +1,9 @@
 # Redis
 
-`@humanlayer/channels-redis` stores [Channels](https://github.com/humanlayer/effect-channels#readme) mailboxes in Redis.
+`@stegosaurus/channels-redis` stores [Channels](https://github.com/humanlayer/effect-channels#readme) mailboxes in Redis.
 
 ```sh
-npm install @humanlayer/channels-redis @humanlayer/channels-delivery effect
+npm install @stegosaurus/channels-redis @stegosaurus/channels-delivery effect
 ```
 
 ```ts

@@ -1,32 +1,35 @@
 {
-	"name": "@humanlayer/channels-alchemy-cloudflare",
-	"version": "0.0.0",
-	"private": true,
-	"type": "module",
-	"sideEffects": false,
-	"module": "./src/index.ts",
-	"types": "./src/index.ts",
-	"exports": {
-		".": "./src/index.ts"
-	},
-	"scripts": {
-		"typecheck": "tsc --noEmit -p tsconfig.json"
-	},
-	"dependencies": {
-		"@humanlayer/channels-delivery": "workspace:*"
-	},
-	"devDependencies": {
-		"@effect/platform-node": "catalog:",
-		"@effect/vitest": "catalog:",
-		"@humanlayer/channels-github": "workspace:*",
-		"@humanlayer/channels-linear": "workspace:*",
-		"@humanlayer/channels-slack": "workspace:*",
-		"alchemy": "catalog:",
-		"effect": "catalog:",
-		"typescript": "catalog:"
-	},
-	"peerDependencies": {
-		"alchemy": "catalog:",
-		"effect": "catalog:"
-	}
+  "name": "@stegosaurus/channels-alchemy-cloudflare",
+  "version": "0.0.0",
+  "description": "Channels Durable Object mailbox host for Cloudflare Workers, on alchemy.",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@stegosaurus/channels-delivery": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@stegosaurus/channels-github": "workspace:*",
+    "@stegosaurus/channels-linear": "workspace:*",
+    "@stegosaurus/channels-slack": "workspace:*",
+    "alchemy": "catalog:",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "alchemy": "catalog:",
+    "effect": "catalog:"
+  }
 }

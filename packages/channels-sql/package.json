@@ -1,27 +1,30 @@
 {
-	"name": "@humanlayer/channels-sql",
-	"version": "0.0.0",
-	"private": true,
-	"type": "module",
-	"sideEffects": false,
-	"module": "./src/index.ts",
-	"types": "./src/index.ts",
-	"exports": {
-		".": "./src/index.ts"
-	},
-	"scripts": {
-		"typecheck": "tsc --noEmit -p tsconfig.json"
-	},
-	"dependencies": {
-		"@humanlayer/channels-delivery": "workspace:*"
-	},
-	"devDependencies": {
-		"@effect/sql-pg": "catalog:",
-		"@effect/vitest": "catalog:",
-		"effect": "catalog:",
-		"typescript": "catalog:"
-	},
-	"peerDependencies": {
-		"effect": "catalog:"
-	}
+  "name": "@stegosaurus/channels-sql",
+  "version": "0.0.0",
+  "description": "Channels SQL backends and migrations over effect/sql.",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc && tsc -p test-backends",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@stegosaurus/channels-delivery": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/sql-pg": "catalog:",
+    "@effect/vitest": "catalog:",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
 }

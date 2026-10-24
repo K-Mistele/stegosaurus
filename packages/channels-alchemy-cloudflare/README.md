@@ -1,9 +1,9 @@
 # Alchemy Cloudflare
 
-`@humanlayer/channels-alchemy-cloudflare` runs [Channels](https://github.com/humanlayer/effect-channels#readme) on Cloudflare with [Alchemy](https://alchemy.run): a Worker takes webhooks and serves the delivery API, and one Durable Object per mailbox stores its events and runs your callbacks from its alarm.
+`@stegosaurus/channels-alchemy-cloudflare` runs [Channels](https://github.com/humanlayer/effect-channels#readme) on Cloudflare with [Alchemy](https://alchemy.run): a Worker takes webhooks and serves the delivery API, and one Durable Object per mailbox stores its events and runs your callbacks from its alarm.
 
 ```sh
-npm install @humanlayer/channels-alchemy-cloudflare @humanlayer/channels-delivery effect alchemy
+npm install @stegosaurus/channels-alchemy-cloudflare @stegosaurus/channels-delivery effect alchemy
 ```
 
 ```ts

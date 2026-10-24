@@ -4,7 +4,7 @@ import {
 	ProviderWebhookEvent,
 	ProviderWebhookEvents,
 	ProviderWebhookIgnored,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect } from 'effect'
 
 import { checkRunPayload, makeGitHubTestProvider, signedGitHubInput } from './fixtures'

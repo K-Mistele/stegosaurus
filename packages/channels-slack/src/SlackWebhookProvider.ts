@@ -9,7 +9,7 @@ import {
 	type ProviderWebhookOutcome,
 	type RawWebhookInput,
 	type WebhookProvider,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Crypto, Effect, Match, Redacted, Schema } from 'effect'
 
 import { SlackApi } from './SlackApi'

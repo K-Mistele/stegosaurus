@@ -1,4 +1,4 @@
-import type { DeliveryCallbackResult, DeliveryContext } from '@humanlayer/channels-delivery'
+import type { DeliveryCallbackResult, DeliveryContext } from '@stegosaurus/channels-delivery'
 import { Cause, Effect, Option, Predicate, Schema } from 'effect'
 
 import type { LinearCallbackEventMap } from './LinearCallbackEvents'

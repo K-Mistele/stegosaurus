@@ -20,10 +20,10 @@ import {
 	ProviderUpdateMessage,
 	makeDeliveryId,
 	type ProviderOutputOperation,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Ref, Result, Schema } from 'effect'
 
-import { commentOutputScenarios } from '../../delivery/test/comment-output-scenarios'
+import { commentOutputScenarios } from '../../channels-delivery/test/comment-output-scenarios'
 import {
 	SlackApi,
 	SlackApiError,

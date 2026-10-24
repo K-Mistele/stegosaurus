@@ -17,7 +17,7 @@ import {
 	readDeliverySlotStatus,
 	type ApplyDeliveryMutation,
 	type ReadDeliveryStatus,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Effect, Layer, Option } from 'effect'
 import * as Redis from 'effect/persistence/Redis'
 

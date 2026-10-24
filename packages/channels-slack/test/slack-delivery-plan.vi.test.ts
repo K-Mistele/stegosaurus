@@ -16,7 +16,7 @@ import {
 	ProviderRenderPlan,
 	RenderedDeliveryPlan,
 	makeDeliveryId,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Option, Queue, Ref, Result, Schema } from 'effect'
 
 import {

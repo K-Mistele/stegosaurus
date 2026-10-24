@@ -1,6 +1,6 @@
 # Linear
 
-`@humanlayer/channels-linear` is the issue-centric Linear provider for `@humanlayer/channels-delivery`. It supports Agent Session entry points, subscribed issue/resource events, and provider-native issue, comment, reaction, user-directory, and external link-card operations. Webhooks are durably admitted before callbacks run.
+`@stegosaurus/channels-linear` is the issue-centric Linear provider for `@stegosaurus/channels-delivery`. It supports Agent Session entry points, subscribed issue/resource events, and provider-native issue, comment, reaction, user-directory, and external link-card operations. Webhooks are durably admitted before callbacks run.
 
 ## Linear application setup
 

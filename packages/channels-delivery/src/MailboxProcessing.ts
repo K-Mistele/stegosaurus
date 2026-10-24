@@ -468,7 +468,7 @@ export class MailboxProcessingBackend extends Context.Service<
 			input: SettleDeliveryOutput,
 		) => Effect.Effect<void, MailboxProcessingBackendError>
 	}
->()('@humanlayer/channels-delivery/MailboxProcessingBackend') {}
+>()('@stegosaurus/channels-delivery/MailboxProcessingBackend') {}
 
 /**
  * @property claimed - batches whose callbacks ran
@@ -1036,7 +1036,7 @@ export const claimOrDeferReadyMailbox = (input: {
 			Match.tagsExhaustive({
 				OutputReadyMailbox: ({ mailboxKey }) =>
 					Effect.gen(function* () {
-						const idempotencyKey = yield* crypto.randomUUIDv4
+						const idempotencyKey = yield* crypto.randomUUIDv4()
 						const claimed = yield* mailboxProcessingBackend.claimDeliveryOutput(
 							ClaimDeliveryOutput.make({ mailboxKey, leaseMs, idempotencyKey }),
 						)
@@ -1199,7 +1199,7 @@ const pollReadyMailboxes = (intervalMs: number) =>
 	})
 
 export class MailboxProcessing extends Context.Service<MailboxProcessing, MailboxProcessingOperations>()(
-	'@humanlayer/channels-delivery/MailboxProcessing',
+	'@stegosaurus/channels-delivery/MailboxProcessing',
 ) {
 	/**
 	 * Mailbox processing over the store's backend. What the processors need stays in `processReady`'s

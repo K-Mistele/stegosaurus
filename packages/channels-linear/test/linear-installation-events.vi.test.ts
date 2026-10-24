@@ -5,7 +5,7 @@ import {
 	ProviderEventInvalid,
 	ProviderWebhookEvent,
 	ProviderWebhookResponse,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Schema } from 'effect'
 
 import { LinearApi } from '../src/LinearApi'

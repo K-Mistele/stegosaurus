@@ -2,7 +2,7 @@ import {
 	type MailboxSubscriptionError,
 	type MailboxSubscriptionResult,
 	MailboxSubscriptions,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Schema, Stream } from 'effect'
 
 import type { SlackApiError, SlackFileUploadError } from './SlackApi'

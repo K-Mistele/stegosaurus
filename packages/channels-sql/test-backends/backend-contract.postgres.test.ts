@@ -7,9 +7,9 @@
  */
 import { describe } from '@effect/vitest'
 
-import { mailboxBackendContract } from '../../delivery/test/backend-contract'
-import { deliveryHandoffContract } from '../../delivery/test/delivery-handoff-contract'
-import { deliveryOutputScenarios } from '../../delivery/test/delivery-output-scenarios'
+import { mailboxBackendContract } from '../../channels-delivery/test/backend-contract'
+import { deliveryHandoffContract } from '../../channels-delivery/test/delivery-handoff-contract'
+import { deliveryOutputScenarios } from '../../channels-delivery/test/delivery-output-scenarios'
 import { emptyStore } from './postgres'
 import { sequentialCallbackContract } from './sequential-callback-contract'
 

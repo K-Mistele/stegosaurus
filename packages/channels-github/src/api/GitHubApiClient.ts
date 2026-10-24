@@ -60,7 +60,7 @@ export class GitHubApiClient extends Context.Service<
 		) => Effect.Effect<string, GitHubApiError>
 		readonly botUserId: Effect.Effect<GitHubId, GitHubApiError>
 	}
->()('@humanlayer/channels-github/internal/GitHubApiClient', {
+>()('@stegosaurus/channels-github/internal/GitHubApiClient', {
 	make: Effect.gen(function* () {
 		const client = yield* HttpClient.HttpClient
 		const credentials = yield* GitHubAppCredentials

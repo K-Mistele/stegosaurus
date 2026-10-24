@@ -13,7 +13,7 @@ import {
 	MailboxSubscriptions,
 	deliveryApiRoutes,
 	type ChannelsProviderRequirements,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect } from 'effect'
 
 import { DeliveryControlAlchemyCloudflare, makeDeliveryRequestHandler } from './DeliveryControl'

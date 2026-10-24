@@ -2,7 +2,7 @@
  * Where a Slack delivery's output goes, saved before the callback runs so a later attempt or a remote
  * worker can reach the same thread. The delivery core stores these as opaque JSON; only Slack reads them.
  */
-import type { DeliveryOperationKind, DeliveryReactionTargetKind } from '@humanlayer/channels-delivery'
+import type { DeliveryOperationKind, DeliveryReactionTargetKind } from '@stegosaurus/channels-delivery'
 import { Option, Schema } from 'effect'
 
 import { SlackMessageRef, SlackThreadRef } from './SlackModels'

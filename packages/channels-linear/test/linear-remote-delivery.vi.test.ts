@@ -14,7 +14,7 @@ import {
 	makeDeliveryClient,
 	type DeliveryClient,
 	type DeliveryContext,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Config, Data, Effect, Layer, Predicate, Queue, Redacted, Ref, Schedule, type Schema } from 'effect'
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { expect } from 'vite-plus/test'

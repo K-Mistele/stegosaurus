@@ -5,14 +5,14 @@
  */
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto'
 import { it } from '@effect/vitest'
-import { DeliveryAdmission, QueueDeliveryMode, type DeliveryContext } from '@humanlayer/channels-delivery'
+import { DeliveryAdmission, QueueDeliveryMode, type DeliveryContext } from '@stegosaurus/channels-delivery'
 import {
 	GitHubApi,
 	GitHubBot,
 	GitHubId,
 	GitHubIssueComment,
 	type GitHubReactionTarget,
-} from '@humanlayer/channels-github'
+} from '@stegosaurus/channels-github'
 import {
 	LinearAgentActivityId,
 	LinearAgentActivityReceipt,
@@ -21,12 +21,12 @@ import {
 	LinearApi,
 	LinearAuth,
 	LinearBot,
-} from '@humanlayer/channels-linear'
-import { SlackApi, SlackBot } from '@humanlayer/channels-slack'
+} from '@stegosaurus/channels-linear'
+import { SlackApi, SlackBot } from '@stegosaurus/channels-slack'
 import { Config, Context, Effect, Layer, Match, Option, Predicate, Queue, Redacted, Ref, Schema } from 'effect'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
-import { githubWebhookSecret, issueCommentPayload, signedGitHubInput } from '../../github/test/fixtures'
+import { githubWebhookSecret, issueCommentPayload, signedGitHubInput } from '../../channels-github/test/fixtures'
 import {
 	agentSessionPayloads,
 	linearAppUserId,
@@ -34,7 +34,7 @@ import {
 	linearOrganizationId,
 	linearWebhookSecret,
 	signedLinearInput,
-} from '../../linear/test/fixtures'
+} from '../../channels-linear/test/fixtures'
 import { ChannelsCloudflare, DeliveryMailboxes } from '../src'
 import { DurableObjectFake, DurableObjectFakeAlarm } from './DurableObjectFake'
 

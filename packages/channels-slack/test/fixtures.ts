@@ -9,11 +9,11 @@ import {
 	type ProviderEventProcessor,
 	webhookRoutes,
 	type RawWebhookInput,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Context, Effect, Layer, Match, Queue, Redacted, Schema } from 'effect'
 import { Headers, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
-import { makeTestDeliveryExecution } from '../../delivery/test/delivery-execution'
+import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution'
 import { SlackApi } from '../src/SlackApi'
 import { makeSlackWebhookProvider } from '../src/SlackWebhookProvider'
 import { signSlackBody } from '../src/SlackWebhookSignature'

@@ -1,30 +1,33 @@
 {
-	"name": "@humanlayer/channels-slack",
-	"version": "0.0.0",
-	"private": true,
-	"type": "module",
-	"sideEffects": false,
-	"module": "./src/index.ts",
-	"types": "./src/index.ts",
-	"exports": {
-		".": "./src/index.ts"
-	},
-	"scripts": {
-		"smoke:live": "bun --env-file=../../.env run scripts/slack-api-live-smoke.ts",
-		"typecheck": "tsc --noEmit -p tsconfig.json"
-	},
-	"dependencies": {
-		"@humanlayer/channels-delivery": "workspace:*"
-	},
-	"devDependencies": {
-		"@effect/platform-node": "catalog:",
-		"@effect/vitest": "catalog:",
-		"@emulators/core": "0.11.2",
-		"@emulators/slack": "0.11.2",
-		"effect": "catalog:",
-		"typescript": "catalog:"
-	},
-	"peerDependencies": {
-		"effect": "catalog:"
-	}
+  "name": "@stegosaurus/channels-slack",
+  "version": "0.0.0",
+  "description": "Channels Slack provider: Events API, Web API client, files, threads and stream chunks.",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "vp test",
+    "smoke:live": "bun --env-file=../../.env run scripts/slack-api-live-smoke.ts"
+  },
+  "dependencies": {
+    "@stegosaurus/channels-delivery": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@emulators/core": "catalog:",
+    "@emulators/slack": "catalog:",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
 }

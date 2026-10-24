@@ -7,7 +7,7 @@ import {
 	WebhookPayloadInvalidError,
 	type ProviderWebhookOutcome,
 	type WebhookProvider,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Crypto, Effect, Match, Redacted, Schema } from 'effect'
 
 import { githubDiscussionResourceId, type GitHubId } from './GitHubIdentity'

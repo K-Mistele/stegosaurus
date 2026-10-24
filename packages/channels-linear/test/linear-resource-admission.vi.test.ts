@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest'
-import { ProviderWebhookEvent } from '@humanlayer/channels-delivery'
+import { ProviderWebhookEvent } from '@stegosaurus/channels-delivery'
 import { Effect, Schema } from 'effect'
 
 import { issueCreatePayload, makeLinearTestProvider, signedLinearInput } from './fixtures'

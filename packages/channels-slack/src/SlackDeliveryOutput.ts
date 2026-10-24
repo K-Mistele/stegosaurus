@@ -38,7 +38,7 @@ import {
 	type ProviderSetMessageReaction,
 	type DeliveryPlan,
 	sameDeliveryPlan,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Effect, Match, Option, Predicate, Schema } from 'effect'
 
 import { SlackApi, type SlackApiError } from './SlackApi'

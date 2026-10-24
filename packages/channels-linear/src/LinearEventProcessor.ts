@@ -13,7 +13,7 @@ import {
 	ProviderEventIgnored,
 	ProviderEventInvalid,
 	type ProviderEventProcessor,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Effect, Match, Option, Predicate, Schema, Struct } from 'effect'
 
 import { LinearApi } from './LinearApi'

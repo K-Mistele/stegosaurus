@@ -1,6 +1,6 @@
 # Slack
 
-`@humanlayer/channels-slack` turns Slack Events API webhooks into durable thread callbacks for `@humanlayer/channels-delivery`. It verifies request signatures, stores accepted events in provider-neutral mailboxes, and exposes thread, channel, message, reaction, file, streaming, and agent-status operations through typed resources and `SlackApi`.
+`@stegosaurus/channels-slack` turns Slack Events API webhooks into durable thread callbacks for `@stegosaurus/channels-delivery`. It verifies request signatures, stores accepted events in provider-neutral mailboxes, and exposes thread, channel, message, reaction, file, streaming, and agent-status operations through typed resources and `SlackApi`.
 
 ## Create a Slack app
 
@@ -53,8 +53,8 @@ Never commit the signing secret or bot token.
 ## Configure a provider
 
 ```ts
-import { DebounceDeliveryMode } from '@humanlayer/channels-delivery'
-import { SlackBot, SlackContent } from '@humanlayer/channels-slack'
+import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery'
+import { SlackBot, SlackContent } from '@stegosaurus/channels-slack'
 import { Config, Effect } from 'effect'
 
 const slack = SlackBot.make({

@@ -8,7 +8,7 @@
  *
  * All times are milliseconds from Effect's Clock, passed in as parameters, never the database's clock.
  */
-import { MailboxDeliveryUnavailable } from '@humanlayer/channels-delivery'
+import { MailboxDeliveryUnavailable } from '@stegosaurus/channels-delivery'
 import { Effect, Layer, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as SqlError from 'effect/sql/SqlError'

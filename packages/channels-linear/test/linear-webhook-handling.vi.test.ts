@@ -4,7 +4,7 @@ import {
 	ProviderWebhookIgnored,
 	WebhookAuthenticationError,
 	WebhookPayloadInvalidError,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Effect, Logger, Schema } from 'effect'
 import { Headers } from 'effect/http'
 

@@ -14,7 +14,7 @@ import {
 	ProviderEventIgnored,
 	ProviderEventInvalid,
 	type ProviderEventProcessor,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Array as Arr, Data, Effect, Match, Option, Predicate, Schema, Struct } from 'effect'
 
 import { SlackApi, SlackApiError, isSlackTokenRejected } from './SlackApi'

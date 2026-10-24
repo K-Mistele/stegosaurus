@@ -6,7 +6,7 @@ import {
 	MailboxDeliveryUnavailable,
 	Timestamp,
 	requestDeliveryInterrupt,
-} from '@humanlayer/channels-delivery'
+} from '@stegosaurus/channels-delivery'
 import { Clock, Context, Effect, Layer, Predicate, Schema } from 'effect'
 
 import type { DeliveryRequest, DeliveryResponse } from './DeliveryControl'
@@ -87,7 +87,7 @@ export type DeliveryMailboxNamespace = {
 
 /** The application's mailbox Durable Object namespace, as the Worker's routes reach it. */
 export class DeliveryMailboxes extends Context.Service<DeliveryMailboxes, DeliveryMailboxNamespace>()(
-	'@humanlayer/channels-alchemy-cloudflare/DeliveryMailboxes',
+	'@stegosaurus/channels-alchemy-cloudflare/DeliveryMailboxes',
 ) {}
 
 /** Route host-level MailboxDelivery calls to the application-owned DO namespace. */

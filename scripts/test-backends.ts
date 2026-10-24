@@ -1,5 +1,5 @@
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
-import { Config, Crypto, Data, Effect, Option, Path, Schedule, Schema, Stream } from 'effect'
+import { Config, Crypto, Data, Effect, Option, Path, Schedule, Stream } from 'effect'
 import { ChildProcess, ChildProcessSpawner } from 'effect/process'
 
 class BackendTestFailure extends Data.TaggedError('BackendTestFailure')<{ readonly operation: string }> {}
@@ -47,7 +47,6 @@ const command = Effect.fn('backend_test.command')(function* (input: {
 })
 
 const program = Effect.gen(function* () {
-	const backend = yield* Config.schema(Schema.Literals(['postgres', 'redis']), 'PHASE2_BACKEND')
 	const path = yield* Path.Path
 	const root = yield* path.fromFileUrl(new URL('../', import.meta.url))
 	const crypto = yield* Crypto.Crypto
@@ -62,14 +61,14 @@ const program = Effect.gen(function* () {
 			operation: 'A local Unix-socket Docker daemon is required; remote contexts are refused',
 		})
 	}
-	const suites =
-		backend === 'postgres'
-			? [{ config: 'packages/sql/test-backends/vite.postgres.config.ts', port: 55432 }]
-			: [{ config: 'packages/redis/test-backends/vite.redis.config.ts', port: 56379 }]
-	for (const suite of suites) {
+	const suites = [
+		{ backend: 'postgres', config: 'packages/channels-sql/test-backends/vite.postgres.config.ts', port: 55432 },
+		{ backend: 'redis', config: 'packages/channels-redis/test-backends/vite.redis.config.ts', port: 56379 },
+	] as const
+	for (const { backend, ...suite } of suites) {
 		yield* Effect.scoped(
 			Effect.gen(function* () {
-				const name = `channels-test-${yield* crypto.randomUUIDv4}`
+				const name = `channels-test-${yield* crypto.randomUUIDv4()}`
 				const docker = (args: ReadonlyArray<string>) => command({ executable: 'docker', args, cwd: root })
 				const options =
 					backend === 'postgres'
@@ -130,6 +129,6 @@ const program = Effect.gen(function* () {
 			}),
 		)
 	}
-}).pipe(Effect.scoped, Effect.timeout('115 seconds'), Effect.provide(NodeServices.layer))
+}).pipe(Effect.scoped, Effect.timeout('230 seconds'), Effect.provide(NodeServices.layer))
 
 NodeRuntime.runMain(program)

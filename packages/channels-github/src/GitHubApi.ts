@@ -51,7 +51,7 @@ export * from './GitHubApiContract'
 
 /** Application-wide GitHub operations. Transport, credentials, pagination, and decoding stay behind this service. */
 export class GitHubApi extends Context.Service<GitHubApi, GitHubApiOperations>()(
-	'@humanlayer/channels-github/GitHubApi',
+	'@stegosaurus/channels-github/GitHubApi',
 	{
 		make: Effect.gen(function* () {
 			const client = yield* GitHubApiClient
