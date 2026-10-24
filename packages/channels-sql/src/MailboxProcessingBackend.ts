@@ -89,7 +89,7 @@ const waitingAdmissionRows = Schema.Array(Schema.Struct({ admission_json: Delive
 /** Log a database or codec failure where it happens, then narrow it to `MailboxProcessingUnavailable`. */
 const narrowSqlFailure: NarrowSqlFailure<MailboxProcessingUnavailable> = (reason) => (error) =>
     Effect.logError('SQL mailbox processing failed', error).pipe(
-        Effect.andThen(Effect.fail(new MailboxProcessingUnavailable({ reason }))),
+        Effect.andThen(Effect.fail(MailboxProcessingUnavailable.make({ reason }))),
     );
 
 /** Narrow the failures of an operation that only reads and writes rows. */
@@ -109,7 +109,7 @@ const makeClaimId = Effect.gen(function* () {
 });
 
 const claimLost = (claim: { readonly mailboxKey: string; readonly claimId: string }) =>
-    new MailboxProcessingClaimLost({ mailboxKey: claim.mailboxKey, claimId: claim.claimId });
+    MailboxProcessingClaimLost.make({ mailboxKey: claim.mailboxKey, claimId: claim.claimId });
 
 /**
  * Look: every due mailbox. An idle one reports its waiting events; one with an active delivery
@@ -139,7 +139,7 @@ const findReadyMailboxes = Effect.fn('delivery.sql.find_ready_mailboxes')(functi
 			ORDER BY mailbox.ready_at, mailbox.mailbox_key LIMIT ${claimLimit}`,
     );
 
-    return rows.map((row) =>
+    return Arr.map(rows, (row) =>
         Match.value(row).pipe(
             Match.discriminatorsExhaustive('status')({
                 idle: (idle) =>
@@ -408,7 +408,7 @@ const prepareDelivery = (input: PrepareMailboxDelivery) =>
                     ClaimNotOwned: () => Effect.fail(claimLost(input)),
                     PreparationMismatch: ({ batchId }) =>
                         Effect.fail(
-                            new DeliveryPreparationConflict({
+                            DeliveryPreparationConflict.make({
                                 deliveryId: formatDeliveryId({
                                     mailboxKey: input.mailboxKey,
                                     batchId,
@@ -532,27 +532,20 @@ export const MailboxProcessingBackendSql = (options: MailboxProcessingBackendSql
     Layer.effect(
         MailboxProcessingBackend,
         Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient;
+            const services = yield* Effect.context<SqlClient.SqlClient>();
 
             return MailboxProcessingBackend.of({
-                findReadyMailboxes: findReadyMailboxes(options.claimLimit).pipe(
-                    Effect.provideService(SqlClient.SqlClient, sql),
-                ),
-                claimMailbox: (input) => claimMailbox(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-                deferMailbox: (input) => deferMailbox(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-                renewClaim: (input) => renewClaim(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+                findReadyMailboxes: findReadyMailboxes(options.claimLimit).pipe(Effect.provide(services)),
+                claimMailbox: (input) => claimMailbox(input).pipe(Effect.provide(services)),
+                deferMailbox: (input) => deferMailbox(input).pipe(Effect.provide(services)),
+                renewClaim: (input) => renewClaim(input).pipe(Effect.provide(services)),
                 recordProcessingAttemptResult: (input) =>
-                    recordProcessingAttemptResult(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-                prepareDelivery: (input) =>
-                    prepareDelivery(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-                handOffDelivery: (input) =>
-                    handOffDelivery(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-                claimDeliveryOutput: (input) =>
-                    claimDeliveryOutput(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-                renewDeliveryOutput: (input) =>
-                    renewDeliveryOutput(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-                settleDeliveryOutput: (input) =>
-                    settleDeliveryOutput(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+                    recordProcessingAttemptResult(input).pipe(Effect.provide(services)),
+                prepareDelivery: (input) => prepareDelivery(input).pipe(Effect.provide(services)),
+                handOffDelivery: (input) => handOffDelivery(input).pipe(Effect.provide(services)),
+                claimDeliveryOutput: (input) => claimDeliveryOutput(input).pipe(Effect.provide(services)),
+                renewDeliveryOutput: (input) => renewDeliveryOutput(input).pipe(Effect.provide(services)),
+                settleDeliveryOutput: (input) => settleDeliveryOutput(input).pipe(Effect.provide(services)),
             });
         }),
     );

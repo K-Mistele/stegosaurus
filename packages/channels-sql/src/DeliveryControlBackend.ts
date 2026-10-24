@@ -25,7 +25,7 @@ import { changeDeliverySlot, lockDeliverySlot, type NarrowSqlFailure } from './D
 /** Log a database or codec failure where it happens, then narrow it to `DeliveryControlUnavailable`. */
 const narrowSqlFailure: NarrowSqlFailure<DeliveryControlUnavailable> = (reason) => (error) =>
     Effect.logError('SQL delivery control failed', error).pipe(
-        Effect.andThen(Effect.fail(new DeliveryControlUnavailable({ reason }))),
+        Effect.andThen(Effect.fail(DeliveryControlUnavailable.make({ reason }))),
     );
 
 const unavailable = <A, R>(effect: Effect.Effect<A, SqlError.SqlError | Schema.SchemaError, R>) =>
@@ -52,7 +52,7 @@ const readDeliveryStatus = Effect.fn('delivery.sql.read_delivery_status')(functi
         )
         .pipe(unavailable);
 
-    if (Option.isNone(loaded)) return yield* new DeliveryNotFound();
+    if (Option.isNone(loaded)) return yield* DeliveryNotFound.make();
 
     return yield* readDeliverySlotStatus(loaded.value.slot, { ...input, now });
 });
@@ -66,7 +66,7 @@ const applyDeliveryMutation = Effect.fn('delivery.sql.apply_delivery_mutation')(
     return yield* changeDeliverySlot({
         mailboxKey: input.reference.mailboxKey,
         withRetained: true,
-        onMissing: new DeliveryNotFound(),
+        onMissing: DeliveryNotFound.make(),
         change: (loaded) =>
             applyDeliverySlotMutation(loaded.slot, { ...input, now, hasWaiting: loaded.hasWaiting }).pipe(
                 Effect.map(({ slot, receipt }) => ({ slot, value: receipt })),
@@ -79,13 +79,11 @@ const applyDeliveryMutation = Effect.fn('delivery.sql.apply_delivery_mutation')(
 export const DeliveryControlBackendSql = Layer.effect(
     DeliveryControlBackend,
     Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
+        const services = yield* Effect.context<SqlClient.SqlClient>();
 
         return DeliveryControlBackend.of({
-            readDeliveryStatus: (input) =>
-                readDeliveryStatus(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-            applyDeliveryMutation: (input) =>
-                applyDeliveryMutation(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+            readDeliveryStatus: (input) => readDeliveryStatus(input).pipe(Effect.provide(services)),
+            applyDeliveryMutation: (input) => applyDeliveryMutation(input).pipe(Effect.provide(services)),
         });
     }),
 );

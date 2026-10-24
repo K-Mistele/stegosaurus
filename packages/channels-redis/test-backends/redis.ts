@@ -31,8 +31,8 @@ export const flushDatabase = Effect.gen(function* () {
 export const storeOverClient = (claimLimit = 100) =>
     Layer.mergeAll(MailboxDeliveryRedis, MailboxProcessingBackendRedis({ claimLimit }), DeliveryControlBackendRedis);
 
+/** The connection, with the database emptied each time it is built. */
+const flushedClient = Layer.effectDiscard(flushDatabase).pipe(Layer.provideMerge(client));
+
 /** An empty store with a connection of its own. Each build empties the database again. */
-export const emptyStore = storeOverClient().pipe(
-    Layer.provide(Layer.effectDiscard(flushDatabase)),
-    Layer.provideMerge(client),
-);
+export const emptyStore = storeOverClient().pipe(Layer.provideMerge(flushedClient));

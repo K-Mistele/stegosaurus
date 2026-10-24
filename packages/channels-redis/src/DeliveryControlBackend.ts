@@ -25,7 +25,7 @@ import { changeDeliverySlot, loadDeliverySlot, type NarrowRedisFailure } from '.
 /** Log a Redis, codec, or contention failure where it happens, then narrow it to `DeliveryControlUnavailable`. */
 const narrowRedisFailure: NarrowRedisFailure<DeliveryControlUnavailable> = (reason) => (error) =>
     Effect.logError('Redis delivery control failed', error).pipe(
-        Effect.andThen(Effect.fail(new DeliveryControlUnavailable({ reason }))),
+        Effect.andThen(Effect.fail(DeliveryControlUnavailable.make({ reason }))),
     );
 
 /** Read what a remote worker may see. The read is one script, so it sees one moment of the mailbox. */
@@ -39,7 +39,7 @@ const readDeliveryStatus = Effect.fn('delivery.redis.read_delivery_status')(func
         }),
     );
 
-    if (Option.isNone(loaded)) return yield* new DeliveryNotFound();
+    if (Option.isNone(loaded)) return yield* DeliveryNotFound.make();
 
     return yield* readDeliverySlotStatus(loaded.value.slot, { ...input, now });
 });
@@ -52,7 +52,7 @@ const applyDeliveryMutation = Effect.fn('delivery.redis.apply_delivery_mutation'
 
     return yield* changeDeliverySlot({
         mailboxKey: input.reference.mailboxKey,
-        onMissing: Effect.fail(new DeliveryNotFound()),
+        onMissing: Effect.fail(DeliveryNotFound.make()),
         change: (loaded) =>
             applyDeliverySlotMutation(loaded.slot, { ...input, now, hasWaiting: loaded.hasWaiting }).pipe(
                 Effect.map(({ slot, receipt }) => ({ slot, value: receipt })),
@@ -65,12 +65,11 @@ const applyDeliveryMutation = Effect.fn('delivery.redis.apply_delivery_mutation'
 export const DeliveryControlBackendRedis = Layer.effect(
     DeliveryControlBackend,
     Effect.gen(function* () {
-        const redis = yield* Redis.Redis;
+        const services = yield* Effect.context<Redis.Redis>();
 
         return DeliveryControlBackend.of({
-            readDeliveryStatus: (input) => readDeliveryStatus(input).pipe(Effect.provideService(Redis.Redis, redis)),
-            applyDeliveryMutation: (input) =>
-                applyDeliveryMutation(input).pipe(Effect.provideService(Redis.Redis, redis)),
+            readDeliveryStatus: (input) => readDeliveryStatus(input).pipe(Effect.provide(services)),
+            applyDeliveryMutation: (input) => applyDeliveryMutation(input).pipe(Effect.provide(services)),
         });
     }),
 );

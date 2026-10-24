@@ -25,7 +25,7 @@ const unavailable = <A, R>(
         Effect.catchTags({
             RedisError: () =>
                 Effect.fail(
-                    new MailboxSubscriptionError({
+                    MailboxSubscriptionError.make({
                         operation,
                         reason: 'redis_unavailable',
                     }),
@@ -33,7 +33,7 @@ const unavailable = <A, R>(
 
             SchemaError: () =>
                 Effect.fail(
-                    new MailboxSubscriptionError({
+                    MailboxSubscriptionError.make({
                         operation,
                         reason: 'redis_codec_unavailable',
                     }),
@@ -81,14 +81,14 @@ const unsubscribe = Effect.fn('delivery.redis.subscriptions.unsubscribe')(
 export const MailboxSubscriptionsRedis = Layer.effect(
     MailboxSubscriptions,
     Effect.gen(function* () {
-        const redis = yield* Redis.Redis;
+        const services = yield* Effect.context<Redis.Redis>();
 
         return MailboxSubscriptions.of({
-            subscribe: (input) => subscribe(input).pipe(Effect.provideService(Redis.Redis, redis)),
+            subscribe: (input) => subscribe(input).pipe(Effect.provide(services)),
 
-            isSubscribed: (input) => isSubscribed(input).pipe(Effect.provideService(Redis.Redis, redis)),
+            isSubscribed: (input) => isSubscribed(input).pipe(Effect.provide(services)),
 
-            unsubscribe: (input) => unsubscribe(input).pipe(Effect.provideService(Redis.Redis, redis)),
+            unsubscribe: (input) => unsubscribe(input).pipe(Effect.provide(services)),
         });
     }),
 );

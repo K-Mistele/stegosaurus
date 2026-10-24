@@ -90,7 +90,7 @@ const Look = Schema.NullOr(Schema.Union([IdleLook, BusyLook]));
 /** Log a Redis, codec, or contention failure where it happens, then narrow it to `MailboxProcessingUnavailable`. */
 const narrowRedisFailure: NarrowRedisFailure<MailboxProcessingUnavailable> = (reason) => (error) =>
     Effect.logError('Redis mailbox processing failed', error).pipe(
-        Effect.andThen(Effect.fail(new MailboxProcessingUnavailable({ reason }))),
+        Effect.andThen(Effect.fail(MailboxProcessingUnavailable.make({ reason }))),
     );
 
 /** Narrow the failures of an operation that only reads and writes keys. */
@@ -110,7 +110,7 @@ const makeClaimNonce = Effect.gen(function* () {
 });
 
 const claimLost = (claim: { readonly mailboxKey: string; readonly claimId: string }) =>
-    new MailboxProcessingClaimLost({ mailboxKey: claim.mailboxKey, claimId: claim.claimId });
+    MailboxProcessingClaimLost.make({ mailboxKey: claim.mailboxKey, claimId: claim.claimId });
 
 /**
  * An idle mailbox reports its waiting events; one with an active delivery reports the work its
@@ -338,7 +338,7 @@ const prepareDelivery = (input: PrepareMailboxDelivery) =>
                 ClaimNotOwned: () => Effect.fail(claimLost(input)),
                 PreparationMismatch: ({ batchId }) =>
                     Effect.fail(
-                        new DeliveryPreparationConflict({
+                        DeliveryPreparationConflict.make({
                             deliveryId: formatDeliveryId({
                                 mailboxKey: input.mailboxKey,
                                 batchId,
@@ -455,8 +455,8 @@ export const MailboxProcessingBackendRedis = (options: MailboxProcessingBackendR
     Layer.effect(
         MailboxProcessingBackend,
         Effect.gen(function* () {
-            const redis = yield* Redis.Redis;
-            const withRedis = Effect.provideService(Redis.Redis, redis);
+            const services = yield* Effect.context<Redis.Redis>();
+            const withRedis = Effect.provide(services);
 
             return MailboxProcessingBackend.of({
                 findReadyMailboxes: findReadyMailboxes(options.claimLimit).pipe(withRedis),

@@ -239,7 +239,7 @@ const processingFor = (input: {
                     },
                 ],
             },
-        ).pipe(Layer.provide(NodeCrypto.layer), Layer.provide(Layer.succeedContext(input.process))),
+        ).pipe(Layer.provide([NodeCrypto.layer, Layer.succeedContext(input.process)])),
     );
 
 const processReady = (processing: Context.Context<MailboxProcessing>) =>
@@ -358,7 +358,7 @@ describe('redis store: several processes', () => {
 
             expect(yield* pollTogetherUntilQuiet(pollerA, pollerB)).toEqual({ claimed: 12, output: 0 });
             const deliveries = yield* Queue.takeAll(handedOff);
-            expect(new Set(deliveries.map(({ deliveryId }) => deliveryId)).size).toBe(12);
+            expect(new Set(Arr.map(deliveries, ({ deliveryId }) => deliveryId)).size).toBe(12);
             expect(deliveries).toHaveLength(12);
 
             yield* Effect.forEach(
@@ -377,8 +377,8 @@ describe('redis store: several processes', () => {
             );
             expect(yield* pollTogetherUntilQuiet(pollerA, pollerB)).toEqual({ claimed: 0, output: 12 });
             const sent = yield* Queue.takeAll(attempts);
-            expect(sent.map(({ attempt }) => attempt)).toEqual(Arr.makeBy(12, () => 1));
-            expect(new Set(sent.map(({ deliveryId }) => deliveryId)).size).toBe(12);
+            expect(Arr.map(sent, ({ attempt }) => attempt)).toEqual(Arr.makeBy(12, () => 1));
+            expect(new Set(Arr.map(sent, ({ deliveryId }) => deliveryId)).size).toBe(12);
 
             for (const { deliveryId, accessToken } of deliveries) {
                 const retired = yield* inProcess(first)(
@@ -660,7 +660,7 @@ const writeOldMailbox = (input: {
         yield* input.redis.send(
             'SADD',
             mailboxEventsKey(mailboxKey),
-            ...[...input.frozen, ...input.waiting].map(({ eventId }) => eventId),
+            ...Arr.map([...input.frozen, ...input.waiting], ({ eventId }) => eventId),
         );
         yield* input.redis.send('ZADD', readyMailboxesKey, String(input.readyAt), mailboxKey);
 

@@ -9,7 +9,7 @@ import { formatDeliveryId, parseDeliveryId } from '@stegosaurus/channels-deliver
 import { DeliveryOutputSettlement } from '@stegosaurus/channels-delivery/DeliveryOperation';
 import { CompleteDelivery, DeliveryControlBackend } from '@stegosaurus/channels-delivery/DeliveryControl';
 import { PreparedDeliveryInvocation } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Clock, Effect, Option, type Layer } from 'effect';
+import { Clock, Effect, Layer, Option } from 'effect';
 import { TestClock } from 'effect/testing';
 
 import {
@@ -26,6 +26,13 @@ type Store = MailboxDelivery | MailboxProcessingBackend | DeliveryControlBackend
 
 /** Reused by the three persistent adapters; every call reloads state through the real backend seam. */
 export const sequentialCallbackContract = <E>(name: string, makeStore: () => Layer.Layer<Store, E>) => {
+    /** Run one test against a store built for it alone and released when it ends. */
+    const withStore = <A, E2>(test: Effect.Effect<A, E2, Store>) =>
+        Layer.build(makeStore()).pipe(
+            Effect.flatMap((store) => Effect.provideContext(test, store)),
+            Effect.scoped,
+        );
+
     it.effect(`${name}: round-trips sequential callback identities, cleanup, output, and retry`, ({ expect }) =>
         Effect.gen(function* () {
             const backend = yield* MailboxProcessingBackend;
@@ -169,7 +176,7 @@ export const sequentialCallbackContract = <E>(name: string, makeStore: () => Lay
             for (const index of [0, 1, 2]) expect((yield* read(index)).stage).toBe('Retired');
             expect((yield* read(0, tokens[2]).pipe(Effect.flip))._tag).toBe('DeliveryNotFound');
             expect(yield* backend.findReadyMailboxes).toEqual([]);
-        }).pipe(Effect.provide(makeStore())),
+        }).pipe(withStore),
     );
     it.effect(`${name}: a terminal callback failure does not start the next stored step`, ({ expect }) =>
         Effect.gen(function* () {
@@ -213,6 +220,6 @@ export const sequentialCallbackContract = <E>(name: string, makeStore: () => Lay
                     })
                     .pipe(Effect.flip))._tag,
             ).toBe('DeliveryNotFound');
-        }).pipe(Effect.provide(makeStore())),
+        }).pipe(withStore),
     );
 };

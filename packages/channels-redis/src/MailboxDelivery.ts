@@ -24,9 +24,9 @@ const unavailable = <A, R>(effect: Effect.Effect<A, Redis.RedisError | Schema.Sc
     effect.pipe(
         Effect.tapError((error) => Effect.logError('Redis mailbox admission failed', error)),
         Effect.catchTags({
-            RedisError: () => Effect.fail(new MailboxDeliveryUnavailable({ reason: 'redis_unavailable' })),
-            SchemaError: () => Effect.fail(new MailboxDeliveryUnavailable({ reason: 'redis_codec_unavailable' })),
-            SlotChanged: () => Effect.fail(new MailboxDeliveryUnavailable({ reason: 'redis_contention' })),
+            RedisError: () => Effect.fail(MailboxDeliveryUnavailable.make({ reason: 'redis_unavailable' })),
+            SchemaError: () => Effect.fail(MailboxDeliveryUnavailable.make({ reason: 'redis_codec_unavailable' })),
+            SlotChanged: () => Effect.fail(MailboxDeliveryUnavailable.make({ reason: 'redis_contention' })),
         }),
     );
 
@@ -88,10 +88,10 @@ const deliver = Effect.fn('delivery.redis.deliver')(function* (admission: Delive
 export const MailboxDeliveryRedis = Layer.effect(
     MailboxDelivery,
     Effect.gen(function* () {
-        const redis = yield* Redis.Redis;
+        const services = yield* Effect.context<Redis.Redis>();
 
         return MailboxDelivery.of({
-            deliver: (admission) => deliver(admission).pipe(Effect.provideService(Redis.Redis, redis)),
+            deliver: (admission) => deliver(admission).pipe(Effect.provide(services)),
         });
     }),
 );

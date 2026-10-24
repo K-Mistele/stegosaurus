@@ -29,7 +29,21 @@ import {
 import { DeliveryOutputSettlement } from '@stegosaurus/channels-delivery/DeliveryOperation';
 import { CompleteDelivery, DeliveryControlBackend } from '@stegosaurus/channels-delivery/DeliveryControl';
 import { PreparedDeliveryInvocation } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Array as Arr, Clock, Context, Deferred, Effect, Fiber, Layer, Option, Queue, Redacted, Schema } from 'effect';
+import {
+    Array as Arr,
+    Clock,
+    Context,
+    Deferred,
+    Effect,
+    Fiber,
+    Layer,
+    Option,
+    Order,
+    Queue,
+    Redacted,
+    Schema,
+    String as Str,
+} from 'effect';
 import * as SqlClient from 'effect/sql/SqlClient';
 import { TestClock } from 'effect/testing';
 
@@ -171,7 +185,10 @@ const claimHistory = Effect.gen(function* () {
         yield* sql`SELECT batch_id, status FROM delivery_next_claims`,
     );
 
-    return rows.map(({ batch_id, status }) => `${batch_id}:${status}`).toSorted();
+    return Arr.sort(
+        Arr.map(rows, ({ batch_id, status }) => `${batch_id}:${status}`),
+        Order.String,
+    );
 });
 
 /**
@@ -222,7 +239,7 @@ const processingFor = (input: {
                     },
                 ],
             },
-        ).pipe(Layer.provide(NodeCrypto.layer), Layer.provide(Layer.succeedContext(input.process))),
+        ).pipe(Layer.provide([NodeCrypto.layer, Layer.succeedContext(input.process)])),
     );
 
 const processReady = (processing: Context.Context<MailboxProcessing>) =>
@@ -290,7 +307,7 @@ describe('sql store: several processes', () => {
                 yield* Deferred.succeed(release, undefined);
                 yield* Fiber.join(holder);
                 const claim = Option.getOrThrow(yield* inProcess(second)(claimWaiting(keyOf('thread-1'))));
-                expect(claim.admissions.map(({ eventId }) => eventId)).toEqual(['a']);
+                expect(Arr.map(claim.admissions, ({ eventId }) => eventId)).toEqual(['a']);
             }).pipe(Effect.scoped),
     );
 
@@ -330,7 +347,7 @@ describe('sql store: several processes', () => {
 
             expect(yield* pollTogetherUntilQuiet(pollerA, pollerB)).toEqual({ claimed: 12, output: 0 });
             const deliveries = yield* Queue.takeAll(handedOff);
-            expect(new Set(deliveries.map(({ deliveryId }) => deliveryId)).size).toBe(12);
+            expect(new Set(Arr.map(deliveries, ({ deliveryId }) => deliveryId)).size).toBe(12);
             expect(deliveries).toHaveLength(12);
 
             yield* Effect.forEach(deliveries, ({ deliveryId, accessToken }) =>
@@ -346,12 +363,12 @@ describe('sql store: several processes', () => {
             );
             expect(yield* pollTogetherUntilQuiet(pollerA, pollerB)).toEqual({ claimed: 0, output: 12 });
             const sent = yield* Queue.takeAll(attempts);
-            expect(sent.map(({ attempt }) => attempt)).toEqual(Arr.makeBy(12, () => 1));
-            expect(new Set(sent.map(({ deliveryId }) => deliveryId)).size).toBe(12);
+            expect(Arr.map(sent, ({ attempt }) => attempt)).toEqual(Arr.makeBy(12, () => 1));
+            expect(new Set(Arr.map(sent, ({ deliveryId }) => deliveryId)).size).toBe(12);
 
             const history = yield* inProcess(first)(claimHistory);
             expect(history).toHaveLength(12);
-            expect(history.every((row) => row.endsWith(':completed'))).toBe(true);
+            expect(Arr.every(history, Str.endsWith(':completed'))).toBe(true);
 
             for (const { deliveryId, accessToken } of deliveries) {
                 const retired = yield* inProcess(first)(

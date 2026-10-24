@@ -1,10 +1,11 @@
 import { NodeRuntime, NodeServices } from '@effect/platform-node';
-import { Config, Crypto, Data, Effect, Option, Path, Schedule, Stream } from 'effect';
+import { Config, Crypto, Effect, Layer, Option, Path, Schedule, Schema, Stream, String as Str } from 'effect';
 import { ChildProcess, ChildProcessSpawner } from 'effect/process';
 
-class BackendTestFailure extends Data.TaggedError('BackendTestFailure')<{
-    readonly operation: string;
-}> {}
+class BackendTestFailure extends Schema.TaggedError<BackendTestFailure, { readonly brand: unique symbol }>()(
+    'BackendTestFailure',
+    { operation: Schema.String },
+) {}
 
 const command = Effect.fn('backend_test.command')(function* (input: {
     readonly executable: string;
@@ -34,7 +35,7 @@ const command = Effect.fn('backend_test.command')(function* (input: {
                         Stream.decodeText(),
                         Stream.runFold(
                             () => '',
-                            (text, chunk) => (text + chunk).slice(-10_000),
+                            (text, chunk) => Str.slice(-10_000)(text + chunk),
                         ),
                     ),
                     process.exitCode,
@@ -45,7 +46,7 @@ const command = Effect.fn('backend_test.command')(function* (input: {
             if (code !== 0) {
                 yield* Effect.logError('Backend test command failed', output);
 
-                return yield* new BackendTestFailure({ operation: input.executable });
+                return yield* BackendTestFailure.make({ operation: input.executable });
             }
 
             return output;
@@ -65,22 +66,54 @@ const program = Effect.gen(function* () {
         cwd: root,
     });
 
-    if (!endpoint.trim().startsWith('unix://') || (Option.isSome(override) && !override.value.startsWith('unix://'))) {
-        return yield* new BackendTestFailure({
+    const isUnixSocket = Str.startsWith('unix://');
+
+    if (!isUnixSocket(Str.trim(endpoint)) || (Option.isSome(override) && !isUnixSocket(override.value))) {
+        return yield* BackendTestFailure.make({
             operation: 'A local Unix-socket Docker daemon is required; remote contexts are refused',
         });
     }
+
+    const postgresPort = 55432;
+    const redisPort = 56379;
 
     const suites = [
         {
             backend: 'postgres',
             config: 'packages/channels-sql/test-backends/vite.postgres.config.ts',
-            port: 55432,
+            container: [
+                '-p',
+                `127.0.0.1:${postgresPort}:5432`,
+                '-e',
+                'POSTGRES_USER=delivery_test',
+                '-e',
+                'POSTGRES_PASSWORD=delivery_test',
+                '-e',
+                'POSTGRES_DB=delivery_adapter_test',
+                'postgres:17-alpine',
+            ],
+            ready: ['pg_isready', '-h', '127.0.0.1', '-U', 'delivery_test', '-d', 'delivery_adapter_test'],
+            env: {
+                SQL_BACKEND_TEST_DATABASE_URL: `postgres://delivery_test:delivery_test@127.0.0.1:${postgresPort}/delivery_adapter_test`,
+            },
         },
         {
             backend: 'redis',
             config: 'packages/channels-redis/test-backends/vite.redis.config.ts',
-            port: 56379,
+            container: [
+                '-p',
+                `127.0.0.1:${redisPort}:6379`,
+                'redis:7-alpine',
+                'redis-server',
+                '--appendonly',
+                'yes',
+                '--appendfsync',
+                'always',
+                '--maxmemory-policy',
+                'noeviction',
+            ],
+            ready: ['redis-cli', 'ping'],
+            env: { REDIS_CONTRACT_TEST_PORT: String(redisPort) },
         },
     ] as const;
 
@@ -91,33 +124,7 @@ const program = Effect.gen(function* () {
 
                 const docker = (args: ReadonlyArray<string>) => command({ executable: 'docker', args, cwd: root });
 
-                const options =
-                    backend === 'postgres'
-                        ? [
-                              '-p',
-                              `127.0.0.1:${suite.port}:5432`,
-                              '-e',
-                              'POSTGRES_USER=delivery_test',
-                              '-e',
-                              'POSTGRES_PASSWORD=delivery_test',
-                              '-e',
-                              'POSTGRES_DB=delivery_adapter_test',
-                              'postgres:17-alpine',
-                          ]
-                        : [
-                              '-p',
-                              `127.0.0.1:${suite.port}:6379`,
-                              'redis:7-alpine',
-                              'redis-server',
-                              '--appendonly',
-                              'yes',
-                              '--appendfsync',
-                              'always',
-                              '--maxmemory-policy',
-                              'noeviction',
-                          ];
-
-                yield* Effect.acquireRelease(docker(['create', '--name', name, ...options]), () =>
+                yield* Effect.acquireRelease(docker(['create', '--name', name, ...suite.container]), () =>
                     docker(['rm', '-fv', name]).pipe(
                         Effect.tapError(() =>
                             Effect.logError('Could not remove owned backend test container', { name }),
@@ -126,13 +133,9 @@ const program = Effect.gen(function* () {
                     ),
                 );
                 yield* docker(['start', name]);
-                yield* docker([
-                    'exec',
-                    name,
-                    ...(backend === 'postgres'
-                        ? ['pg_isready', '-h', '127.0.0.1', '-U', 'delivery_test', '-d', 'delivery_adapter_test']
-                        : ['redis-cli', 'ping']),
-                ]).pipe(Effect.retry({ times: 20, schedule: Schedule.spaced('250 millis') }));
+                yield* docker(['exec', name, ...suite.ready]).pipe(
+                    Effect.retry({ times: 20, schedule: Schedule.spaced('250 millis') }),
+                );
                 yield* Effect.logInfo(`Testing ${suite.config} with a fresh ${backend} container`);
 
                 const result = yield* command({
@@ -141,11 +144,7 @@ const program = Effect.gen(function* () {
                     cwd: root,
                     env: {
                         DELIVERY_BACKEND_TEST_CONFIRM: 'disposable',
-                        ...(backend === 'postgres'
-                            ? {
-                                  SQL_BACKEND_TEST_DATABASE_URL: `postgres://delivery_test:delivery_test@127.0.0.1:${suite.port}/delivery_adapter_test`,
-                              }
-                            : { REDIS_CONTRACT_TEST_PORT: String(suite.port) }),
+                        ...suite.env,
                     },
                 });
 
@@ -153,6 +152,12 @@ const program = Effect.gen(function* () {
             }),
         );
     }
-}).pipe(Effect.scoped, Effect.timeout('230 seconds'), Effect.provide(NodeServices.layer));
+});
 
-NodeRuntime.runMain(program);
+NodeRuntime.runMain(
+    Layer.build(NodeServices.layer).pipe(
+        Effect.flatMap((services) => Effect.provideContext(program, services)),
+        Effect.scoped,
+        Effect.timeout('230 seconds'),
+    ),
+);

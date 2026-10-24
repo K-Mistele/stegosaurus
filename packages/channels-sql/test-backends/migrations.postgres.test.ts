@@ -4,7 +4,7 @@
  * Each run is counted by its `delivery.sql.migrate` span, through a recording tracer.
  */
 import { describe, it } from '@effect/vitest';
-import { Effect, Layer, Schema, Tracer } from 'effect';
+import { Array as Arr, Effect, Layer, Schema, String as Str, Tracer } from 'effect';
 import * as SqlClient from 'effect/sql/SqlClient';
 
 import { ChannelsSql } from '../src';
@@ -22,7 +22,7 @@ const makeRecordingTracer = () => {
         },
     });
 
-    return { tracer, migrations: () => names.filter((name) => name.includes('migrate')) };
+    return { tracer, migrations: () => Arr.filter(names, Str.includes('migrate')) };
 };
 
 const storage = (runMigrations: boolean) =>

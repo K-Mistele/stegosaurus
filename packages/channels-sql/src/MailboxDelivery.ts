@@ -19,8 +19,8 @@ const unavailable = <A, R>(effect: Effect.Effect<A, Schema.SchemaError | SqlErro
     effect.pipe(
         Effect.tapError((error) => Effect.logError('SQL mailbox admission failed', error)),
         Effect.catchTags({
-            SchemaError: () => Effect.fail(new MailboxDeliveryUnavailable({ reason: 'sql_codec_unavailable' })),
-            SqlError: () => Effect.fail(new MailboxDeliveryUnavailable({ reason: 'sql_unavailable' })),
+            SchemaError: () => Effect.fail(MailboxDeliveryUnavailable.make({ reason: 'sql_codec_unavailable' })),
+            SqlError: () => Effect.fail(MailboxDeliveryUnavailable.make({ reason: 'sql_unavailable' })),
         }),
     );
 
@@ -86,10 +86,10 @@ const deliver = Effect.fn('delivery.sql.deliver')(function* (admission: Delivery
 export const MailboxDeliverySql = Layer.effect(
     MailboxDelivery,
     Effect.gen(function* () {
-        const sqlClient = yield* SqlClient.SqlClient;
+        const services = yield* Effect.context<SqlClient.SqlClient>();
 
         return MailboxDelivery.of({
-            deliver: (admission) => deliver(admission).pipe(Effect.provideService(SqlClient.SqlClient, sqlClient)),
+            deliver: (admission) => deliver(admission).pipe(Effect.provide(services)),
         });
     }),
 );

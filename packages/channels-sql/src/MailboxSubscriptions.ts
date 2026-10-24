@@ -37,7 +37,7 @@ const unavailable = <A, R>(
         Effect.catchTags({
             SchemaError: () =>
                 Effect.fail(
-                    new MailboxSubscriptionError({
+                    MailboxSubscriptionError.make({
                         operation,
                         reason: 'sql_codec_unavailable',
                     }),
@@ -45,7 +45,7 @@ const unavailable = <A, R>(
 
             SqlError: () =>
                 Effect.fail(
-                    new MailboxSubscriptionError({
+                    MailboxSubscriptionError.make({
                         operation,
                         reason: 'sql_unavailable',
                     }),
@@ -111,14 +111,14 @@ const unsubscribe = Effect.fn('delivery.sql.subscriptions.unsubscribe')(
 export const MailboxSubscriptionsSql = Layer.effect(
     MailboxSubscriptions,
     Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
+        const services = yield* Effect.context<SqlClient.SqlClient>();
 
         return MailboxSubscriptions.of({
-            subscribe: (input) => subscribe(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+            subscribe: (input) => subscribe(input).pipe(Effect.provide(services)),
 
-            isSubscribed: (input) => isSubscribed(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+            isSubscribed: (input) => isSubscribed(input).pipe(Effect.provide(services)),
 
-            unsubscribe: (input) => unsubscribe(input).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+            unsubscribe: (input) => unsubscribe(input).pipe(Effect.provide(services)),
         });
     }),
 );

@@ -37,8 +37,8 @@ export const emptyTables = Effect.gen(function* () {
 export const storeOverClient = (claimLimit = 10) =>
     Layer.mergeAll(MailboxDeliverySql, MailboxProcessingBackendSql({ claimLimit }), DeliveryControlBackendSql);
 
+/** The pool, with the tables emptied each time it is built. */
+const emptiedClient = Layer.effectDiscard(emptyTables).pipe(Layer.provideMerge(client));
+
 /** An empty store with a pool of its own. Each build empties the tables again. */
-export const emptyStore = storeOverClient().pipe(
-    Layer.provide(Layer.effectDiscard(emptyTables)),
-    Layer.provide(client),
-);
+export const emptyStore = storeOverClient().pipe(Layer.provide(emptiedClient));

@@ -1,10 +1,16 @@
+import { Option, String as Str } from 'effect';
+
 const root = 'delivery:next:{mailboxes}';
 
+/** Each UTF-16 code unit as four hex digits. */
 const encode = (value: string) => {
     let encoded = '';
 
     for (let offset = 0; offset < value.length; offset++) {
-        encoded += value.charCodeAt(offset).toString(16).padStart(4, '0');
+        encoded += Option.match(Str.charCodeAt(value, offset), {
+            onNone: () => '',
+            onSome: (code) => Str.padStart(4, '0')(code.toString(16)),
+        });
     }
 
     return encoded;

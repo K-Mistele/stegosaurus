@@ -99,7 +99,10 @@ const Loaded = Schema.NullOr(
 const CommitResult = Schema.Literals(['ok', 'conflict', 'duplicate']);
 
 /** Another change reached the mailbox between the read and the write; the change is decided again. */
-export class SlotChanged extends Schema.TaggedError<SlotChanged>()('SlotChanged', {}) {}
+export class SlotChanged extends Schema.TaggedError<SlotChanged, { readonly brand: unique symbol }>()(
+    'SlotChanged',
+    {},
+) {}
 
 const isSlotChanged: Predicate.Refinement<unknown, SlotChanged> = Schema.is(SlotChanged);
 
@@ -243,7 +246,7 @@ const retainedWrite = (before: DeliverySlot, slot: DeliverySlot, now: number) =>
         if (slot.retained === before.retained) return Scripts.RetainedWrite.Keep();
 
         if (!Arr.isReadonlyArrayNonEmpty(slot.retained)) return Scripts.RetainedWrite.Remove();
-        const lastRetained = Math.max(...slot.retained.map(({ retainUntil }) => retainUntil));
+        const lastRetained = Math.max(...Arr.map(slot.retained, ({ retainUntil }) => retainUntil));
 
         if (lastRetained <= now) return Scripts.RetainedWrite.Remove();
 
@@ -308,7 +311,7 @@ export const commitDeliverySlot = (input: {
             }),
         );
 
-        if (result === 'conflict') return yield* new SlotChanged();
+        if (result === 'conflict') return yield* SlotChanged.make();
 
         return result;
     });

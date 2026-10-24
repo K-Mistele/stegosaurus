@@ -174,7 +174,9 @@ const loadRetainedDeliveries = (input: { readonly mailboxKey: string; readonly n
             yield* sql`SELECT retained_json FROM delivery_next_mailboxes WHERE mailbox_key = ${input.mailboxKey}`,
         );
 
-        return row.retained_json.filter(({ retainUntil }) => retainUntil > input.now).slice(-MAX_RETAINED_DELIVERIES);
+        return Arr.filter(row.retained_json, ({ retainUntil }) => retainUntil > input.now).slice(
+            -MAX_RETAINED_DELIVERIES,
+        );
     });
 
 /**
@@ -326,11 +328,15 @@ const writeRetainedDeliveries = (input: {
         const sql = (yield* SqlClient.SqlClient).withoutTransforms();
         const retainedJson = yield* Schema.encodeEffect(retainedCodec)(input.slot.retained);
         yield* sql`UPDATE delivery_next_mailboxes SET retained_json = ${retainedJson} WHERE mailbox_key = ${input.mailboxKey}`;
-        const keptNow = new Set(input.slot.retained.map(({ batchId }) => batchId));
+        const keptNow = new Set(Arr.map(input.slot.retained, ({ batchId }) => batchId));
 
-        const finished = input.slot.retained.findLast(({ batchId }) => batchId === input.before.active?.batchId);
-
-        const retired = finished !== undefined && finished.batchId !== input.slot.active?.batchId ? [finished] : [];
+        const retired = Arr.findLast(
+            input.slot.retained,
+            ({ batchId }) => batchId === input.before.active?.batchId,
+        ).pipe(
+            Option.filter((finished) => finished.batchId !== input.slot.active?.batchId),
+            Option.toArray,
+        );
 
         yield* Effect.forEach(retired, (delivery) =>
             Effect.gen(function* () {
@@ -341,7 +347,7 @@ const writeRetainedDeliveries = (input: {
 					WHERE batch_id = ${delivery.batchId}`;
             }),
         );
-        const pruned = input.before.retained.filter(({ batchId }) => !keptNow.has(batchId));
+        const pruned = Arr.filter(input.before.retained, ({ batchId }) => !keptNow.has(batchId));
         yield* Effect.forEach(
             pruned,
             ({ batchId }) =>

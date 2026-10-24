@@ -1251,14 +1251,10 @@ export class MailboxProcessing extends Context.Service<MailboxProcessing, Mailbo
      */
     static readonly make = <R>(options: MailboxProcessingOptions, processors: MailboxProcessors<R>) =>
         Effect.gen(function* () {
-            const backend = yield* MailboxProcessingBackend;
-            const crypto = yield* Crypto.Crypto;
+            const services = yield* Effect.context<MailboxProcessingBackend | Crypto.Crypto>();
 
             return {
-                processReady: processReady(options, processors).pipe(
-                    Effect.provideService(MailboxProcessingBackend, backend),
-                    Effect.provideService(Crypto.Crypto, crypto),
-                ),
+                processReady: processReady(options, processors).pipe(Effect.provide(services)),
             } satisfies MailboxProcessingOperations<R>;
         });
 

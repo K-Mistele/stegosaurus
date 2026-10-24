@@ -17,8 +17,8 @@ const unavailable = <A, R>(effect: Effect.Effect<A, Schema.SchemaError | SqlErro
     effect.pipe(
         Effect.tapError((error) => Effect.logError('SQL mailbox migration failed', error)),
         Effect.catchTags({
-            SchemaError: () => Effect.fail(new MailboxDeliveryUnavailable({ reason: 'sql_codec_unavailable' })),
-            SqlError: () => Effect.fail(new MailboxDeliveryUnavailable({ reason: 'sql_unavailable' })),
+            SchemaError: () => Effect.fail(MailboxDeliveryUnavailable.make({ reason: 'sql_codec_unavailable' })),
+            SqlError: () => Effect.fail(MailboxDeliveryUnavailable.make({ reason: 'sql_unavailable' })),
         }),
     );
 
@@ -183,7 +183,7 @@ export const migrate = Effect.gen(function* () {
             yield* migrateSequentialCallbacks;
         }),
     );
-}).pipe(unavailable, Effect.asVoid, Effect.withSpan('delivery.sql.migrate'));
+}).pipe(unavailable, Effect.withSpan('delivery.sql.migrate'));
 
 /**
  * Runs `migrate` once when built. `ChannelsSql.make` provides it ahead of the store's services when
