@@ -1297,7 +1297,9 @@ export const TuiApp = (props: TuiAppProps) => {
                 <NewSessionModal
                     cwd={props.cwd}
                     configuration={props.configuration ?? { profiles: [], providers: [] }}
-                    onClose={() => setNewSessionOpen(false)}
+                    // The dialog's keymap runs before this component's key handler. Closing after the current key
+                    // event keeps that handler seeing the dialog open, so Escape doesn't also go back to sessions.
+                    onClose={() => queueMicrotask(() => setNewSessionOpen(false))}
                     onSubmit={(request) => {
                         setNewSessionOpen(false);
                         props.onNewSession?.(request);

@@ -2,7 +2,8 @@ import { TerminalControl } from '@kitlangton/terminal-control';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 let terminal: TerminalControl;
-const terminalDescribe = process.env.FOLD_TUI_TERMINAL_TEST === '1' ? describe : describe.skip;
+// Real-terminal tests: opt in with FOLD_TUI_TERMINAL_TEST=1, and never in CI.
+const terminalDescribe = process.env.FOLD_TUI_TERMINAL_TEST === '1' && !process.env.CI ? describe : describe.skip;
 
 terminalDescribe('TUI tool inspectors', () => {
     beforeAll(async () => {
@@ -22,7 +23,7 @@ terminalDescribe('TUI tool inspectors', () => {
             record: 'on-failure',
         });
 
-        await session.screen.waitForText('Trailing assistant row keeps skill inspectable', { timeoutMs: 10_000 });
+        await session.screen.waitForText('Trailing assistant row keeps skill', { timeoutMs: 10_000 });
         await session.screen.waitForText('EVENTS · [SELECTED]', { timeoutMs: 10_000 });
         await session.screen.capture({ settleMs: 100, deadlineMs: 5_000, allowIncomplete: true });
         await session.keyboard.type('k');

@@ -40,8 +40,8 @@ const overflowSubagentEntries: ReadonlyArray<LogEntry> =
     process.env.FOLD_TUI_OVERFLOW_SUBAGENTS_FIXTURE === '1'
         ? Array.from({ length: 14 }, (_, index) => {
               const number = index + 1;
-              const toolCallId = ToolCallId.make(`tool_call_overflow_${number}`);
-              const agentId = AgentId.make(`agent_overflow_${number}`);
+              const toolCallId = ToolCallId.make(`tool_call_${`overflow${number}`.padEnd(24, 'a')}`);
+              const agentId = AgentId.make(`agent_${`overflow${number}`.padEnd(24, 'a')}`);
               return [
                   {
                       _tag: 'assistant-message',
@@ -52,7 +52,7 @@ const overflowSubagentEntries: ReadonlyArray<LogEntry> =
                       agentId: rootAgentId,
                       parentAgentId: null,
                       toolCallId: null,
-                      messageId: MessageId.make(`msg_overflow_${number}`),
+                      messageId: MessageId.make(`msg_${`overflow${number}`.padEnd(24, 'a')}`),
                       message: {
                           role: 'assistant',
                           content: [
@@ -116,7 +116,7 @@ const subagentEntries: ReadonlyArray<LogEntry> = [
         agentId: rootAgentId,
         parentAgentId: null,
         toolCallId: null,
-        messageId: MessageId.make('msg_system_root_aaaaaaaaaaaaaaaa'),
+        messageId: MessageId.make('msg_systemrootaaaaaaaaaaaaaa'),
         placement: 'leading',
         messages: [
             {
@@ -137,7 +137,7 @@ const subagentEntries: ReadonlyArray<LogEntry> = [
                   agentId: rootAgentId,
                   parentAgentId: null,
                   toolCallId: null,
-                  messageId: MessageId.make('msg_root_subagent_aaaaaaaaaaaa'),
+                  messageId: MessageId.make('msg_rootsubagentaaaaaaaaaaaa'),
                   message: {
                       role: 'assistant',
                       content: [
@@ -163,7 +163,7 @@ const subagentEntries: ReadonlyArray<LogEntry> = [
         agentId: researcherAgentId,
         parentAgentId: null,
         toolCallId: null,
-        messageId: MessageId.make('msg_system_researcher_aaaaaaaaaa'),
+        messageId: MessageId.make('msg_systemresearcheraaaaaaaa'),
         placement: 'leading',
         messages: [
             {
@@ -182,7 +182,7 @@ const subagentEntries: ReadonlyArray<LogEntry> = [
         agentId: researcherAgentId,
         parentAgentId: null,
         toolCallId: null,
-        messageId: MessageId.make('msg_researcher_skill_aaaaaaaaaa'),
+        messageId: MessageId.make('msg_researcherskillaaaaaaaaa'),
         message: {
             role: 'assistant',
             content: [
@@ -280,7 +280,9 @@ await render(
             viewedPatchHashes={viewedPatchHashes}
             onViewChange={(change) => setViewedPatchHashes((viewed) => markChangeViewed(viewed, change))}
             onRefreshGit={() => setNotice('CHANGES REFRESHED')}
-            {...(process.env.FOLD_TUI_SUBAGENT_FIXTURE === '1' ? { initialSelectedAgentId: 'agent_researcher' } : {})}
+            {...(process.env.FOLD_TUI_EVENT_SUBAGENT_FIXTURE === '1'
+                ? { initialSelectedAgentId: researcherAgentId }
+                : {})}
             notice={notice}
             targetNotice={targetNotice}
             onCompact={() => setNotice('COMPACTED')}

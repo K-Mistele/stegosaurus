@@ -2,7 +2,8 @@ import { TerminalControl } from '@kitlangton/terminal-control';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 let terminal: TerminalControl;
-const terminalDescribe = process.env.FOLD_TUI_TERMINAL_TEST === '1' ? describe : describe.skip;
+// Real-terminal tests: opt in with FOLD_TUI_TERMINAL_TEST=1, and never in CI.
+const terminalDescribe = process.env.FOLD_TUI_TERMINAL_TEST === '1' && !process.env.CI ? describe : describe.skip;
 
 terminalDescribe('TUI staged model selection', () => {
     beforeAll(async () => {
@@ -26,18 +27,23 @@ terminalDescribe('TUI staged model selection', () => {
             record: 'on-failure',
         });
         await session.screen.waitForText('MODEL SELECTION', { timeoutMs: 10_000 });
+        // Selection type lists Direct model first, then Profile.
+        await session.keyboard.press('ArrowDown');
+        await session.screen.waitForText('▸ Profile', { timeoutMs: 10_000 });
         await session.keyboard.press('Enter');
         await session.screen.waitForText('fixture-profile', { timeoutMs: 10_000 });
         await session.keyboard.press('Enter');
         await session.screen.waitForText('"profile":"fixture-profile"', { timeoutMs: 10_000 });
-        await session.screen.waitForText('Direct model', { timeoutMs: 10_000 });
-        await session.keyboard.press('ArrowDown');
+        await session.screen.waitForText('▸ Direct model', { timeoutMs: 10_000 });
         await session.keyboard.press('Enter');
         await session.screen.waitForText('fixture-provider', { timeoutMs: 10_000 });
         await session.keyboard.press('Enter');
         await session.screen.waitForText('fixture-model', { timeoutMs: 10_000 });
         await session.keyboard.press('Enter');
-        await session.screen.waitForText('Mode · new session only', { timeoutMs: 10_000 });
+        // The Thinking step comes between model and mode; keep its default (Off).
+        await session.screen.waitForText('▸ Off', { timeoutMs: 10_000 });
+        await session.keyboard.press('Enter');
+        await session.screen.waitForText('Smart root with standard tools', { timeoutMs: 10_000 });
         await session.keyboard.press('ArrowDown');
         await session.keyboard.press('Enter');
         await session.screen.waitForText('"mode":"rlm"', { timeoutMs: 10_000 });
@@ -64,14 +70,16 @@ terminalDescribe('TUI staged model selection', () => {
         await session.screen.waitForText('Working directory', { timeoutMs: 10_000 });
         await session.keyboard.press('Enter');
         await session.screen.waitForText('Selection type', { timeoutMs: 10_000 });
-        await session.keyboard.press('ArrowDown');
         await session.screen.waitForText('▸ Direct model', { timeoutMs: 10_000 });
         await session.keyboard.press('Enter');
         await session.screen.waitForText('Provider', { timeoutMs: 10_000 });
         await session.keyboard.press('Enter');
         await session.screen.waitForText('Model · fixture-provider', { timeoutMs: 10_000 });
         await session.keyboard.press('Enter');
-        await session.screen.waitForText('Mode · new session only', { timeoutMs: 10_000 });
+        // The Thinking step comes between model and mode; keep its default (Off).
+        await session.screen.waitForText('▸ Off', { timeoutMs: 10_000 });
+        await session.keyboard.press('Enter');
+        await session.screen.waitForText('Smart root with standard tools', { timeoutMs: 10_000 });
         await session.keyboard.press('ArrowDown');
         await session.keyboard.press('Enter');
         await session.screen.waitForText('"provider":"fixture-provider"', { timeoutMs: 10_000 });

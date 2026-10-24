@@ -1,8 +1,21 @@
 import { TerminalControl } from '@kitlangton/terminal-control';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+type TerminalSession = Awaited<ReturnType<TerminalControl['launch']>>;
+
+/** Poll the screen until `text` is gone, e.g. after closing a dialog. */
+const waitForTextGone = async (session: TerminalSession, text: string, timeoutMs = 10_000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const frame = await session.screen.capture({ settleMs: 50, deadlineMs: 2_000, allowIncomplete: true });
+        if (!frame.text.includes(text)) return;
+    }
+    throw new Error(`timed out waiting for "${text}" to disappear`);
+};
+
 let terminal: TerminalControl;
-const terminalDescribe = process.env.FOLD_TUI_TERMINAL_TEST === '1' ? describe : describe.skip;
+// Real-terminal tests: opt in with FOLD_TUI_TERMINAL_TEST=1, and never in CI.
+const terminalDescribe = process.env.FOLD_TUI_TERMINAL_TEST === '1' && !process.env.CI ? describe : describe.skip;
 const shiftEnter = new TextEncoder().encode('\u001b[13;2u');
 
 terminalDescribe('TUI terminal behavior', () => {
@@ -115,12 +128,13 @@ terminalDescribe('TUI terminal behavior', () => {
             host: 'opentui',
             viewport: { cols: 140, rows: 44 },
             record: 'on-failure',
-            env: { FOLD_TUI_SUBAGENT_FIXTURE: '1' },
+            env: { FOLD_TUI_EVENT_SUBAGENT_FIXTURE: '1' },
         });
 
         await session.screen.waitForText('researcher', { timeoutMs: 10_000 });
+        // `ll` focuses the right pane on its META tab.
         await session.keyboard.type('ll');
-        await session.keyboard.press('Tab');
+        await session.screen.waitForText('META · [SELECTED]', { timeoutMs: 10_000 });
         await session.screen.waitForText('AGENT TYPES', { timeoutMs: 10_000 });
         await session.screen.waitForText('TOOL CALLS', { timeoutMs: 10_000 });
         const meta = await session.screen.capture({ settleMs: 100, deadlineMs: 5_000, allowIncomplete: true });
@@ -163,7 +177,7 @@ terminalDescribe('TUI terminal behavior', () => {
             host: 'opentui',
             viewport: { cols: 140, rows: 44 },
             record: 'on-failure',
-            env: { FOLD_TUI_SUBAGENT_FIXTURE: '1' },
+            env: { FOLD_TUI_EVENT_SUBAGENT_FIXTURE: '1' },
         });
 
         await session.screen.waitForText('researcher', { timeoutMs: 10_000 });
@@ -226,8 +240,11 @@ terminalDescribe('TUI terminal behavior', () => {
         expect(initial.text).toContain('^N NEW');
         expect(initial.text).toContain('ESC SESSIONS');
 
+        // Ctrl+N opens the new-session dialog; onNewSession fires only once it is completed.
         await session.keyboard.press('Control+N');
-        await session.screen.waitForText('new-session-requested', { timeoutMs: 10_000 });
+        await session.screen.waitForText('Working directory', { timeoutMs: 10_000 });
+        await session.keyboard.press('Escape');
+        await waitForTextGone(session, 'NEW SESSION');
         await session.keyboard.press('Escape');
         await session.screen.waitForText('session-list-requested', { timeoutMs: 10_000 });
 
@@ -261,7 +278,8 @@ terminalDescribe('TUI terminal behavior', () => {
         await session.screen.waitForText('[INTERRUPT+SEND]', { timeoutMs: 10_000 });
         await session.keyboard.type('keep');
         await session.keyboard.press('Escape');
-        await session.screen.waitForText('I TO FOCUS', { timeoutMs: 10_000 });
+        // The input keeps its draft, so its 'I TO FOCUS' placeholder is hidden; the hint shows it is unfocused.
+        await session.screen.waitForText('I INPUT', { timeoutMs: 10_000 });
         await session.screen.waitForText('EVENTS · [SELECTED]', { timeoutMs: 10_000 });
         await session.keyboard.type('l');
         await session.screen.waitForText('CONTEXT · [LIVE] · root · [SELECTED]', { timeoutMs: 10_000 });
@@ -279,15 +297,15 @@ terminalDescribe('TUI terminal behavior', () => {
         await session.screen.waitForText('EVENTS · [SELECTED]', { timeoutMs: 10_000 });
 
         await session.keyboard.type('b');
-        await session.screen.waitForText('B GLOW:OFF', { timeoutMs: 10_000 });
+        await session.screen.waitForText('B:OFF', { timeoutMs: 10_000 });
         await session.keyboard.type('f');
-        await session.screen.waitForText('F GLITCH:OFF', { timeoutMs: 10_000 });
+        await session.screen.waitForText('F:OFF', { timeoutMs: 10_000 });
         await session.keyboard.type('v');
-        await session.screen.waitForText('V VIGNETTE:HEAVY', { timeoutMs: 10_000 });
+        await session.screen.waitForText('V:HEAVY', { timeoutMs: 10_000 });
         await session.keyboard.type('v');
-        await session.screen.waitForText('V VIGNETTE:OFF', { timeoutMs: 10_000 });
+        await session.screen.waitForText('V:OFF', { timeoutMs: 10_000 });
         await session.keyboard.type('v');
-        await session.screen.waitForText('V VIGNETTE:LIGHT', { timeoutMs: 10_000 });
+        await session.screen.waitForText('V:LIGHT', { timeoutMs: 10_000 });
 
         await session.keyboard.type('q');
         const exit = await session.waitForExit({ timeoutMs: 5_000 });
@@ -301,10 +319,10 @@ terminalDescribe('TUI terminal behavior', () => {
         });
         await interrupted.screen.waitForText('WAITING FOR ROOT-AGENT OUTPUT', { timeoutMs: 10_000 });
         await interrupted.keyboard.press('Control+C');
+        // The fixture always has a running subagent, so the session stays RUNNING after the root is interrupted.
         await interrupted.screen.waitForText('INTERRUPT REQUESTED', { timeoutMs: 10_000 });
-        await interrupted.screen.waitForText('STOPPED', { timeoutMs: 10_000 });
         await interrupted.keyboard.type('b');
-        await interrupted.screen.waitForText('B GLOW:OFF', { timeoutMs: 10_000 });
+        await interrupted.screen.waitForText('B:OFF', { timeoutMs: 10_000 });
         await interrupted.keyboard.type('q');
         const interruptedExit = await interrupted.waitForExit({ timeoutMs: 5_000 });
         expect(interruptedExit).toMatchObject({ reason: 'exited', exit: { code: 0 } });

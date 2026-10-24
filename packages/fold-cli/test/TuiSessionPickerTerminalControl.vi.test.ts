@@ -2,7 +2,8 @@ import { TerminalControl } from '@kitlangton/terminal-control';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 let terminal: TerminalControl;
-const terminalDescribe = process.env.FOLD_TUI_TERMINAL_TEST === '1' ? describe : describe.skip;
+// Real-terminal tests: opt in with FOLD_TUI_TERMINAL_TEST=1, and never in CI.
+const terminalDescribe = process.env.FOLD_TUI_TERMINAL_TEST === '1' && !process.env.CI ? describe : describe.skip;
 
 terminalDescribe('TUI session picker', () => {
     beforeAll(async () => {

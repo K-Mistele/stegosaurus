@@ -36,7 +36,7 @@ pnpm alchemy:destroy   # alchemy destroy
 - `test:stack`, `alchemy:dev`, and `alchemy:deploy` read `GH_APP_ID` and `GH_APP_PRIVATE_KEY` from Infisical (see Secrets).
 - `pnpm alchemy:deploy` deploys stage `prod`. Deploy a personal stage with `pnpm exec alchemy deploy` (defaults to `live_$USER`).
 - The pre-commit hook runs `vp staged`, which runs `vp check --fix` on staged files.
-- Opt-in tests: fold-cli's real-terminal TUI tests run only with `FOLD_TUI_TERMINAL_TEST=1` (`vp run @stegosaurus/fold-cli#test:tui`, needs Bun), and fold-agent's live Codex tests only with `FOLD_CODEX_LIVE=1`.
+- Opt-in tests: fold-cli's real-terminal TUI tests run only with `FOLD_TUI_TERMINAL_TEST=1` and never when `CI` is set (`vp run @stegosaurus/fold-cli#test:tui`, needs Bun), and fold-agent's live Codex tests only with `FOLD_CODEX_LIVE=1`.
 
 ## Secrets
 
