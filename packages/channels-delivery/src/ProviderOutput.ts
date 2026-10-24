@@ -6,17 +6,17 @@
  * ran, never storage. `processProviderOutput` picks the processor of the provider that owns the
  * delivery.
  */
-import { Effect, Predicate, Schema } from 'effect'
+import { Effect, Predicate, Schema } from 'effect';
 
-import { SetActivity } from './DeliveryActivity'
-import { PreparedDeliveryCallback } from './DeliveryContext'
-import { AddExternalLink } from './DeliveryLink'
-import { CreateMessage, ProviderDeleteMessage, ProviderUpdateMessage } from './DeliveryMessage'
-import { DeliveryOperationId } from './DeliveryOperation'
-import { PresentOutcome } from './DeliveryOutcome'
-import { ProviderRenderPlan } from './DeliveryPlan'
-import { ProviderSetMessageReaction } from './DeliveryReaction'
-import { DeliveryId } from './DeliveryReference'
+import { SetActivity } from './DeliveryActivity';
+import { PreparedDeliveryCallback } from './DeliveryContext';
+import { AddExternalLink } from './DeliveryLink';
+import { CreateMessage, ProviderDeleteMessage, ProviderUpdateMessage } from './DeliveryMessage';
+import { DeliveryOperationId } from './DeliveryOperation';
+import { PresentOutcome } from './DeliveryOutcome';
+import { ProviderRenderPlan } from './DeliveryPlan';
+import { ProviderSetMessageReaction } from './DeliveryReaction';
+import { DeliveryId } from './DeliveryReference';
 
 /**
  * `PresentOutcome` as a provider receives it.
@@ -24,10 +24,11 @@ import { DeliveryId } from './DeliveryReference'
  * @property clearActivity - the remote worker's last activity was `Working`, so the provider must clear it
  */
 export const ProviderPresentOutcome = Schema.TaggedStruct('PresentOutcome', {
-	...PresentOutcome.fields,
-	clearActivity: Schema.Boolean,
-})
-export type ProviderPresentOutcome = typeof ProviderPresentOutcome.Type
+    ...PresentOutcome.fields,
+    clearActivity: Schema.Boolean,
+});
+
+export type ProviderPresentOutcome = typeof ProviderPresentOutcome.Type;
 
 /**
  * A saved operation as a provider receives it. An update or deletion, or a reaction on a message,
@@ -35,16 +36,17 @@ export type ProviderPresentOutcome = typeof ProviderPresentOutcome.Type
  * `CreateMessage`. `RenderPlan` carries the plan the provider last showed.
  */
 export const ProviderOutputOperation = Schema.Union([
-	ProviderPresentOutcome,
-	AddExternalLink,
-	CreateMessage,
-	ProviderUpdateMessage,
-	ProviderDeleteMessage,
-	SetActivity,
-	ProviderSetMessageReaction,
-	ProviderRenderPlan,
-])
-export type ProviderOutputOperation = typeof ProviderOutputOperation.Type
+    ProviderPresentOutcome,
+    AddExternalLink,
+    CreateMessage,
+    ProviderUpdateMessage,
+    ProviderDeleteMessage,
+    SetActivity,
+    ProviderSetMessageReaction,
+    ProviderRenderPlan,
+]);
+
+export type ProviderOutputOperation = typeof ProviderOutputOperation.Type;
 
 /**
  * One attempt at one operation, as a provider sees it.
@@ -55,57 +57,64 @@ export type ProviderOutputOperation = typeof ProviderOutputOperation.Type
  * that takes a client-chosen ID sends it, and treats the provider's "already exists" answer as applied.
  */
 export const ProviderOutputAttempt = Schema.Struct({
-	deliveryId: DeliveryId,
-	operationId: DeliveryOperationId,
-	attempt: Schema.Int.check(Schema.isGreaterThan(0)),
-	hadAmbiguousAttempt: Schema.Boolean,
-	idempotencyKey: Schema.NonEmptyString,
-	prepared: PreparedDeliveryCallback,
-	operation: ProviderOutputOperation,
-})
-export type ProviderOutputAttempt = typeof ProviderOutputAttempt.Type
+    deliveryId: DeliveryId,
+    operationId: DeliveryOperationId,
+    attempt: Schema.Int.check(Schema.isGreaterThan(0)),
+    hadAmbiguousAttempt: Schema.Boolean,
+    idempotencyKey: Schema.NonEmptyString,
+    prepared: PreparedDeliveryCallback,
+    operation: ProviderOutputOperation,
+});
+
+export type ProviderOutputAttempt = typeof ProviderOutputAttempt.Type;
 
 /** The provider applied the operation. `receipt` is its own reference to what it made, read only by it. */
 export const DeliveryOutputApplied = Schema.TaggedStruct('DeliveryOutputApplied', {
-	receipt: Schema.optionalKey(Schema.Json),
-})
-export type DeliveryOutputApplied = typeof DeliveryOutputApplied.Type
+    receipt: Schema.optionalKey(Schema.Json),
+});
+
+export type DeliveryOutputApplied = typeof DeliveryOutputApplied.Type;
 
 /** The provider could not apply the operation. A retryable failure runs again later; others give up. */
 export class DeliveryOutputFailed extends Schema.TaggedError<DeliveryOutputFailed>()('DeliveryOutputFailed', {
-	provider: Schema.NonEmptyString,
-	retryable: Schema.Boolean,
-	safeCode: Schema.NonEmptyString,
-	retryAfterMs: Schema.optionalKey(
-		Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
-	),
+    provider: Schema.NonEmptyString,
+    retryable: Schema.Boolean,
+    safeCode: Schema.NonEmptyString,
+    retryAfterMs: Schema.optionalKey(
+        Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
+    ),
 }) {}
 
 /** No provider in this bot sends output for the delivery's provider. */
 export class ProviderOutputProcessorNotFound extends Schema.TaggedError<ProviderOutputProcessorNotFound>()(
-	'ProviderOutputProcessorNotFound',
-	{ namespace: Schema.NonEmptyString, provider: Schema.NonEmptyString },
+    'ProviderOutputProcessorNotFound',
+    { namespace: Schema.NonEmptyString, provider: Schema.NonEmptyString },
 ) {}
 
 /** One provider's output half. `R` is what it needs while it sends, such as the provider's API client. */
 export type ProviderOutputProcessor<R = never> = {
-	readonly namespace: string
-	readonly providerName: string
-	readonly process: (attempt: ProviderOutputAttempt) => Effect.Effect<DeliveryOutputApplied, DeliveryOutputFailed, R>
-}
+    readonly namespace: string;
+    readonly providerName: string;
+    readonly process: (attempt: ProviderOutputAttempt) => Effect.Effect<DeliveryOutputApplied, DeliveryOutputFailed, R>;
+};
 
 /** Hand one output attempt to the processor of the provider that owns the delivery. */
 export const processProviderOutput = <R = never>(processors: ReadonlyArray<ProviderOutputProcessor<R>>) =>
-	Effect.fn('delivery.process_provider_output')(function* (input: {
-		readonly namespace: string
-		readonly provider: string
-		readonly attempt: ProviderOutputAttempt
-	}) {
-		const processor = processors.find(
-			(candidate) => candidate.namespace === input.namespace && candidate.providerName === input.provider,
-		)
-		if (Predicate.isUndefined(processor)) {
-			return yield* new ProviderOutputProcessorNotFound({ namespace: input.namespace, provider: input.provider })
-		}
-		return yield* processor.process(input.attempt)
-	})
+    Effect.fn('delivery.process_provider_output')(function* (input: {
+        readonly namespace: string;
+        readonly provider: string;
+        readonly attempt: ProviderOutputAttempt;
+    }) {
+        const processor = processors.find(
+            (candidate) => candidate.namespace === input.namespace && candidate.providerName === input.provider,
+        );
+
+        if (Predicate.isUndefined(processor)) {
+            return yield* new ProviderOutputProcessorNotFound({
+                namespace: input.namespace,
+                provider: input.provider,
+            });
+        }
+
+        return yield* processor.process(input.attempt);
+    });

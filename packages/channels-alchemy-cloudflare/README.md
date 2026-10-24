@@ -7,7 +7,11 @@ npm install @stegosaurus/channels-alchemy-cloudflare @stegosaurus/channels-deliv
 ```
 
 ```ts
-export const bot = ChannelsCloudflare.make({ namespace: 'my-app', providers: [slack], eventProcessing })
+export const bot = ChannelsCloudflare.make({
+    namespace: 'my-app',
+    providers: [slack],
+    eventProcessing,
+});
 
 export class DeliveryMailbox extends Cloudflare.DurableObject<DeliveryMailbox, MailboxMethods>()('DeliveryMailbox') {}
 ```

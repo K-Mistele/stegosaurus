@@ -5,17 +5,17 @@
  *
  * Every contract test builds its store afresh, and building it empties the database.
  */
-import { describe } from '@effect/vitest'
+import { describe } from '@effect/vitest';
 
-import { mailboxBackendContract } from '../../channels-delivery/test/backend-contract'
-import { deliveryHandoffContract } from '../../channels-delivery/test/delivery-handoff-contract'
-import { deliveryOutputScenarios } from '../../channels-delivery/test/delivery-output-scenarios'
-import { sequentialCallbackContract } from '../../channels-sql/test-backends/sequential-callback-contract'
-import { emptyStore } from './redis'
+import { mailboxBackendContract } from '../../channels-delivery/test/backend-contract';
+import { deliveryHandoffContract } from '../../channels-delivery/test/delivery-handoff-contract';
+import { deliveryOutputScenarios } from '../../channels-delivery/test/delivery-output-scenarios';
+import { sequentialCallbackContract } from '../../channels-sql/test-backends/sequential-callback-contract';
+import { emptyStore } from './redis';
 
 describe('redis store contracts', () => {
-	mailboxBackendContract('redis', () => emptyStore)
-	deliveryHandoffContract('redis', () => emptyStore)
-	deliveryOutputScenarios('redis', () => emptyStore)
-	sequentialCallbackContract('redis', () => emptyStore)
-})
+    mailboxBackendContract('redis', () => emptyStore);
+    deliveryHandoffContract('redis', () => emptyStore);
+    deliveryOutputScenarios('redis', () => emptyStore);
+    sequentialCallbackContract('redis', () => emptyStore);
+});

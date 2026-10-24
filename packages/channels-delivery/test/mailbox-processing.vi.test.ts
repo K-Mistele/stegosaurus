@@ -1,444 +1,464 @@
-import * as NodeCrypto from '@effect/platform-node/NodeCrypto'
-import { describe, it } from '@effect/vitest'
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Queue, Ref } from 'effect'
-import { TestClock } from 'effect/testing'
+import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
+import { describe, it } from '@effect/vitest';
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Queue, Ref } from 'effect';
+import { TestClock } from 'effect/testing';
 
 import {
-	BurstDeliveryMode,
-	DebounceDeliveryMode,
-	DeliveryAdmission,
-	MailboxDelivery,
-	MailboxProcessing,
-	MailboxProcessingBackend,
-	MailboxProcessingClaimLost,
-	ProviderEventExecutionFailed,
-	ProviderEventHandled,
-	QueueDeliveryMode,
-	SerialDeliveryMode,
-	type DeliveryAdmissionBatch,
-	type DeliveryMode,
-	type MailboxProcessingOptions,
-	type ProviderEventProcessor,
-	type ProviderEventProcessorError,
-	type ProviderEventResult,
-} from '../src'
-import { MailboxBackendMemory } from '../src/MailboxBackendMemory'
+    BurstDeliveryMode,
+    DebounceDeliveryMode,
+    DeliveryAdmission,
+    MailboxDelivery,
+    MailboxProcessing,
+    MailboxProcessingBackend,
+    MailboxProcessingClaimLost,
+    ProviderEventExecutionFailed,
+    ProviderEventHandled,
+    QueueDeliveryMode,
+    SerialDeliveryMode,
+    type DeliveryAdmissionBatch,
+    type DeliveryMode,
+    type MailboxProcessingOptions,
+    type ProviderEventProcessor,
+    type ProviderEventProcessorError,
+    type ProviderEventResult,
+} from '../src';
+import { MailboxBackendMemory } from '../src/MailboxBackendMemory';
 
 const admission = (eventId: string, resourceId = 'thread-1') =>
-	DeliveryAdmission.make({
-		namespace: 'test',
-		provider: 'example',
-		installationId: 'installation',
-		resourceId,
-		eventId,
-		payload: { eventId },
-	})
+    DeliveryAdmission.make({
+        namespace: 'test',
+        provider: 'example',
+        installationId: 'installation',
+        resourceId,
+        eventId,
+        payload: { eventId },
+    });
 
 const deliver = (eventId: string, resourceId?: string) =>
-	Effect.gen(function* () {
-		yield* (yield* MailboxDelivery).deliver(admission(eventId, resourceId))
-	})
+    Effect.gen(function* () {
+        yield* (yield* MailboxDelivery).deliver(admission(eventId, resourceId));
+    });
 
 const processReady = Effect.gen(function* () {
-	return yield* (yield* MailboxProcessing).processReady
-})
+    return yield* (yield* MailboxProcessing).processReady;
+});
 
-const eventIds = (batch: DeliveryAdmissionBatch) => batch.map(({ eventId }) => eventId)
+const eventIds = (batch: DeliveryAdmissionBatch) => batch.map(({ eventId }) => eventId);
 
-const handled = Effect.succeed(ProviderEventHandled.make({}))
+const handled = Effect.succeed(ProviderEventHandled.make({}));
 
 const temporaryFailure = new ProviderEventExecutionFailed({
-	provider: 'example',
-	safeCode: 'temporary',
-	retryable: true,
-})
+    provider: 'example',
+    safeCode: 'temporary',
+    retryable: true,
+});
 
 /** A processor that records every batch it is handed, then runs the test's callback. */
 const recordingProcessor = (
-	dispatched: Queue.Queue<ReadonlyArray<string>>,
-	callback: (batch: DeliveryAdmissionBatch) => Effect.Effect<ProviderEventResult, ProviderEventProcessorError> = () =>
-		handled,
+    dispatched: Queue.Queue<ReadonlyArray<string>>,
+    callback: (batch: DeliveryAdmissionBatch) => Effect.Effect<ProviderEventResult, ProviderEventProcessorError> = () =>
+        handled,
 ): ProviderEventProcessor => ({
-	namespace: 'test',
-	providerName: 'example',
-	process: (batch) => Queue.offer(dispatched, eventIds(batch)).pipe(Effect.andThen(callback(batch))),
-})
+    namespace: 'test',
+    providerName: 'example',
+    process: (batch) => Queue.offer(dispatched, eventIds(batch)).pipe(Effect.andThen(callback(batch))),
+});
 
 const processingOptions = (overrides: Partial<MailboxProcessingOptions> = {}): MailboxProcessingOptions => ({
-	concurrency: 2,
-	leaseMs: 30_000,
-	deliveryModeFor: () => QueueDeliveryMode.make({}),
-	polling: 'disabled',
-	...overrides,
-})
+    concurrency: 2,
+    leaseMs: 30_000,
+    deliveryModeFor: () => QueueDeliveryMode.make({}),
+    polling: 'disabled',
+    ...overrides,
+});
 
 /** The real processing layer over the in-memory store, with the store's services left visible to the test. */
 const processingOver = (processor: ProviderEventProcessor, options: MailboxProcessingOptions) =>
-	MailboxProcessing.layer(options, { events: [processor], outputs: [] }).pipe(
-		Layer.provide(NodeCrypto.layer),
-		Layer.provideMerge(MailboxBackendMemory),
-	)
+    MailboxProcessing.layer(options, { events: [processor], outputs: [] }).pipe(
+        Layer.provide(NodeCrypto.layer),
+        Layer.provideMerge(MailboxBackendMemory),
+    );
 
 /** An in-memory store built ahead of the processing layer, for tests that wrap or call the store themselves. */
 const buildMemoryStore = Effect.gen(function* () {
-	const store = yield* Layer.build(MailboxBackendMemory)
-	return {
-		store,
-		delivery: Context.get(store, MailboxDelivery),
-		backend: Context.get(store, MailboxProcessingBackend),
-	}
-})
+    const store = yield* Layer.build(MailboxBackendMemory);
 
-const withMode = (mode: DeliveryMode) => processingOptions({ deliveryModeFor: () => mode })
+    return {
+        store,
+        delivery: Context.get(store, MailboxDelivery),
+        backend: Context.get(store, MailboxProcessingBackend),
+    };
+});
+
+const withMode = (mode: DeliveryMode) => processingOptions({ deliveryModeFor: () => mode });
 
 describe('mailbox processing', () => {
-	it.effect('isolates a failed mailbox while processing distinct mailboxes concurrently', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			const processor = recordingProcessor(dispatched, (batch) =>
-				batch[0].resourceId === 'broken' ? Effect.die('simulated processor defect') : handled,
-			)
-			yield* Effect.gen(function* () {
-				yield* deliver('a', 'broken')
-				yield* deliver('b', 'healthy')
-				expect(yield* processReady).toEqual({ claimed: 2, deferred: 0, output: 0 })
-				expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toEqual([])
-				yield* TestClock.adjust(30_000)
-				expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toHaveLength(1)
-			}).pipe(Effect.provide(processingOver(processor, processingOptions())))
-		}),
-	)
+    it.effect('isolates a failed mailbox while processing distinct mailboxes concurrently', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
 
-	it.effect('preserves interruption while isolating ordinary claim failures', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			const processor = recordingProcessor(dispatched, () => Effect.interrupt)
-			const result = yield* deliver('a').pipe(
-				Effect.andThen(processReady),
-				Effect.provide(processingOver(processor, processingOptions())),
-				Effect.exit,
-			)
-			expect(Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)).toBe(true)
-		}),
-	)
+            const processor = recordingProcessor(dispatched, (batch) =>
+                batch[0].resourceId === 'broken' ? Effect.die('simulated processor defect') : handled,
+            );
 
-	it.effect('retries the frozen batch ahead of later events, then gives up at the last attempt', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			const failuresLeft = yield* Ref.make(2)
-			const processor = recordingProcessor(dispatched, (batch) =>
-				batch[0].eventId === 'first'
-					? Ref.getAndUpdate(failuresLeft, (left) => left - 1).pipe(
-							Effect.flatMap((left) => (left > 0 ? Effect.fail(temporaryFailure) : handled)),
-						)
-					: handled,
-			)
-			yield* Effect.gen(function* () {
-				yield* deliver('first')
-				yield* processReady
-				yield* deliver('later')
-				expect((yield* processReady).claimed).toBe(0)
-				yield* TestClock.adjust(1_000)
-				yield* processReady
-				yield* processReady
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['first'], ['first'], ['later']])
-			}).pipe(Effect.provide(processingOver(processor, processingOptions({ maxAttempts: 2 }))))
-		}),
-	)
+            yield* Effect.gen(function* () {
+                yield* deliver('a', 'broken');
+                yield* deliver('b', 'healthy');
+                expect(yield* processReady).toEqual({ claimed: 2, deferred: 0, output: 0 });
+                expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toEqual([]);
+                yield* TestClock.adjust(30_000);
+                expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toHaveLength(1);
+            }).pipe(Effect.provide(processingOver(processor, processingOptions())));
+        }),
+    );
 
-	it.effect('recovers a claim whose worker died, with the same frozen batch', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			const firstRun = yield* Ref.make(true)
-			const processor = recordingProcessor(dispatched, () =>
-				Ref.getAndSet(firstRun, false).pipe(
-					Effect.flatMap((first) => (first ? Effect.die('simulated abandoned claim') : handled)),
-				),
-			)
-			yield* Effect.gen(function* () {
-				yield* deliver('stale')
-				yield* processReady
-				expect((yield* processReady).claimed).toBe(0)
-				yield* TestClock.adjust(30_000)
-				expect((yield* processReady).claimed).toBe(1)
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['stale'], ['stale']])
-				expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toEqual([])
-			}).pipe(Effect.provide(processingOver(processor, processingOptions())))
-		}),
-	)
-})
+    it.effect('preserves interruption while isolating ordinary claim failures', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            const processor = recordingProcessor(dispatched, () => Effect.interrupt);
+
+            const result = yield* deliver('a').pipe(
+                Effect.andThen(processReady),
+                Effect.provide(processingOver(processor, processingOptions())),
+                Effect.exit,
+            );
+
+            expect(Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)).toBe(true);
+        }),
+    );
+
+    it.effect('retries the frozen batch ahead of later events, then gives up at the last attempt', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            const failuresLeft = yield* Ref.make(2);
+
+            const processor = recordingProcessor(dispatched, (batch) =>
+                batch[0].eventId === 'first'
+                    ? Ref.getAndUpdate(failuresLeft, (left) => left - 1).pipe(
+                          Effect.flatMap((left) => (left > 0 ? Effect.fail(temporaryFailure) : handled)),
+                      )
+                    : handled,
+            );
+
+            yield* Effect.gen(function* () {
+                yield* deliver('first');
+                yield* processReady;
+                yield* deliver('later');
+                expect((yield* processReady).claimed).toBe(0);
+                yield* TestClock.adjust(1_000);
+                yield* processReady;
+                yield* processReady;
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['first'], ['first'], ['later']]);
+            }).pipe(Effect.provide(processingOver(processor, processingOptions({ maxAttempts: 2 }))));
+        }),
+    );
+
+    it.effect('recovers a claim whose worker died, with the same frozen batch', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            const firstRun = yield* Ref.make(true);
+
+            const processor = recordingProcessor(dispatched, () =>
+                Ref.getAndSet(firstRun, false).pipe(
+                    Effect.flatMap((first) => (first ? Effect.die('simulated abandoned claim') : handled)),
+                ),
+            );
+
+            yield* Effect.gen(function* () {
+                yield* deliver('stale');
+                yield* processReady;
+                expect((yield* processReady).claimed).toBe(0);
+                yield* TestClock.adjust(30_000);
+                expect((yield* processReady).claimed).toBe(1);
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['stale'], ['stale']]);
+                expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toEqual([]);
+            }).pipe(Effect.provide(processingOver(processor, processingOptions())));
+        }),
+    );
+});
 
 describe('attempt limit', () => {
-	it.effect('fails a batch that keeps killing its worker, without running it again', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			const processor = recordingProcessor(dispatched, (batch) =>
-				batch[0].eventId === 'poison' ? Effect.die('simulated worker crash') : handled,
-			)
-			yield* Effect.gen(function* () {
-				yield* deliver('poison')
-				yield* processReady
-				yield* TestClock.adjust(30_000)
-				yield* processReady
-				yield* deliver('next')
-				yield* TestClock.adjust(30_000)
-				expect((yield* processReady).claimed).toBe(1)
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['poison'], ['poison']])
-				expect((yield* processReady).claimed).toBe(1)
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['next']])
-			}).pipe(Effect.provide(processingOver(processor, processingOptions({ maxAttempts: 2 }))))
-		}),
-	)
-})
+    it.effect('fails a batch that keeps killing its worker, without running it again', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+
+            const processor = recordingProcessor(dispatched, (batch) =>
+                batch[0].eventId === 'poison' ? Effect.die('simulated worker crash') : handled,
+            );
+
+            yield* Effect.gen(function* () {
+                yield* deliver('poison');
+                yield* processReady;
+                yield* TestClock.adjust(30_000);
+                yield* processReady;
+                yield* deliver('next');
+                yield* TestClock.adjust(30_000);
+                expect((yield* processReady).claimed).toBe(1);
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['poison'], ['poison']]);
+                expect((yield* processReady).claimed).toBe(1);
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['next']]);
+            }).pipe(Effect.provide(processingOver(processor, processingOptions({ maxAttempts: 2 }))));
+        }),
+    );
+});
 
 describe('delivery modes', () => {
-	it.effect('queue hands everything that is waiting to one callback', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			yield* Effect.gen(function* () {
-				yield* deliver('a')
-				yield* deliver('b')
-				yield* processReady
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b']])
-			}).pipe(
-				Effect.provide(processingOver(recordingProcessor(dispatched), withMode(QueueDeliveryMode.make({})))),
-			)
-		}),
-	)
+    it.effect('queue hands everything that is waiting to one callback', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            yield* Effect.gen(function* () {
+                yield* deliver('a');
+                yield* deliver('b');
+                yield* processReady;
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b']]);
+            }).pipe(
+                Effect.provide(processingOver(recordingProcessor(dispatched), withMode(QueueDeliveryMode.make({})))),
+            );
+        }),
+    );
 
-	it.effect('serial hands over one event per callback, oldest first', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			yield* Effect.gen(function* () {
-				yield* deliver('a')
-				yield* deliver('b')
-				yield* processReady
-				yield* processReady
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['a'], ['b']])
-			}).pipe(
-				Effect.provide(processingOver(recordingProcessor(dispatched), withMode(SerialDeliveryMode.make({})))),
-			)
-		}),
-	)
+    it.effect('serial hands over one event per callback, oldest first', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            yield* Effect.gen(function* () {
+                yield* deliver('a');
+                yield* deliver('b');
+                yield* processReady;
+                yield* processReady;
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['a'], ['b']]);
+            }).pipe(
+                Effect.provide(processingOver(recordingProcessor(dispatched), withMode(SerialDeliveryMode.make({})))),
+            );
+        }),
+    );
 
-	it.effect('debounce waits for quiet, and every new event restarts the wait', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			yield* Effect.gen(function* () {
-				yield* deliver('a')
-				expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 })
-				yield* TestClock.adjust(1_500)
-				yield* deliver('b')
-				expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 })
-				yield* TestClock.adjust(1_999)
-				expect(yield* processReady).toEqual({ claimed: 0, deferred: 0, output: 0 })
-				yield* TestClock.adjust(1)
-				expect(yield* processReady).toEqual({ claimed: 1, deferred: 0, output: 0 })
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b']])
-			}).pipe(
-				Effect.provide(
-					processingOver(
-						recordingProcessor(dispatched),
-						withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000 })),
-					),
-				),
-			)
-		}),
-	)
+    it.effect('debounce waits for quiet, and every new event restarts the wait', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            yield* Effect.gen(function* () {
+                yield* deliver('a');
+                expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 });
+                yield* TestClock.adjust(1_500);
+                yield* deliver('b');
+                expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 });
+                yield* TestClock.adjust(1_999);
+                expect(yield* processReady).toEqual({ claimed: 0, deferred: 0, output: 0 });
+                yield* TestClock.adjust(1);
+                expect(yield* processReady).toEqual({ claimed: 1, deferred: 0, output: 0 });
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b']]);
+            }).pipe(
+                Effect.provide(
+                    processingOver(
+                        recordingProcessor(dispatched),
+                        withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000 })),
+                    ),
+                ),
+            );
+        }),
+    );
 
-	it.effect('debounce stops waiting once the oldest event has waited the maximum', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			yield* Effect.gen(function* () {
-				yield* deliver('a')
-				yield* processReady
-				yield* TestClock.adjust(1_500)
-				yield* deliver('b')
-				yield* processReady
-				yield* TestClock.adjust(1_500)
-				yield* deliver('c')
-				expect(yield* processReady).toEqual({ claimed: 1, deferred: 0, output: 0 })
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b', 'c']])
-			}).pipe(
-				Effect.provide(
-					processingOver(
-						recordingProcessor(dispatched),
-						withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000, maxWaitMs: 3_000 })),
-					),
-				),
-			)
-		}),
-	)
+    it.effect('debounce stops waiting once the oldest event has waited the maximum', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            yield* Effect.gen(function* () {
+                yield* deliver('a');
+                yield* processReady;
+                yield* TestClock.adjust(1_500);
+                yield* deliver('b');
+                yield* processReady;
+                yield* TestClock.adjust(1_500);
+                yield* deliver('c');
+                expect(yield* processReady).toEqual({ claimed: 1, deferred: 0, output: 0 });
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b', 'c']]);
+            }).pipe(
+                Effect.provide(
+                    processingOver(
+                        recordingProcessor(dispatched),
+                        withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000, maxWaitMs: 3_000 })),
+                    ),
+                ),
+            );
+        }),
+    );
 
-	it.effect('burst collects for a fixed window after the first event', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			yield* Effect.gen(function* () {
-				yield* deliver('a')
-				expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 })
-				yield* TestClock.adjust(1_500)
-				yield* deliver('b')
-				expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 })
-				yield* TestClock.adjust(500)
-				expect(yield* processReady).toEqual({ claimed: 1, deferred: 0, output: 0 })
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b']])
-			}).pipe(
-				Effect.provide(
-					processingOver(
-						recordingProcessor(dispatched),
-						withMode(BurstDeliveryMode.make({ windowMs: 2_000 })),
-					),
-				),
-			)
-		}),
-	)
+    it.effect('burst collects for a fixed window after the first event', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            yield* Effect.gen(function* () {
+                yield* deliver('a');
+                expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 });
+                yield* TestClock.adjust(1_500);
+                yield* deliver('b');
+                expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 });
+                yield* TestClock.adjust(500);
+                expect(yield* processReady).toEqual({ claimed: 1, deferred: 0, output: 0 });
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b']]);
+            }).pipe(
+                Effect.provide(
+                    processingOver(
+                        recordingProcessor(dispatched),
+                        withMode(BurstDeliveryMode.make({ windowMs: 2_000 })),
+                    ),
+                ),
+            );
+        }),
+    );
 
-	it.effect('debounces events that arrived during a run, after the run settles', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			const { store, delivery } = yield* buildMemoryStore
-			const processor = recordingProcessor(dispatched, (batch) =>
-				batch[0].eventId === 'a'
-					? delivery.deliver(admission('during-run')).pipe(Effect.orDie, Effect.andThen(handled))
-					: handled,
-			)
-			yield* Effect.gen(function* () {
-				yield* deliver('a')
-				yield* TestClock.adjust(2_000)
-				expect(yield* processReady).toEqual({ claimed: 1, deferred: 0, output: 0 })
-				expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 })
-				yield* TestClock.adjust(2_000)
-				yield* processReady
-				expect(yield* Queue.takeAll(dispatched)).toEqual([['a'], ['during-run']])
-			}).pipe(
-				Effect.provide(
-					MailboxProcessing.layer(withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000 })), {
-						events: [processor],
-						outputs: [],
-					}).pipe(Layer.provide(NodeCrypto.layer), Layer.provideMerge(Layer.succeedContext(store))),
-				),
-			)
-		}),
-	)
-})
+    it.effect('debounces events that arrived during a run, after the run settles', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            const { store, delivery } = yield* buildMemoryStore;
+
+            const processor = recordingProcessor(dispatched, (batch) =>
+                batch[0].eventId === 'a'
+                    ? delivery.deliver(admission('during-run')).pipe(Effect.orDie, Effect.andThen(handled))
+                    : handled,
+            );
+
+            yield* Effect.gen(function* () {
+                yield* deliver('a');
+                yield* TestClock.adjust(2_000);
+                expect(yield* processReady).toEqual({ claimed: 1, deferred: 0, output: 0 });
+                expect(yield* processReady).toEqual({ claimed: 0, deferred: 1, output: 0 });
+                yield* TestClock.adjust(2_000);
+                yield* processReady;
+                expect(yield* Queue.takeAll(dispatched)).toEqual([['a'], ['during-run']]);
+            }).pipe(
+                Effect.provide(
+                    MailboxProcessing.layer(withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000 })), {
+                        events: [processor],
+                        outputs: [],
+                    }).pipe(Layer.provide(NodeCrypto.layer), Layer.provideMerge(Layer.succeedContext(store))),
+                ),
+            );
+        }),
+    );
+});
 
 describe('claim lease', () => {
-	it.effect('keeps renewing the lease while the callback runs, and stops when it finishes', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			const finishCallback = yield* Deferred.make<void>()
-			const processor = recordingProcessor(dispatched, () =>
-				Deferred.await(finishCallback).pipe(Effect.andThen(handled)),
-			)
-			yield* Effect.gen(function* () {
-				const backend = yield* MailboxProcessingBackend
-				yield* deliver('slow')
-				const pass = yield* processReady.pipe(Effect.forkChild)
-				yield* Queue.take(dispatched)
-				yield* TestClock.adjust(9_000)
-				expect(yield* backend.findReadyMailboxes).toEqual([])
-				yield* Deferred.succeed(finishCallback, undefined)
-				expect(yield* Fiber.join(pass)).toEqual({ claimed: 1, deferred: 0, output: 0 })
-				yield* TestClock.adjust(60_000)
-				expect(yield* backend.findReadyMailboxes).toEqual([])
-			}).pipe(Effect.provide(processingOver(processor, processingOptions({ leaseMs: 3_000 }))))
-		}),
-	)
+    it.effect('keeps renewing the lease while the callback runs, and stops when it finishes', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            const finishCallback = yield* Deferred.make<void>();
 
-	it.effect('interrupts the callback and records nothing once the claim belongs to someone else', ({ expect }) =>
-		Effect.gen(function* () {
-			const callbackStarted = yield* Deferred.make<void>()
-			const callbackInterrupted = yield* Deferred.make<void>()
-			const recorded = yield* Ref.make(0)
-			const { store, backend: realBackend } = yield* buildMemoryStore
-			const backendThatLosesClaims = Layer.succeed(
-				MailboxProcessingBackend,
-				MailboxProcessingBackend.of({
-					...realBackend,
-					renewClaim: ({ mailboxKey, claimId }) =>
-						Effect.fail(new MailboxProcessingClaimLost({ mailboxKey, claimId })),
-					recordProcessingAttemptResult: (input) =>
-						Ref.update(recorded, (count) => count + 1).pipe(
-							Effect.andThen(realBackend.recordProcessingAttemptResult(input)),
-						),
-				}),
-			)
-			const processor: ProviderEventProcessor = {
-				namespace: 'test',
-				providerName: 'example',
-				process: () =>
-					Deferred.succeed(callbackStarted, undefined).pipe(
-						Effect.andThen(Effect.never),
-						Effect.onInterrupt(() => Deferred.succeed(callbackInterrupted, undefined)),
-					),
-			}
-			yield* Effect.gen(function* () {
-				yield* deliver('slow')
-				const pass = yield* processReady.pipe(Effect.forkChild)
-				yield* Deferred.await(callbackStarted)
-				yield* TestClock.adjust(1_000)
-				yield* Deferred.await(callbackInterrupted)
-				expect(yield* Fiber.join(pass)).toEqual({ claimed: 1, deferred: 0, output: 0 })
-				expect(yield* Ref.get(recorded)).toBe(0)
-			}).pipe(
-				Effect.provide(
-					MailboxProcessing.layer(processingOptions({ leaseMs: 3_000 }), {
-						events: [processor],
-						outputs: [],
-					}).pipe(Layer.provide(Layer.mergeAll(backendThatLosesClaims, NodeCrypto.layer))),
-				),
-				Effect.provide(store),
-			)
-		}),
-	)
-})
+            const processor = recordingProcessor(dispatched, () =>
+                Deferred.await(finishCallback).pipe(Effect.andThen(handled)),
+            );
+
+            yield* Effect.gen(function* () {
+                const backend = yield* MailboxProcessingBackend;
+                yield* deliver('slow');
+                const pass = yield* processReady.pipe(Effect.forkChild);
+                yield* Queue.take(dispatched);
+                yield* TestClock.adjust(9_000);
+                expect(yield* backend.findReadyMailboxes).toEqual([]);
+                yield* Deferred.succeed(finishCallback, undefined);
+                expect(yield* Fiber.join(pass)).toEqual({ claimed: 1, deferred: 0, output: 0 });
+                yield* TestClock.adjust(60_000);
+                expect(yield* backend.findReadyMailboxes).toEqual([]);
+            }).pipe(Effect.provide(processingOver(processor, processingOptions({ leaseMs: 3_000 }))));
+        }),
+    );
+
+    it.effect('interrupts the callback and records nothing once the claim belongs to someone else', ({ expect }) =>
+        Effect.gen(function* () {
+            const callbackStarted = yield* Deferred.make<void>();
+            const callbackInterrupted = yield* Deferred.make<void>();
+            const recorded = yield* Ref.make(0);
+            const { store, backend: realBackend } = yield* buildMemoryStore;
+
+            const backendThatLosesClaims = Layer.succeed(
+                MailboxProcessingBackend,
+                MailboxProcessingBackend.of({
+                    ...realBackend,
+                    renewClaim: ({ mailboxKey, claimId }) =>
+                        Effect.fail(new MailboxProcessingClaimLost({ mailboxKey, claimId })),
+                    recordProcessingAttemptResult: (input) =>
+                        Ref.update(recorded, (count) => count + 1).pipe(
+                            Effect.andThen(realBackend.recordProcessingAttemptResult(input)),
+                        ),
+                }),
+            );
+
+            const processor: ProviderEventProcessor = {
+                namespace: 'test',
+                providerName: 'example',
+                process: () =>
+                    Deferred.succeed(callbackStarted, undefined).pipe(
+                        Effect.andThen(Effect.never),
+                        Effect.onInterrupt(() => Deferred.succeed(callbackInterrupted, undefined)),
+                    ),
+            };
+
+            yield* Effect.gen(function* () {
+                yield* deliver('slow');
+                const pass = yield* processReady.pipe(Effect.forkChild);
+                yield* Deferred.await(callbackStarted);
+                yield* TestClock.adjust(1_000);
+                yield* Deferred.await(callbackInterrupted);
+                expect(yield* Fiber.join(pass)).toEqual({ claimed: 1, deferred: 0, output: 0 });
+                expect(yield* Ref.get(recorded)).toBe(0);
+            }).pipe(
+                Effect.provide(
+                    MailboxProcessing.layer(processingOptions({ leaseMs: 3_000 }), {
+                        events: [processor],
+                        outputs: [],
+                    }).pipe(Layer.provide(Layer.mergeAll(backendThatLosesClaims, NodeCrypto.layer))),
+                ),
+                Effect.provide(store),
+            );
+        }),
+    );
+});
 
 describe('polling', () => {
-	it.effect('processes on its own, goes again at once after finding work, and survives a failed pass', ({ expect }) =>
-		Effect.gen(function* () {
-			const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>()
-			const failNextLook = yield* Ref.make(false)
-			const looks = yield* Queue.unbounded<void>()
-			const { store, backend: realBackend } = yield* buildMemoryStore
-			const observedBackend = Layer.succeed(
-				MailboxProcessingBackend,
-				MailboxProcessingBackend.of({
-					...realBackend,
-					findReadyMailboxes: Queue.offer(looks, undefined).pipe(
-						Effect.andThen(Ref.getAndSet(failNextLook, false)),
-						Effect.flatMap((fail) =>
-							fail ? Effect.die('simulated look defect') : realBackend.findReadyMailboxes,
-						),
-					),
-				}),
-			)
-			yield* Effect.gen(function* () {
-				yield* Queue.take(looks)
-				yield* deliver('a')
-				yield* deliver('b')
-				yield* TestClock.adjust(1_000)
-				expect(yield* Queue.take(dispatched)).toEqual(['a'])
-				expect(yield* Queue.take(dispatched)).toEqual(['b'])
-				yield* Queue.take(looks).pipe(Effect.repeat({ times: 2 }))
+    it.effect('processes on its own, goes again at once after finding work, and survives a failed pass', ({ expect }) =>
+        Effect.gen(function* () {
+            const dispatched = yield* Queue.unbounded<ReadonlyArray<string>>();
+            const failNextLook = yield* Ref.make(false);
+            const looks = yield* Queue.unbounded<void>();
+            const { store, backend: realBackend } = yield* buildMemoryStore;
 
-				yield* Ref.set(failNextLook, true)
-				yield* deliver('c')
-				yield* TestClock.adjust(1_000)
-				expect(yield* Queue.size(dispatched)).toBe(0)
-				yield* TestClock.adjust(1_000)
-				expect(yield* Queue.take(dispatched)).toEqual(['c'])
-			}).pipe(
-				Effect.provide(
-					MailboxProcessing.layer(
-						processingOptions({
-							deliveryModeFor: () => SerialDeliveryMode.make({}),
-							polling: { intervalMs: 1_000 },
-						}),
-						{ events: [recordingProcessor(dispatched)], outputs: [] },
-					).pipe(Layer.provide(Layer.mergeAll(observedBackend, NodeCrypto.layer))),
-				),
-				Effect.provide(store),
-			)
-		}),
-	)
-})
+            const observedBackend = Layer.succeed(
+                MailboxProcessingBackend,
+                MailboxProcessingBackend.of({
+                    ...realBackend,
+                    findReadyMailboxes: Queue.offer(looks, undefined).pipe(
+                        Effect.andThen(Ref.getAndSet(failNextLook, false)),
+                        Effect.flatMap((fail) =>
+                            fail ? Effect.die('simulated look defect') : realBackend.findReadyMailboxes,
+                        ),
+                    ),
+                }),
+            );
+
+            yield* Effect.gen(function* () {
+                yield* Queue.take(looks);
+                yield* deliver('a');
+                yield* deliver('b');
+                yield* TestClock.adjust(1_000);
+                expect(yield* Queue.take(dispatched)).toEqual(['a']);
+                expect(yield* Queue.take(dispatched)).toEqual(['b']);
+                yield* Queue.take(looks).pipe(Effect.repeat({ times: 2 }));
+
+                yield* Ref.set(failNextLook, true);
+                yield* deliver('c');
+                yield* TestClock.adjust(1_000);
+                expect(yield* Queue.size(dispatched)).toBe(0);
+                yield* TestClock.adjust(1_000);
+                expect(yield* Queue.take(dispatched)).toEqual(['c']);
+            }).pipe(
+                Effect.provide(
+                    MailboxProcessing.layer(
+                        processingOptions({
+                            deliveryModeFor: () => SerialDeliveryMode.make({}),
+                            polling: { intervalMs: 1_000 },
+                        }),
+                        { events: [recordingProcessor(dispatched)], outputs: [] },
+                    ).pipe(Layer.provide(Layer.mergeAll(observedBackend, NodeCrypto.layer))),
+                ),
+                Effect.provide(store),
+            );
+        }),
+    );
+});

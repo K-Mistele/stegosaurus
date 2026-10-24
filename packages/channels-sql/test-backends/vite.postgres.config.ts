@@ -1,10 +1,10 @@
-import { defineConfig } from 'vite-plus'
+import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
-	envDir: false,
-	test: {
-		include: ['packages/channels-sql/test-backends/*.postgres.test.ts'],
-		fileParallelism: false,
-		passWithNoTests: false,
-	},
-})
+    envDir: false,
+    test: {
+        include: ['packages/channels-sql/test-backends/*.postgres.test.ts'],
+        fileParallelism: false,
+        passWithNoTests: false,
+    },
+});

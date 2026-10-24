@@ -11,60 +11,65 @@
  * past `readyAt` when that output settled, and the mailbox never woke again. So the handler keeps
  * passing while a pass finds work, and when it ends it moves any alarm at or before now forward.
  */
-import { MailboxProcessing } from '@stegosaurus/channels-delivery'
-import { Cause, Clock, Effect, Predicate, Schema } from 'effect'
+import { MailboxProcessing } from '@stegosaurus/channels-delivery';
+import { Cause, Clock, Effect, Predicate, Schema } from 'effect';
 
-import { DurableMailboxState, mailboxStateKey } from './MailboxState'
-import { MailboxStorage } from './MailboxStorage'
+import { DurableMailboxState, mailboxStateKey } from './MailboxState';
+import { MailboxStorage } from './MailboxStorage';
 
 export type MailboxAlarmHandlerOptions = {
-	/** How soon to look again at a mailbox that was due but could not be worked on. */
-	readonly rearmAfterMs: number
-}
+    /** How soon to look again at a mailbox that was due but could not be worked on. */
+    readonly rearmAfterMs: number;
+};
 
 /** The most processing passes one alarm runs. Work still due after them waits for the next alarm. */
-export const MAX_PASSES_PER_ALARM = 20
+export const MAX_PASSES_PER_ALARM = 20;
 
 /**
  * Build the alarm handler over the current Durable Object's storage. Each alarm runs the
  * `MailboxProcessing` it is given while it runs.
  */
 export const makeMailboxAlarmHandler = (options: MailboxAlarmHandlerOptions) =>
-	Effect.gen(function* () {
-		const storage = yield* MailboxStorage
+    Effect.gen(function* () {
+        const storage = yield* MailboxStorage;
 
-		/**
-		 * Leave the mailbox with an alarm it will keep: when work is due and the alarm is missing, or set
-		 * for a time already past, set it to `readyAt`, but no sooner than `rearmAfterMs` from now.
-		 */
-		const rearmWhenDueWithoutLiveAlarm = Effect.gen(function* () {
-			const stored = yield* storage.get(mailboxStateKey)
-			if (Predicate.isUndefined(stored)) return
-			const { readyAt } = (yield* Schema.decodeUnknownEffect(DurableMailboxState)(stored)).deliveries
-			if (Predicate.isNull(readyAt)) return
-			const alarm = yield* storage.getAlarm
-			const now = yield* Clock.currentTimeMillis
-			if (Predicate.isNotNull(alarm) && alarm > now) return
-			yield* storage.setAlarm(Math.max(readyAt, now + options.rearmAfterMs))
-			yield* Effect.logWarning('Mailbox was due with no live alarm; alarm put back').pipe(
-				Effect.annotateLogs({ ready_at: readyAt, alarm: alarm ?? 'none' }),
-			)
-		})
+        /**
+         * Leave the mailbox with an alarm it will keep: when work is due and the alarm is missing, or set
+         * for a time already past, set it to `readyAt`, but no sooner than `rearmAfterMs` from now.
+         */
+        const rearmWhenDueWithoutLiveAlarm = Effect.gen(function* () {
+            const stored = yield* storage.get(mailboxStateKey);
 
-		/** One pass. Reports whether it found work, so the handler knows to look again. */
-		const pass = Effect.flatMap(MailboxProcessing, (processing) => processing.processReady).pipe(
-			Effect.map(({ claimed, output }) => claimed > 0 || output > 0),
-			Effect.catchCauseIf(
-				(cause) => !Cause.hasInterruptsOnly(cause),
-				(cause) => Effect.logError('Mailbox alarm pass failed', cause).pipe(Effect.as(false)),
-			),
-		)
+            if (Predicate.isUndefined(stored)) return;
 
-		return Effect.fn('delivery.cloudflare.mailbox_alarm')(function* () {
-			/** Work one step can make due at once, such as the output after a settled one, runs in this alarm. */
-			for (let passes = 0; passes < MAX_PASSES_PER_ALARM; passes++) {
-				if (!(yield* pass)) break
-			}
-			yield* rearmWhenDueWithoutLiveAlarm
-		})
-	})
+            const { readyAt } = (yield* Schema.decodeUnknownEffect(DurableMailboxState)(stored)).deliveries;
+
+            if (Predicate.isNull(readyAt)) return;
+            const alarm = yield* storage.getAlarm;
+            const now = yield* Clock.currentTimeMillis;
+
+            if (Predicate.isNotNull(alarm) && alarm > now) return;
+            yield* storage.setAlarm(Math.max(readyAt, now + options.rearmAfterMs));
+            yield* Effect.logWarning('Mailbox was due with no live alarm; alarm put back').pipe(
+                Effect.annotateLogs({ ready_at: readyAt, alarm: alarm ?? 'none' }),
+            );
+        });
+
+        /** One pass. Reports whether it found work, so the handler knows to look again. */
+        const pass = Effect.flatMap(MailboxProcessing, (processing) => processing.processReady).pipe(
+            Effect.map(({ claimed, output }) => claimed > 0 || output > 0),
+            Effect.catchCauseIf(
+                (cause) => !Cause.hasInterruptsOnly(cause),
+                (cause) => Effect.logError('Mailbox alarm pass failed', cause).pipe(Effect.as(false)),
+            ),
+        );
+
+        return Effect.fn('delivery.cloudflare.mailbox_alarm')(function* () {
+            /** Work one step can make due at once, such as the output after a settled one, runs in this alarm. */
+            for (let passes = 0; passes < MAX_PASSES_PER_ALARM; passes++) {
+                if (!(yield* pass)) break;
+            }
+
+            yield* rearmWhenDueWithoutLiveAlarm;
+        });
+    });

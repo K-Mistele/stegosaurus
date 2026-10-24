@@ -94,34 +94,34 @@ Never commit the webhook secret or private key.
 ## Configure a provider
 
 ```ts
-import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery'
-import { GitHubBot, GitHubId } from '@stegosaurus/channels-github'
-import { Config, Effect } from 'effect'
+import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery';
+import { GitHubBot, GitHubId } from '@stegosaurus/channels-github';
+import { Config, Effect } from 'effect';
 
 const github = GitHubBot.make({
-	webhookSecret: Config.Redacted('GITHUB_WEBHOOK_SECRET'),
-	deliveryMode: DebounceDeliveryMode.make({
-		quietPeriodMs: 2_000,
-		maxWaitMs: 10_000,
-	}),
-	bot: Config.all({
-		mentionNames: Config.String('GITHUB_BOT_MENTION_NAME').pipe(Config.map((name) => [name])),
-		botUserId: Config.schema(GitHubId, 'GITHUB_BOT_USER_ID'),
-	}),
-	handlers: {
-		onIssueCreated: (event) =>
-			Effect.gen(function* () {
-				yield* event.issue.subscribe()
-			}),
-		onPrCreated: (event) =>
-			Effect.gen(function* () {
-				yield* event.pullRequest.subscribe()
-			}),
-		onMentioned: (event) => Effect.logInfo('GitHub bot mentioned', event),
-		onSubscribedIssueEvents: (event) => Effect.logInfo('Subscribed issue activity', event),
-		onSubscribedPrEvents: (event) => Effect.logInfo('Subscribed pull request activity', event),
-	},
-})
+    webhookSecret: Config.Redacted('GITHUB_WEBHOOK_SECRET'),
+    deliveryMode: DebounceDeliveryMode.make({
+        quietPeriodMs: 2_000,
+        maxWaitMs: 10_000,
+    }),
+    bot: Config.all({
+        mentionNames: Config.String('GITHUB_BOT_MENTION_NAME').pipe(Config.map((name) => [name])),
+        botUserId: Config.schema(GitHubId, 'GITHUB_BOT_USER_ID'),
+    }),
+    handlers: {
+        onIssueCreated: (event) =>
+            Effect.gen(function* () {
+                yield* event.issue.subscribe();
+            }),
+        onPrCreated: (event) =>
+            Effect.gen(function* () {
+                yield* event.pullRequest.subscribe();
+            }),
+        onMentioned: (event) => Effect.logInfo('GitHub bot mentioned', event),
+        onSubscribedIssueEvents: (event) => Effect.logInfo('Subscribed issue activity', event),
+        onSubscribedPrEvents: (event) => Effect.logInfo('Subscribed pull request activity', event),
+    },
+});
 ```
 
 Add `github` to the providers passed to `Channels.make` or the host-specific wrapper such as `ChannelsCloudflare.make`.
@@ -133,12 +133,12 @@ Callbacks provide `GitHubIssue` and `GitHubPullRequest` resources. Their methods
 `GitHubApi` itself returns plain records with no methods: `GitHubIssueCommentRecord`, `GitHubReviewCommentRecord`, `GitHubCheckRunRecord`, `GitHubActionsJobRecord`, and lists of them. Resource methods wrap these in the `GitHubIssueComment`, `GitHubReviewComment`, `GitHubCheckRun`, and `GitHubActionsJob` objects, so `issue.postComment(...)` returns a comment with `addReaction()`. Code that calls `GitHubApi` directly and needs those methods wraps the record, as in `GitHubIssueComment.make(record)`, or `commentFromRecord(record)` for an `updateComment` result.
 
 ```ts
-const comment = yield * issue.postComment(content) // GitHubIssueComment
-yield * comment.addReaction('eyes')
+const comment = yield * issue.postComment(content); // GitHubIssueComment
+yield * comment.addReaction('eyes');
 
-const api = yield * GitHubApi
-const record = yield * api.postIssueComment({ issue: issue.ref, content }) // GitHubIssueCommentRecord
-yield * GitHubIssueComment.make(record).addReaction('eyes')
+const api = yield * GitHubApi;
+const record = yield * api.postIssueComment({ issue: issue.ref, content }); // GitHubIssueCommentRecord
+yield * GitHubIssueComment.make(record).addReaction('eyes');
 ```
 
 ### Issues
@@ -158,9 +158,9 @@ In addition to `fetchInfo()`, comment operations, and subscription operations, a
 
 ```ts
 const updateIssue = Effect.gen(function* () {
-	yield* issue.addLabels(['triage', 'agent-reviewed'])
-	yield* issue.close('completed')
-})
+    yield* issue.addLabels(['triage', 'agent-reviewed']);
+    yield* issue.close('completed');
+});
 ```
 
 Label inputs are arrays of non-empty names. Duplicate is not a supported close reason. GitHub's duplicate-closing API requires the canonical issue's internal database ID and a newer API contract; this package pins GitHub API version `2022-11-28`.
@@ -199,14 +199,14 @@ Review-comment locations are tagged values. `Line` and `Range` line numbers must
 
 ```ts
 const reviewPullRequest = Effect.gen(function* () {
-	const info = yield* pullRequest.fetchInfo()
-	yield* pullRequest.postReviewComment({
-		content: { markdown: 'This can fail when the input is empty.' },
-		commitId: info.headSha,
-		path: 'src/example.ts',
-		location: { _tag: 'Line', line: 42, side: 'RIGHT' },
-	})
-})
+    const info = yield* pullRequest.fetchInfo();
+    yield* pullRequest.postReviewComment({
+        content: { markdown: 'This can fail when the input is empty.' },
+        commitId: info.headSha,
+        path: 'src/example.ts',
+        location: { _tag: 'Line', line: 42, side: 'RIGHT' },
+    });
+});
 ```
 
 A PR has no close-reason field. Post a conversation comment or add a label before `close()` when the reason must be visible.
@@ -215,14 +215,14 @@ Merging requires an explicit method and the head SHA the agent actually reviewed
 
 ```ts
 const mergePullRequest = Effect.gen(function* () {
-	const info = yield* pullRequest.fetchInfo()
-	return yield* pullRequest.merge({
-		method: 'squash',
-		expectedHeadSha: info.headSha,
-		commitTitle: 'Fix the login race',
-		commitMessage: 'Prevent overlapping refresh requests.',
-	})
-})
+    const info = yield* pullRequest.fetchInfo();
+    return yield* pullRequest.merge({
+        method: 'squash',
+        expectedHeadSha: info.headSha,
+        commitTitle: 'Fix the login race',
+        commitMessage: 'Prevent overlapping refresh requests.',
+    });
+});
 ```
 
 GitHub can reject a merge for a stale head, merge conflict, disabled merge method, required checks or reviews, unresolved conversations, branch protection, repository rules, or a merge queue. Inspect the returned result's `merged` field; rejected HTTP responses fail with `GitHubApiError` as described below.
@@ -244,21 +244,21 @@ GitHub can reject a merge for a stale head, merge conflict, disabled merge metho
 `listCheckRuns()` queries the PR head at call time. In a completed-check callback, use the event's `headSha` and `checkRunId` so a newer push cannot change which check you inspect:
 
 ```ts
-import { Effect } from 'effect'
+import { Effect } from 'effect';
 
 const inspectCompletedCheck = Effect.gen(function* () {
-	const checks = yield* event.pullRequest.listCheckRunsForRef(event.headSha)
-	const check = checks.find((candidate) => candidate.ref.id === event.checkRunId)
-	if (check === undefined) return
+    const checks = yield* event.pullRequest.listCheckRunsForRef(event.headSha);
+    const check = checks.find((candidate) => candidate.ref.id === event.checkRunId);
+    if (check === undefined) return;
 
-	const info = yield* check.fetchInfo()
-	const annotations = yield* check.listAnnotations()
-	const job = yield* check.resolveActionsJob()
+    const info = yield* check.fetchInfo();
+    const annotations = yield* check.listAnnotations();
+    const job = yield* check.resolveActionsJob();
 
-	if (job !== null) {
-		const log = yield* job.downloadLog()
-	}
-})
+    if (job !== null) {
+        const log = yield* job.downloadLog();
+    }
+});
 ```
 
 Listing check runs requests `filter=all`, so rerun attempts are not hidden by GitHub's default latest-only filter. It shows observed statuses, but it does not identify which checks are required by branch protection or repository rules.

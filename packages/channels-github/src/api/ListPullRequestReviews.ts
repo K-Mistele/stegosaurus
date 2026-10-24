@@ -1,18 +1,21 @@
-import { Effect } from 'effect'
+import { Effect } from 'effect';
 
-import type { GitHubPullRequestRequest } from '../GitHubApiContract'
-import { GitHubApiClient } from './GitHubApiClient'
-import { repositoryPath, review } from './GitHubApiProjections'
-import { Review } from './GitHubApiSchemas'
+import type { GitHubPullRequestRequest } from '../GitHubApiContract';
+import { GitHubApiClient } from './GitHubApiClient';
+import { repositoryPath, review } from './GitHubApiProjections';
+import { Review } from './GitHubApiSchemas';
+
 export const listPullRequestReviews = Effect.fn('github.api.list_pull_request_reviews')(function* (
-	input: GitHubPullRequestRequest,
+    input: GitHubPullRequestRequest,
 ) {
-	const api = yield* GitHubApiClient
-	const values = yield* api.list({
-		operation: 'list_pull_request_reviews',
-		ref: input.pullRequest,
-		path: `${repositoryPath(input.pullRequest)}/pulls/${input.pullRequest.number}/reviews`,
-		schema: Review,
-	})
-	return values.map((value) => review(input.pullRequest, value))
-})
+    const api = yield* GitHubApiClient;
+
+    const values = yield* api.list({
+        operation: 'list_pull_request_reviews',
+        ref: input.pullRequest,
+        path: `${repositoryPath(input.pullRequest)}/pulls/${input.pullRequest.number}/reviews`,
+        schema: Review,
+    });
+
+    return values.map((value) => review(input.pullRequest, value));
+});

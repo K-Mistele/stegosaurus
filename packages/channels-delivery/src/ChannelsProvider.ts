@@ -8,17 +8,17 @@
  * A provider builds none of its own services. What each half needs, such as the provider's API client,
  * stays in its requirements, and the application provides it once.
  */
-import type { Crypto, Effect, Scope } from 'effect'
+import type { Crypto, Effect, Scope } from 'effect';
 
-import type { DeliveryMode } from './MailboxPolicy'
-import type { MailboxSubscriptions } from './MailboxSubscriptions'
-import type { ProviderEventProcessor } from './ProviderEventProcessing'
-import type { ProviderOutputProcessor } from './ProviderOutput'
-import type { WebhookProvider } from './ProviderWebhooks'
+import type { DeliveryMode } from './MailboxPolicy';
+import type { MailboxSubscriptions } from './MailboxSubscriptions';
+import type { ProviderEventProcessor } from './ProviderEventProcessing';
+import type { ProviderOutputProcessor } from './ProviderOutput';
+import type { WebhookProvider } from './ProviderWebhooks';
 
 export type ChannelsProviderBuildInput = {
-	readonly namespace: string
-}
+    readonly namespace: string;
+};
 
 /**
  * What a provider needs from the application, and how building it can fail.
@@ -29,10 +29,10 @@ export type ChannelsProviderBuildInput = {
  * @property error - why building a half failed, such as a `ConfigError` for a missing secret
  */
 export type ChannelsProviderRequirements = {
-	readonly build: unknown
-	readonly process: unknown
-	readonly error: unknown
-}
+    readonly build: unknown;
+    readonly process: unknown;
+    readonly error: unknown;
+};
 
 /**
  * One provider as `Channels.make` sees it.
@@ -49,21 +49,25 @@ export type ChannelsProviderRequirements = {
  * its output, but its deliveries still end.
  */
 export type ChannelsProvider<
-	R extends ChannelsProviderRequirements = { readonly build: never; readonly process: never; readonly error: never },
+    R extends ChannelsProviderRequirements = {
+        readonly build: never;
+        readonly process: never;
+        readonly error: never;
+    },
 > = {
-	readonly providerName: string
-	readonly deliveryMode: DeliveryMode
-	readonly webhookProvider: (
-		input: ChannelsProviderBuildInput,
-	) => Effect.Effect<WebhookProvider<Crypto.Crypto>, R['error'], R['build'] | Scope.Scope>
-	readonly eventProcessor: (
-		input: ChannelsProviderBuildInput,
-	) => Effect.Effect<
-		ProviderEventProcessor<R['process'] | MailboxSubscriptions>,
-		R['error'],
-		R['build'] | Scope.Scope
-	>
-	readonly outputProcessor?: (
-		input: ChannelsProviderBuildInput,
-	) => Effect.Effect<ProviderOutputProcessor<R['process']>, R['error'], R['build'] | Scope.Scope>
-}
+    readonly providerName: string;
+    readonly deliveryMode: DeliveryMode;
+    readonly webhookProvider: (
+        input: ChannelsProviderBuildInput,
+    ) => Effect.Effect<WebhookProvider<Crypto.Crypto>, R['error'], R['build'] | Scope.Scope>;
+    readonly eventProcessor: (
+        input: ChannelsProviderBuildInput,
+    ) => Effect.Effect<
+        ProviderEventProcessor<R['process'] | MailboxSubscriptions>,
+        R['error'],
+        R['build'] | Scope.Scope
+    >;
+    readonly outputProcessor?: (
+        input: ChannelsProviderBuildInput,
+    ) => Effect.Effect<ProviderOutputProcessor<R['process']>, R['error'], R['build'] | Scope.Scope>;
+};

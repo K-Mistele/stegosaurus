@@ -1,34 +1,36 @@
-import type { DeliveryCallbackResult, DeliveryContext } from '@stegosaurus/channels-delivery'
-import { Cause, Effect, Option, Predicate, Schema } from 'effect'
+import type { DeliveryCallbackResult, DeliveryContext } from '@stegosaurus/channels-delivery';
+import { Cause, Effect, Option, Predicate, Schema } from 'effect';
 
 import type {
-	GitHubIssueCreated,
-	GitHubMentioned,
-	GitHubPrCreated,
-	GitHubSubscribedIssueEvents,
-	GitHubSubscribedPrEvents,
-} from './GitHubCallbackEvents'
+    GitHubIssueCreated,
+    GitHubMentioned,
+    GitHubPrCreated,
+    GitHubSubscribedIssueEvents,
+    GitHubSubscribedPrEvents,
+} from './GitHubCallbackEvents';
 
 export const GitHubCallbackName = Schema.Literals([
-	'onIssueCreated',
-	'onPrCreated',
-	'onMentioned',
-	'onSubscribedIssueEvents',
-	'onSubscribedPrEvents',
-])
-export type GitHubCallbackName = typeof GitHubCallbackName.Type
+    'onIssueCreated',
+    'onPrCreated',
+    'onMentioned',
+    'onSubscribedIssueEvents',
+    'onSubscribedPrEvents',
+]);
+
+export type GitHubCallbackName = typeof GitHubCallbackName.Type;
 
 export const GitHubCallbackRetryability = Schema.Struct({
-	retryability: Schema.Literals(['retryable', 'non_retryable']),
-})
+    retryability: Schema.Literals(['retryable', 'non_retryable']),
+});
+
 export interface GitHubCallbackRetryability extends Schema.Schema.Type<typeof GitHubCallbackRetryability> {}
 
-const GitHubCallbackRetryableFlag = Schema.Struct({ retryable: Schema.Boolean })
+const GitHubCallbackRetryableFlag = Schema.Struct({ retryable: Schema.Boolean });
 
 export class GitHubCallbackError extends Schema.TaggedError<GitHubCallbackError>()('GitHubCallbackError', {
-	callback: GitHubCallbackName,
-	retryable: Schema.Boolean,
-	reason: Schema.Literals(['failed', 'unexpected']),
+    callback: GitHubCallbackName,
+    retryable: Schema.Boolean,
+    reason: Schema.Literals(['failed', 'unexpected']),
 }) {}
 
 /**
@@ -36,76 +38,87 @@ export class GitHubCallbackError extends Schema.TaggedError<GitHubCallbackError>
  * that did so may return the `DeliveryHandoff`. The saved handoff, not the return value, is authoritative.
  */
 export type GitHubCallbackHandler<A, E, R> = (
-	event: A,
-	delivery: DeliveryContext,
-) => Effect.Effect<DeliveryCallbackResult, E, R>
+    event: A,
+    delivery: DeliveryContext,
+) => Effect.Effect<DeliveryCallbackResult, E, R>;
 
 export type GitHubCallbackHandlers<E, R> = {
-	readonly onIssueCreated?: GitHubCallbackHandler<GitHubIssueCreated, E, R>
-	readonly onPrCreated?: GitHubCallbackHandler<GitHubPrCreated, E, R>
-	readonly onMentioned?: GitHubCallbackHandler<GitHubMentioned, E, R>
-	readonly onSubscribedIssueEvents?: GitHubCallbackHandler<GitHubSubscribedIssueEvents, E, R>
-	readonly onSubscribedPrEvents?: GitHubCallbackHandler<GitHubSubscribedPrEvents, E, R>
-}
+    readonly onIssueCreated?: GitHubCallbackHandler<GitHubIssueCreated, E, R>;
+    readonly onPrCreated?: GitHubCallbackHandler<GitHubPrCreated, E, R>;
+    readonly onMentioned?: GitHubCallbackHandler<GitHubMentioned, E, R>;
+    readonly onSubscribedIssueEvents?: GitHubCallbackHandler<GitHubSubscribedIssueEvents, E, R>;
+    readonly onSubscribedPrEvents?: GitHubCallbackHandler<GitHubSubscribedPrEvents, E, R>;
+};
 
 const retryableFromCause = (cause: Cause.Cause<unknown>): boolean =>
-	Option.match(Cause.findErrorOption(cause), {
-		onNone: () => true,
-		onSome: (error) => {
-			if (Schema.is(GitHubCallbackRetryability)(error)) return error.retryability === 'retryable'
-			if (Schema.is(GitHubCallbackRetryableFlag)(error)) return error.retryable
-			return true
-		},
-	})
+    Option.match(Cause.findErrorOption(cause), {
+        onNone: () => true,
+        onSome: (error) => {
+            if (Schema.is(GitHubCallbackRetryability)(error)) return error.retryability === 'retryable';
+
+            if (Schema.is(GitHubCallbackRetryableFlag)(error)) return error.retryable;
+
+            return true;
+        },
+    });
 
 const narrowGitHubCallbackCause = (input: {
-	readonly callback: GitHubCallbackName
-	readonly cause: Cause.Cause<unknown>
+    readonly callback: GitHubCallbackName;
+    readonly cause: Cause.Cause<unknown>;
 }) => {
-	if (Cause.hasInterrupts(input.cause)) {
-		const preservedReasons = input.cause.reasons.filter(
-			(reason) => Cause.isInterruptReason(reason) || Cause.isDieReason(reason),
-		)
-		const preserveCause = Effect.failCause(Cause.fromReasons<never>(preservedReasons))
-		if (Cause.hasInterruptsOnly(input.cause)) return preserveCause
-		return Effect.logError(
-			'GitHub application callback was interrupted with additional failures',
-			input.cause,
-		).pipe(
-			Effect.annotateLogs({ callback: input.callback, classification: 'interrupted_with_failure' }),
-			Effect.andThen(preserveCause),
-		)
-	}
-	const unexpected = Cause.hasDies(input.cause)
-	return Effect.logError('GitHub application callback failed', input.cause).pipe(
-		Effect.annotateLogs({ callback: input.callback, classification: unexpected ? 'unexpected_defect' : 'failed' }),
-		Effect.andThen(
-			Effect.fail(
-				GitHubCallbackError.make({
-					callback: input.callback,
-					reason: unexpected ? 'unexpected' : 'failed',
-					retryable: unexpected ? true : retryableFromCause(input.cause),
-				}),
-			),
-		),
-	)
-}
+    if (Cause.hasInterrupts(input.cause)) {
+        const preservedReasons = input.cause.reasons.filter(
+            (reason) => Cause.isInterruptReason(reason) || Cause.isDieReason(reason),
+        );
+
+        const preserveCause = Effect.failCause(Cause.fromReasons<never>(preservedReasons));
+
+        if (Cause.hasInterruptsOnly(input.cause)) return preserveCause;
+
+        return Effect.logError(
+            'GitHub application callback was interrupted with additional failures',
+            input.cause,
+        ).pipe(
+            Effect.annotateLogs({ callback: input.callback, classification: 'interrupted_with_failure' }),
+            Effect.andThen(preserveCause),
+        );
+    }
+
+    const unexpected = Cause.hasDies(input.cause);
+
+    return Effect.logError('GitHub application callback failed', input.cause).pipe(
+        Effect.annotateLogs({
+            callback: input.callback,
+            classification: unexpected ? 'unexpected_defect' : 'failed',
+        }),
+        Effect.andThen(
+            Effect.fail(
+                GitHubCallbackError.make({
+                    callback: input.callback,
+                    reason: unexpected ? 'unexpected' : 'failed',
+                    retryable: unexpected ? true : retryableFromCause(input.cause),
+                }),
+            ),
+        ),
+    );
+};
 
 const wrapCallback = <A, E, R>(callback: GitHubCallbackName, handler: GitHubCallbackHandler<A, E, R> | undefined) => {
-	if (Predicate.isUndefined(handler)) return undefined
-	return Effect.fn(`github.callbacks.${callback}`)((event: A, delivery: DeliveryContext) =>
-		Effect.suspend(() => handler(event, delivery)).pipe(
-			Effect.catchCause((cause) => narrowGitHubCallbackCause({ callback, cause })),
-		),
-	)
-}
+    if (Predicate.isUndefined(handler)) return undefined;
 
-export type GitHubCallbackOperations<R = never> = GitHubCallbackHandlers<GitHubCallbackError, R>
+    return Effect.fn(`github.callbacks.${callback}`)((event: A, delivery: DeliveryContext) =>
+        Effect.suspend(() => handler(event, delivery)).pipe(
+            Effect.catchCause((cause) => narrowGitHubCallbackCause({ callback, cause })),
+        ),
+    );
+};
+
+export type GitHubCallbackOperations<R = never> = GitHubCallbackHandlers<GitHubCallbackError, R>;
 
 export const makeGitHubCallbacks = <E, R>(handlers: GitHubCallbackHandlers<E, R>): GitHubCallbackOperations<R> => ({
-	onIssueCreated: wrapCallback('onIssueCreated', handlers.onIssueCreated),
-	onPrCreated: wrapCallback('onPrCreated', handlers.onPrCreated),
-	onMentioned: wrapCallback('onMentioned', handlers.onMentioned),
-	onSubscribedIssueEvents: wrapCallback('onSubscribedIssueEvents', handlers.onSubscribedIssueEvents),
-	onSubscribedPrEvents: wrapCallback('onSubscribedPrEvents', handlers.onSubscribedPrEvents),
-})
+    onIssueCreated: wrapCallback('onIssueCreated', handlers.onIssueCreated),
+    onPrCreated: wrapCallback('onPrCreated', handlers.onPrCreated),
+    onMentioned: wrapCallback('onMentioned', handlers.onMentioned),
+    onSubscribedIssueEvents: wrapCallback('onSubscribedIssueEvents', handlers.onSubscribedIssueEvents),
+    onSubscribedPrEvents: wrapCallback('onSubscribedPrEvents', handlers.onSubscribedPrEvents),
+});

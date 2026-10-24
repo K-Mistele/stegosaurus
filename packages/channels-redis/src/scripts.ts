@@ -17,10 +17,10 @@
  * its active delivery: `batch` (admissions JSON), `batch_id`, `access_token`, `prepared`, `claim_id`,
  * `attempt`, `stage`, and `delivery`, the JSON of everything else the lifecycle keeps.
  */
-import { Data, Predicate } from 'effect'
-import * as Redis from 'effect/persistence/Redis'
+import { Data, Predicate } from 'effect';
+import * as Redis from 'effect/persistence/Redis';
 
-import { mailboxEventsKey, mailboxPendingKey, mailboxRetainedKey, mailboxStateKey, readyMailboxesKey } from './Keys'
+import { mailboxEventsKey, mailboxPendingKey, mailboxRetainedKey, mailboxStateKey, readyMailboxesKey } from './Keys';
 
 /** Splits one pending entry into its sequence, arrival time and admission JSON. */
 const parseEntry = `
@@ -29,33 +29,33 @@ local function parse_entry(entry)
   local second = string.find(entry, '|', first + 1, true)
   return string.sub(entry, 1, first - 1), string.sub(entry, first + 1, second - 1), string.sub(entry, second + 1)
 end
-`
+`;
 
 /**
  * Accepts an event once and wakes an idle mailbox. Returns 1 when accepted, 0 for a repeat.
  * An interrupting event goes through `commit` instead, so it marks the active delivery in the same write.
  */
 export const admit = Redis.script(
-	(input: {
-		readonly mailboxKey: string
-		readonly provider: string
-		readonly eventId: string
-		readonly admissionJson: string
-		readonly now: number
-	}) => [
-		readyMailboxesKey,
-		mailboxStateKey(input.mailboxKey),
-		mailboxPendingKey(input.mailboxKey),
-		mailboxEventsKey(input.mailboxKey),
-		input.mailboxKey,
-		input.provider,
-		input.eventId,
-		input.admissionJson,
-		input.now,
-	],
-	{
-		numberOfKeys: 4,
-		lua: `
+    (input: {
+        readonly mailboxKey: string;
+        readonly provider: string;
+        readonly eventId: string;
+        readonly admissionJson: string;
+        readonly now: number;
+    }) => [
+        readyMailboxesKey,
+        mailboxStateKey(input.mailboxKey),
+        mailboxPendingKey(input.mailboxKey),
+        mailboxEventsKey(input.mailboxKey),
+        input.mailboxKey,
+        input.provider,
+        input.eventId,
+        input.admissionJson,
+        input.now,
+    ],
+    {
+        numberOfKeys: 4,
+        lua: `
 if redis.call('SADD', KEYS[4], ARGV[3]) == 0 then return 0 end
 local sequence = redis.call('HINCRBY', KEYS[2], 'next_sequence', 1) - 1
 redis.call('RPUSH', KEYS[3], string.format('%.0f', sequence) .. '|' .. ARGV[5] .. '|' .. ARGV[4])
@@ -71,8 +71,8 @@ if status == 'idle' then
 end
 return 1
 `,
-	},
-).withReturnType<unknown>()
+    },
+).withReturnType<unknown>();
 
 /**
  * Reports one due mailbox: `{ status, provider, count, firstSequence, firstArrivedAt, lastSequence, lastArrivedAt, stage }`.
@@ -81,16 +81,16 @@ return 1
  * Returns false when the mailbox is not due. An idle mailbox with nothing waiting leaves the ready set.
  */
 export const look = Redis.script(
-	(input: { readonly mailboxKey: string; readonly now: number }) => [
-		readyMailboxesKey,
-		mailboxStateKey(input.mailboxKey),
-		mailboxPendingKey(input.mailboxKey),
-		input.mailboxKey,
-		input.now,
-	],
-	{
-		numberOfKeys: 3,
-		lua: `${parseEntry}
+    (input: { readonly mailboxKey: string; readonly now: number }) => [
+        readyMailboxesKey,
+        mailboxStateKey(input.mailboxKey),
+        mailboxPendingKey(input.mailboxKey),
+        input.mailboxKey,
+        input.now,
+    ],
+    {
+        numberOfKeys: 3,
+        lua: `${parseEntry}
 local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
 if not score or tonumber(score) > tonumber(ARGV[2]) then return false end
 local status = redis.call('HGET', KEYS[2], 'status') or 'idle'
@@ -108,22 +108,22 @@ local first_sequence, first_arrived_at = parse_entry(redis.call('LINDEX', KEYS[3
 local last_sequence, last_arrived_at = parse_entry(redis.call('LINDEX', KEYS[3], -1))
 return { status, provider, tostring(count), first_sequence, first_arrived_at, last_sequence, last_arrived_at, '' }
 `,
-	},
-).withReturnType<unknown>()
+    },
+).withReturnType<unknown>();
 
 /** Moves an idle mailbox's wake-up time, unless an event newer than `lastSequenceSeen` has arrived. */
 export const defer = Redis.script(
-	(input: { readonly mailboxKey: string; readonly until: number; readonly lastSequenceSeen: number }) => [
-		readyMailboxesKey,
-		mailboxStateKey(input.mailboxKey),
-		mailboxPendingKey(input.mailboxKey),
-		input.mailboxKey,
-		input.until,
-		input.lastSequenceSeen,
-	],
-	{
-		numberOfKeys: 3,
-		lua: `${parseEntry}
+    (input: { readonly mailboxKey: string; readonly until: number; readonly lastSequenceSeen: number }) => [
+        readyMailboxesKey,
+        mailboxStateKey(input.mailboxKey),
+        mailboxPendingKey(input.mailboxKey),
+        input.mailboxKey,
+        input.until,
+        input.lastSequenceSeen,
+    ],
+    {
+        numberOfKeys: 3,
+        lua: `${parseEntry}
 if (redis.call('HGET', KEYS[2], 'status') or 'idle') ~= 'idle' then return 0 end
 local last = redis.call('LINDEX', KEYS[3], -1)
 if not last then return 0 end
@@ -134,8 +134,8 @@ redis.call('HINCRBY', KEYS[2], 'version', 1)
 redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
 return 1
 `,
-	},
-).withReturnType<unknown>()
+    },
+).withReturnType<unknown>();
 
 /**
  * Reads a mailbox in one step: `{ the named state fields, waiting count, retained JSON or false, waiting admissions }`.
@@ -143,21 +143,21 @@ return 1
  * Returns false when there is no such mailbox.
  */
 export const load = Redis.script(
-	(input: {
-		readonly mailboxKey: string
-		readonly pendingUpTo: number | null
-		readonly fields: ReadonlyArray<string>
-	}) => [
-		mailboxStateKey(input.mailboxKey),
-		mailboxPendingKey(input.mailboxKey),
-		mailboxRetainedKey(input.mailboxKey),
-		input.mailboxKey,
-		Predicate.isNull(input.pendingUpTo) ? '' : input.pendingUpTo,
-		...input.fields,
-	],
-	{
-		numberOfKeys: 3,
-		lua: `${parseEntry}
+    (input: {
+        readonly mailboxKey: string;
+        readonly pendingUpTo: number | null;
+        readonly fields: ReadonlyArray<string>;
+    }) => [
+        mailboxStateKey(input.mailboxKey),
+        mailboxPendingKey(input.mailboxKey),
+        mailboxRetainedKey(input.mailboxKey),
+        input.mailboxKey,
+        Predicate.isNull(input.pendingUpTo) ? '' : input.pendingUpTo,
+        ...input.fields,
+    ],
+    {
+        numberOfKeys: 3,
+        lua: `${parseEntry}
 if redis.call('EXISTS', KEYS[1]) == 0 then return false end
 local pending = {}
 if ARGV[2] ~= '' then
@@ -175,16 +175,17 @@ return {
   pending,
 }
 `,
-	},
-).withReturnType<unknown>()
+    },
+).withReturnType<unknown>();
 
 /** What a change does to a mailbox's finished deliveries. */
 export type RetainedWrite = Data.TaggedEnum<{
-	Keep: {}
-	Replace: { readonly json: string; readonly ttlMs: number }
-	Remove: {}
-}>
-export const RetainedWrite = Data.taggedEnum<RetainedWrite>()
+    Keep: {};
+    Replace: { readonly json: string; readonly ttlMs: number };
+    Remove: {};
+}>;
+
+export const RetainedWrite = Data.taggedEnum<RetainedWrite>();
 
 /**
  * A change decided in TypeScript, written as it was decided.
@@ -198,47 +199,51 @@ export const RetainedWrite = Data.taggedEnum<RetainedWrite>()
  * @property remove - state fields to remove
  */
 export type CommitInput = {
-	readonly mailboxKey: string
-	readonly provider: string
-	readonly expectedVersion: number
-	readonly readyAt: number | null
-	readonly popWaiting: number
-	readonly retained: RetainedWrite
-	readonly admission: { readonly eventId: string; readonly arrivedAt: number; readonly json: string } | null
-	readonly set: ReadonlyArray<readonly [string, string]>
-	readonly remove: ReadonlyArray<string>
-}
+    readonly mailboxKey: string;
+    readonly provider: string;
+    readonly expectedVersion: number;
+    readonly readyAt: number | null;
+    readonly popWaiting: number;
+    readonly retained: RetainedWrite;
+    readonly admission: {
+        readonly eventId: string;
+        readonly arrivedAt: number;
+        readonly json: string;
+    } | null;
+    readonly set: ReadonlyArray<readonly [string, string]>;
+    readonly remove: ReadonlyArray<string>;
+};
 
 const retainedArguments = RetainedWrite.$match({
-	Keep: () => ['keep', '', 0] as const,
-	Replace: ({ json, ttlMs }) => ['replace', json, ttlMs] as const,
-	Remove: () => ['remove', '', 0] as const,
-})
+    Keep: () => ['keep', '', 0] as const,
+    Replace: ({ json, ttlMs }) => ['replace', json, ttlMs] as const,
+    Remove: () => ['remove', '', 0] as const,
+});
 
 /** Writes a decided change. Returns `ok`, `conflict` when the mailbox changed since it was read, or `duplicate` for a repeated admission. */
 export const commit = Redis.script(
-	(input: CommitInput) => [
-		readyMailboxesKey,
-		mailboxStateKey(input.mailboxKey),
-		mailboxPendingKey(input.mailboxKey),
-		mailboxRetainedKey(input.mailboxKey),
-		mailboxEventsKey(input.mailboxKey),
-		input.mailboxKey,
-		input.expectedVersion,
-		Predicate.isNull(input.readyAt) ? '' : input.readyAt,
-		input.popWaiting,
-		...retainedArguments(input.retained),
-		input.provider,
-		input.admission?.eventId ?? '',
-		input.admission?.arrivedAt ?? '',
-		input.admission?.json ?? '',
-		input.set.length,
-		...input.set.flat(),
-		...input.remove,
-	],
-	{
-		numberOfKeys: 5,
-		lua: `
+    (input: CommitInput) => [
+        readyMailboxesKey,
+        mailboxStateKey(input.mailboxKey),
+        mailboxPendingKey(input.mailboxKey),
+        mailboxRetainedKey(input.mailboxKey),
+        mailboxEventsKey(input.mailboxKey),
+        input.mailboxKey,
+        input.expectedVersion,
+        Predicate.isNull(input.readyAt) ? '' : input.readyAt,
+        input.popWaiting,
+        ...retainedArguments(input.retained),
+        input.provider,
+        input.admission?.eventId ?? '',
+        input.admission?.arrivedAt ?? '',
+        input.admission?.json ?? '',
+        input.set.length,
+        ...input.set.flat(),
+        ...input.remove,
+    ],
+    {
+        numberOfKeys: 5,
+        lua: `
 local version = tonumber(redis.call('HGET', KEYS[2], 'version') or '0')
 if version ~= tonumber(ARGV[2]) then return 'conflict' end
 if ARGV[9] ~= '' then
@@ -268,5 +273,5 @@ elseif ARGV[5] == 'remove' then
 end
 return 'ok'
 `,
-	},
-).withReturnType<unknown>()
+    },
+).withReturnType<unknown>();

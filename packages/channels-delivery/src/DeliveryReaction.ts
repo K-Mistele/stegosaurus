@@ -12,22 +12,23 @@
  * the latest is sent; one already being sent is followed by a new operation. Provider callbacks keep
  * their own, richer reaction APIs, such as Slack's custom emoji.
  */
-import { Schema } from 'effect'
+import { Schema } from 'effect';
 
-import { MessageId, ProviderMessageReference } from './DeliveryMessage'
+import { MessageId, ProviderMessageReference } from './DeliveryMessage';
 
 /** The reactions every provider can show. */
 export const PortableReaction = Schema.Literals([
-	'thumbs_up',
-	'thumbs_down',
-	'laugh',
-	'confused',
-	'heart',
-	'hooray',
-	'rocket',
-	'eyes',
-])
-export type PortableReaction = typeof PortableReaction.Type
+    'thumbs_up',
+    'thumbs_down',
+    'laugh',
+    'confused',
+    'heart',
+    'hooray',
+    'rocket',
+    'eyes',
+]);
+
+export type PortableReaction = typeof PortableReaction.Type;
 
 /**
  * What a reaction goes on.
@@ -37,33 +38,36 @@ export type PortableReaction = typeof PortableReaction.Type
  * - `PlanTarget`: where the delivery's plan is shown; no provider reacts on its plan yet, so it is never available
  */
 export const DeliveryReactionTarget = Schema.TaggedUnion({
-	ActivationTarget: {},
-	MessageTarget: { messageId: MessageId },
-	PlanTarget: {},
-})
-export type DeliveryReactionTarget = typeof DeliveryReactionTarget.Type
+    ActivationTarget: {},
+    MessageTarget: { messageId: MessageId },
+    PlanTarget: {},
+});
+
+export type DeliveryReactionTarget = typeof DeliveryReactionTarget.Type;
 
 /** The kinds of reaction target a destination can react on. A provider lists them when it prepares a delivery. */
-export const DeliveryReactionTargetKind = Schema.Literals(['ActivationTarget', 'MessageTarget', 'PlanTarget'])
-export type DeliveryReactionTargetKind = typeof DeliveryReactionTargetKind.Type
+export const DeliveryReactionTargetKind = Schema.Literals(['ActivationTarget', 'MessageTarget', 'PlanTarget']);
+
+export type DeliveryReactionTargetKind = typeof DeliveryReactionTargetKind.Type;
 
 /** The kind of a target, to check it against the kinds a destination lists. */
 export const deliveryReactionTargetKind = DeliveryReactionTarget.match({
-	ActivationTarget: (): DeliveryReactionTargetKind => 'ActivationTarget',
-	MessageTarget: (): DeliveryReactionTargetKind => 'MessageTarget',
-	PlanTarget: (): DeliveryReactionTargetKind => 'PlanTarget',
-})
+    ActivationTarget: (): DeliveryReactionTargetKind => 'ActivationTarget',
+    MessageTarget: (): DeliveryReactionTargetKind => 'MessageTarget',
+    PlanTarget: (): DeliveryReactionTargetKind => 'PlanTarget',
+});
 
 /** Whether two targets name the same thing. */
-export const sameDeliveryReactionTarget = Schema.toEquivalence(DeliveryReactionTarget)
+export const sameDeliveryReactionTarget = Schema.toEquivalence(DeliveryReactionTarget);
 
 /** Make the bot's reaction present (`active: true`) or absent on a target. */
 export const SetMessageReaction = Schema.TaggedStruct('SetMessageReaction', {
-	target: DeliveryReactionTarget,
-	reaction: PortableReaction,
-	active: Schema.Boolean,
-})
-export type SetMessageReaction = typeof SetMessageReaction.Type
+    target: DeliveryReactionTarget,
+    reaction: PortableReaction,
+    active: Schema.Boolean,
+});
+
+export type SetMessageReaction = typeof SetMessageReaction.Type;
 
 /**
  * A reaction target as a provider receives it. A message target carries the provider's own reference
@@ -71,10 +75,11 @@ export type SetMessageReaction = typeof SetMessageReaction.Type
  * saved preparation, which the provider already has.
  */
 export const ProviderReactionTarget = Schema.TaggedUnion({
-	ActivationTarget: {},
-	MessageTarget: { messageId: MessageId, reference: ProviderMessageReference },
-})
-export type ProviderReactionTarget = typeof ProviderReactionTarget.Type
+    ActivationTarget: {},
+    MessageTarget: { messageId: MessageId, reference: ProviderMessageReference },
+});
+
+export type ProviderReactionTarget = typeof ProviderReactionTarget.Type;
 
 /**
  * `SetMessageReaction` as a provider receives it.
@@ -84,9 +89,10 @@ export type ProviderReactionTarget = typeof ProviderReactionTarget.Type
  * Linear, needs it; Slack and GitHub remove by name.
  */
 export const ProviderSetMessageReaction = Schema.TaggedStruct('SetMessageReaction', {
-	target: ProviderReactionTarget,
-	reaction: PortableReaction,
-	active: Schema.Boolean,
-	addedReference: Schema.optionalKey(Schema.Json),
-})
-export type ProviderSetMessageReaction = typeof ProviderSetMessageReaction.Type
+    target: ProviderReactionTarget,
+    reaction: PortableReaction,
+    active: Schema.Boolean,
+    addedReference: Schema.optionalKey(Schema.Json),
+});
+
+export type ProviderSetMessageReaction = typeof ProviderSetMessageReaction.Type;

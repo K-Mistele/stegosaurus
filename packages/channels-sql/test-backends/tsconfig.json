@@ -1,11 +1,11 @@
 {
-	"extends": "../tsconfig.json",
-	"include": [
-		".",
-		"../src",
-		"../../channels-delivery/test/backend-contract.ts",
-		"../../channels-delivery/test/delivery-handoff-contract.ts",
-		"../../channels-delivery/test/delivery-output-scenarios.ts",
-		"../../channels-delivery/test/delivery-api-scenario.ts"
-	]
+    "extends": "../tsconfig.json",
+    "include": [
+        ".",
+        "../src",
+        "../../channels-delivery/test/backend-contract.ts",
+        "../../channels-delivery/test/delivery-handoff-contract.ts",
+        "../../channels-delivery/test/delivery-output-scenarios.ts",
+        "../../channels-delivery/test/delivery-api-scenario.ts"
+    ]
 }

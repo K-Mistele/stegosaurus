@@ -1,32 +1,32 @@
 {
-  "name": "@stegosaurus/channels-github",
-  "version": "0.0.0",
-  "description": "Channels GitHub App provider: webhooks, REST operations, App JWT signing and git credentials.",
-  "files": [
-    "src"
-  ],
-  "type": "module",
-  "sideEffects": false,
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "scripts": {
-    "typecheck": "tsc",
-    "test": "vp test"
-  },
-  "dependencies": {
-    "@stegosaurus/channels-delivery": "workspace:*"
-  },
-  "devDependencies": {
-    "@effect/platform-node": "catalog:",
-    "@effect/vitest": "catalog:",
-    "@emulators/core": "catalog:",
-    "@emulators/github": "catalog:",
-    "effect": "catalog:",
-    "typescript": "catalog:",
-    "vite-plus": "catalog:"
-  },
-  "peerDependencies": {
-    "effect": "catalog:"
-  }
+    "name": "@stegosaurus/channels-github",
+    "version": "0.0.0",
+    "description": "Channels GitHub App provider: webhooks, REST operations, App JWT signing and git credentials.",
+    "files": [
+        "src"
+    ],
+    "type": "module",
+    "sideEffects": false,
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "scripts": {
+        "typecheck": "tsc",
+        "test": "vp test"
+    },
+    "dependencies": {
+        "@stegosaurus/channels-delivery": "workspace:*"
+    },
+    "devDependencies": {
+        "@effect/platform-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@emulators/core": "catalog:",
+        "@emulators/github": "catalog:",
+        "effect": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:"
+    },
+    "peerDependencies": {
+        "effect": "catalog:"
+    }
 }

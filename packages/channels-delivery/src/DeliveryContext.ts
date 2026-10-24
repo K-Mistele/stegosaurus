@@ -8,15 +8,15 @@
  * `ProviderDeliveryExecution` is internal: the provider processor uses it to save which callback a batch
  * runs, and where its output goes, before any application code runs. A retry reuses what was saved.
  */
-import { Data, Schema } from 'effect'
-import type { Duration, Effect, Option, Redacted } from 'effect'
+import { Data, Schema } from 'effect';
+import type { Duration, Effect, Option, Redacted } from 'effect';
 
-import type { ExternalLink } from './DeliveryLink'
-import { DeliveryReactionTargetKind } from './DeliveryReaction'
-import { ConversationId, DeliveryId } from './DeliveryReference'
+import type { ExternalLink } from './DeliveryLink';
+import { DeliveryReactionTargetKind } from './DeliveryReaction';
+import { ConversationId, DeliveryId } from './DeliveryReference';
 
 /** How long a handed-off delivery may go without a request from its remote worker, unless the handoff says otherwise. */
-export const DEFAULT_HANDOFF_FAIL_AFTER = '24 hours' satisfies Duration.Input
+export const DEFAULT_HANDOFF_FAIL_AFTER = '24 hours' satisfies Duration.Input;
 
 /**
  * @property links - links to show on the delivery, such as the remote job's page
@@ -25,34 +25,36 @@ export const DEFAULT_HANDOFF_FAIL_AFTER = '24 hours' satisfies Duration.Input
  * starts the time again. Defaults to 24 hours; `'Infinity'` means no limit.
  */
 export type HandoffOptions = {
-	readonly links?: ReadonlyArray<ExternalLink>
-	readonly failAfter?: Duration.Input
-}
+    readonly links?: ReadonlyArray<ExternalLink>;
+    readonly failAfter?: Duration.Input;
+};
 
 /** Returned by a callback that handed its delivery off. The saved handoff, not this value, is authoritative. */
 export const DeliveryHandoff = Schema.TaggedStruct('DeliveryHandoff', {
-	deliveryId: DeliveryId,
-})
-export type DeliveryHandoff = typeof DeliveryHandoff.Type
+    deliveryId: DeliveryId,
+});
+
+export type DeliveryHandoff = typeof DeliveryHandoff.Type;
 
 /** What an application callback may return. */
-export type DeliveryCallbackResult = void | DeliveryHandoff
+export type DeliveryCallbackResult = void | DeliveryHandoff;
 
 /**
  * The output operations a destination can show. Every request a remote worker makes needs its
  * operation listed, including `PresentOutcome` for `complete` and `fail`.
  */
 export const DeliveryOperationKind = Schema.Literals([
-	'PresentOutcome',
-	'CreateMessage',
-	'UpdateMessage',
-	'DeleteMessage',
-	'SetMessageReaction',
-	'SetActivity',
-	'RenderPlan',
-	'AddExternalLink',
-])
-export type DeliveryOperationKind = typeof DeliveryOperationKind.Type
+    'PresentOutcome',
+    'CreateMessage',
+    'UpdateMessage',
+    'DeleteMessage',
+    'SetMessageReaction',
+    'SetActivity',
+    'RenderPlan',
+    'AddExternalLink',
+]);
+
+export type DeliveryOperationKind = typeof DeliveryOperationKind.Type;
 
 /**
  * What a provider saves before the callback runs. Every attempt of the batch uses it.
@@ -66,66 +68,69 @@ export type DeliveryOperationKind = typeof DeliveryOperationKind.Type
  * a delivery prepared before reactions existed.
  */
 export const PreparedDeliveryCallback = Schema.Struct({
-	name: Schema.NonEmptyString,
-	presentationVersion: Schema.Int.check(Schema.isGreaterThan(0)),
-	destination: Schema.Json,
-	activationTarget: Schema.optionalKey(Schema.Json),
-	supportedOperations: Schema.Array(DeliveryOperationKind),
-	reactionTargets: Schema.optionalKey(Schema.Array(DeliveryReactionTargetKind)),
-})
-export type PreparedDeliveryCallback = typeof PreparedDeliveryCallback.Type
+    name: Schema.NonEmptyString,
+    presentationVersion: Schema.Int.check(Schema.isGreaterThan(0)),
+    destination: Schema.Json,
+    activationTarget: Schema.optionalKey(Schema.Json),
+    supportedOperations: Schema.Array(DeliveryOperationKind),
+    reactionTargets: Schema.optionalKey(Schema.Array(DeliveryReactionTargetKind)),
+});
+
+export type PreparedDeliveryCallback = typeof PreparedDeliveryCallback.Type;
 
 export const PreparedDeliveryInvocation = Schema.Struct({
-	callbacks: Schema.NonEmptyArray(PreparedDeliveryCallback),
-})
-export type PreparedDeliveryInvocation = typeof PreparedDeliveryInvocation.Type
+    callbacks: Schema.NonEmptyArray(PreparedDeliveryCallback),
+});
+
+export type PreparedDeliveryInvocation = typeof PreparedDeliveryInvocation.Type;
 
 /** A preparation as JSON text, for stores that keep it as a string. */
-export const PreparedDeliveryInvocationJson = Schema.fromJsonString(PreparedDeliveryInvocation)
+export const PreparedDeliveryInvocationJson = Schema.fromJsonString(PreparedDeliveryInvocation);
 
 /** Where a delivery is in its life. */
 export const DeliveryStage = Schema.Literals([
-	'Local',
-	'Retry',
-	'ExternalCleaning',
-	'ExternalWaiting',
-	'Finishing',
-	'Retired',
-])
-export type DeliveryStage = typeof DeliveryStage.Type
+    'Local',
+    'Retry',
+    'ExternalCleaning',
+    'ExternalWaiting',
+    'Finishing',
+    'Retired',
+]);
+
+export type DeliveryStage = typeof DeliveryStage.Type;
 
 /** The store cannot hand deliveries off yet. */
 export class DeliveryHandoffUnsupported extends Schema.TaggedError<DeliveryHandoffUnsupported>()(
-	'DeliveryHandoffUnsupported',
-	{},
+    'DeliveryHandoffUnsupported',
+    {},
 ) {}
 
 /** The delivery can no longer be handed off: its claim was lost, or it already ended. */
 export class DeliveryHandoffRejected extends Schema.TaggedError<DeliveryHandoffRejected>()('DeliveryHandoffRejected', {
-	deliveryId: DeliveryId,
+    deliveryId: DeliveryId,
 }) {}
 
 /** The store could not be reached. */
 export class DeliveryHandoffUnavailable extends Schema.TaggedError<DeliveryHandoffUnavailable>()(
-	'DeliveryHandoffUnavailable',
-	{ reason: Schema.String },
+    'DeliveryHandoffUnavailable',
+    { reason: Schema.String },
 ) {}
 
-export type DeliveryHandoffError = DeliveryHandoffUnsupported | DeliveryHandoffRejected | DeliveryHandoffUnavailable
+export type DeliveryHandoffError = DeliveryHandoffUnsupported | DeliveryHandoffRejected | DeliveryHandoffUnavailable;
 
 /** The batch already runs a different callback, or its claim was lost. The provider must not run anything. */
 export class DeliveryPreparationConflict extends Schema.TaggedError<DeliveryPreparationConflict>()(
-	'DeliveryPreparationConflict',
-	{ deliveryId: DeliveryId },
+    'DeliveryPreparationConflict',
+    { deliveryId: DeliveryId },
 ) {}
 
 /** The store could not be reached while saving the preparation. */
 export class DeliveryPreparationUnavailable extends Schema.TaggedError<DeliveryPreparationUnavailable>()(
-	'DeliveryPreparationUnavailable',
-	{ reason: Schema.String },
+    'DeliveryPreparationUnavailable',
+    { reason: Schema.String },
 ) {}
 
-export type DeliveryPreparationError = DeliveryPreparationConflict | DeliveryPreparationUnavailable
+export type DeliveryPreparationError = DeliveryPreparationConflict | DeliveryPreparationUnavailable;
 
 /**
  * The callback's view of its delivery.
@@ -136,10 +141,10 @@ export type DeliveryPreparationError = DeliveryPreparationConflict | DeliveryPre
  * @property handoff - hand the delivery to a remote worker; call it after the remote job has started
  */
 export class DeliveryContext extends Data.Class<{
-	readonly deliveryId: DeliveryId
-	readonly conversationId: ConversationId
-	readonly accessToken: Redacted.Redacted<string>
-	readonly handoff: (options?: HandoffOptions) => Effect.Effect<DeliveryHandoff, DeliveryHandoffError>
+    readonly deliveryId: DeliveryId;
+    readonly conversationId: ConversationId;
+    readonly accessToken: Redacted.Redacted;
+    readonly handoff: (options?: HandoffOptions) => Effect.Effect<DeliveryHandoff, DeliveryHandoffError>;
 }> {}
 
 /**
@@ -153,12 +158,12 @@ export class DeliveryContext extends Data.Class<{
  * @property context - the value to pass to the application callback
  */
 export class ProviderDeliveryExecution extends Data.Class<{
-	readonly deliveryId: DeliveryId
-	readonly callbackIndex: number
-	readonly idempotencyKey: string
-	readonly prepared: Option.Option<PreparedDeliveryInvocation>
-	readonly prepare: (
-		invocation: PreparedDeliveryInvocation,
-	) => Effect.Effect<PreparedDeliveryInvocation, DeliveryPreparationError>
-	readonly context: DeliveryContext
+    readonly deliveryId: DeliveryId;
+    readonly callbackIndex: number;
+    readonly idempotencyKey: string;
+    readonly prepared: Option.Option<PreparedDeliveryInvocation>;
+    readonly prepare: (
+        invocation: PreparedDeliveryInvocation,
+    ) => Effect.Effect<PreparedDeliveryInvocation, DeliveryPreparationError>;
+    readonly context: DeliveryContext;
 }> {}

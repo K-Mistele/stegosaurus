@@ -5,26 +5,26 @@
  * saving or routing them to the appropriate "mailbox"
  */
 
-import { Context, Effect, Schema } from 'effect'
+import { Context, Effect, Schema } from 'effect';
 
 /**
  * Mailbox was unavailable for network/storage reasons, webhook should receive 503
  */
 export class MailboxDeliveryUnavailable extends Schema.TaggedError<MailboxDeliveryUnavailable>()(
-	'MailboxDeliveryUnavailable',
-	{
-		reason: Schema.String,
-	},
+    'MailboxDeliveryUnavailable',
+    {
+        reason: Schema.String,
+    },
 ) {}
 
 /**
  * admission cannot be accepted e.g. capacity exhaustion
  */
 export class MailboxDeliveryRejected extends Schema.TaggedError<MailboxDeliveryRejected>()('MailboxDeliveryRejected', {
-	reason: Schema.String,
+    reason: Schema.String,
 }) {}
 
-export type MailboxDeliveryError = MailboxDeliveryUnavailable | MailboxDeliveryRejected
+export type MailboxDeliveryError = MailboxDeliveryUnavailable | MailboxDeliveryRejected;
 
 /**
  * The provider event delivered to a mailbox.
@@ -39,26 +39,30 @@ export type MailboxDeliveryError = MailboxDeliveryUnavailable | MailboxDeliveryR
  *
  */
 export const DeliveryAdmission = Schema.TaggedStruct('DeliveryAdmission', {
-	namespace: Schema.NonEmptyString,
-	provider: Schema.NonEmptyString,
-	installationId: Schema.NonEmptyString,
-	resourceId: Schema.NonEmptyString,
-	eventId: Schema.NonEmptyString,
-	payload: Schema.Json,
-	interrupt: Schema.optionalKey(Schema.Literal(true)),
-})
-export type DeliveryAdmission = Schema.Schema.Type<typeof DeliveryAdmission>
+    namespace: Schema.NonEmptyString,
+    provider: Schema.NonEmptyString,
+    installationId: Schema.NonEmptyString,
+    resourceId: Schema.NonEmptyString,
+    eventId: Schema.NonEmptyString,
+    payload: Schema.Json,
+    interrupt: Schema.optionalKey(Schema.Literal(true)),
+});
+
+export type DeliveryAdmission = Schema.Schema.Type<typeof DeliveryAdmission>;
 
 /** An admission as JSON text, for stores that keep it as a string. */
-export const DeliveryAdmissionJson = Schema.fromJsonString(DeliveryAdmission)
+export const DeliveryAdmissionJson = Schema.fromJsonString(DeliveryAdmission);
 
 /** A collision-free, stable key for the mailbox addressed by an admission. */
-export type DeliveryMailboxAddress = Pick<DeliveryAdmission, 'namespace' | 'provider' | 'installationId' | 'resourceId'>
+export type DeliveryMailboxAddress = Pick<
+    DeliveryAdmission,
+    'namespace' | 'provider' | 'installationId' | 'resourceId'
+>;
 
 export const deliveryMailboxKey = (admission: DeliveryMailboxAddress) =>
-	[admission.namespace, admission.provider, admission.installationId, admission.resourceId]
-		.map((segment) => `${segment.length}:${segment}`)
-		.join('|')
+    [admission.namespace, admission.provider, admission.installationId, admission.resourceId]
+        .map((segment) => `${segment.length}:${segment}`)
+        .join('|');
 
 /**
  * Indicates that an event was delivered to a mailbox correctly
@@ -68,14 +72,15 @@ export const deliveryMailboxKey = (admission: DeliveryMailboxAddress) =>
  * @property accepted - indicates if accepted. could be false due to already delivered, still return 200 in this case.
  */
 export const DeliveryReceipt = Schema.TaggedStruct('DeliveryReceipt', {
-	mailboxKey: Schema.NonEmptyString,
-	accepted: Schema.Boolean,
-})
-export type DeliveryReceipt = typeof DeliveryReceipt.Type
+    mailboxKey: Schema.NonEmptyString,
+    accepted: Schema.Boolean,
+});
+
+export type DeliveryReceipt = typeof DeliveryReceipt.Type;
 
 export class MailboxDelivery extends Context.Service<
-	MailboxDelivery,
-	{
-		readonly deliver: (admission: DeliveryAdmission) => Effect.Effect<DeliveryReceipt, MailboxDeliveryError>
-	}
+    MailboxDelivery,
+    {
+        readonly deliver: (admission: DeliveryAdmission) => Effect.Effect<DeliveryReceipt, MailboxDeliveryError>;
+    }
 >()('@stegosaurus/channels-delivery/MailboxDelivery') {}

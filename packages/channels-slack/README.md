@@ -53,22 +53,22 @@ Never commit the signing secret or bot token.
 ## Configure a provider
 
 ```ts
-import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery'
-import { SlackBot, SlackContent } from '@stegosaurus/channels-slack'
-import { Config, Effect } from 'effect'
+import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery';
+import { SlackBot, SlackContent } from '@stegosaurus/channels-slack';
+import { Config, Effect } from 'effect';
 
 const slack = SlackBot.make({
-	signingSecret: Config.Redacted('SLACK_SIGNING_SECRET'),
-	deliveryMode: DebounceDeliveryMode.make({ quietPeriodMs: 2_000, maxWaitMs: 10_000 }),
-	handlers: {
-		onNewMention: (event) =>
-			Effect.gen(function* () {
-				yield* event.thread.subscribe()
-				yield* event.thread.post(SlackContent.make({ markdown: 'On it.' }))
-			}),
-		onSubscribedThreadEvents: (event) => Effect.logInfo('Subscribed thread activity', event.events.length),
-	},
-})
+    signingSecret: Config.Redacted('SLACK_SIGNING_SECRET'),
+    deliveryMode: DebounceDeliveryMode.make({ quietPeriodMs: 2_000, maxWaitMs: 10_000 }),
+    handlers: {
+        onNewMention: (event) =>
+            Effect.gen(function* () {
+                yield* event.thread.subscribe();
+                yield* event.thread.post(SlackContent.make({ markdown: 'On it.' }));
+            }),
+        onSubscribedThreadEvents: (event) => Effect.logInfo('Subscribed thread activity', event.events.length),
+    },
+});
 ```
 
 Add `slack` to the providers passed to `Channels.make` or a host-specific wrapper such as `ChannelsCloudflare.make`. The bot builds no Slack client of its own: the webhook half, the callbacks, and sent output all use the `SlackApi` the application provides, usually `SlackApiLive` (for example `bot.start(Layer.merge(NodeCrypto.layer, SlackApiLive))`). Tests can provide a fake `SlackApi` layer instead. See `examples/alchemy-cloudflare` for a complete Worker and Durable Object setup.
@@ -79,13 +79,13 @@ Messages carry `files: ReadonlyArray<SlackFile>`, whether they come from a webho
 
 ```ts
 onSubscribedThreadEvents: (event) =>
-	Effect.forEach(
-		event.events.flatMap((threadEvent) =>
-			Predicate.isTagged(threadEvent, 'SlackMessageReceived') ? threadEvent.message.files : [],
-		),
-		(file) => file.downloadBytes({ maxBytes: 10 * 1024 * 1024 }),
-		{ concurrency: 4 },
-	)
+    Effect.forEach(
+        event.events.flatMap((threadEvent) =>
+            Predicate.isTagged(threadEvent, 'SlackMessageReceived') ? threadEvent.message.files : [],
+        ),
+        (file) => file.downloadBytes({ maxBytes: 10 * 1024 * 1024 }),
+        { concurrency: 4 },
+    );
 ```
 
 - `file.download()` streams the bytes without buffering. `file.downloadBytes({ maxBytes })` buffers them and fails with `SlackFileSizeLimitExceeded` from the declared size, `Content-Length`, or the running byte count, before it exceeds the bound.
@@ -96,11 +96,11 @@ onSubscribedThreadEvents: (event) =>
 
 ```ts
 const shareReport = event.thread.uploadFile({
-	filename: 'report.csv',
-	bytes: new TextEncoder().encode('name,count\nalpha,1\n'),
-	title: 'Report',
-	initialComment: 'Here is the report.',
-})
+    filename: 'report.csv',
+    bytes: new TextEncoder().encode('name,count\nalpha,1\n'),
+    title: 'Report',
+    initialComment: 'Here is the report.',
+});
 ```
 
 Uploads use Slack's external upload flow: `files.getUploadURLExternal`, a raw-byte `POST` to the returned upload URL, then `files.completeUploadExternal` with `channel_id` and, for threads, `thread_ts`. The bot token goes only to the two Web API calls, never to the upload URL. Inputs hold at most 50 MB in memory. A `missing_scope` response fails with `SlackFileAuthorizationError` naming `files:write`. Other failures are `SlackApiError` values whose `operation` names the stage (`get_file_upload_url`, `upload_file_bytes`, or `complete_file_upload`). The sequence is not retried as a whole, because a failed completion may already have shared the file.

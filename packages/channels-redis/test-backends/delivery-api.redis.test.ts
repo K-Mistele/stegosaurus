@@ -3,13 +3,13 @@
  * provider webhook and `bot.deliveryApi`, polls the store on its own, and a remote worker finishes a
  * handed-off delivery through the generated client.
  */
-import { deliveryApiScenario } from '../../channels-delivery/test/delivery-api-scenario'
-import { ChannelsRedis } from '../src'
-import { client, flushDatabase } from './redis'
+import { deliveryApiScenario } from '../../channels-delivery/test/delivery-api-scenario';
+import { ChannelsRedis } from '../src';
+import { client, flushDatabase } from './redis';
 
 deliveryApiScenario('redis', {
-	namespace: 'channels-redis-test',
-	storage: ChannelsRedis.make({ claimLimit: 10, polling: { intervalMs: 10 } }),
-	client,
-	empty: flushDatabase,
-})
+    namespace: 'channels-redis-test',
+    storage: ChannelsRedis.make({ claimLimit: 10, polling: { intervalMs: 10 } }),
+    client,
+    empty: flushDatabase,
+});
