@@ -33,7 +33,7 @@ export type DownloadLinearFileInput = {
 const isRedirect = (response: HttpClientResponse) => response.status >= 300 && response.status < 400;
 
 const redirectError = (message: string) =>
-    new LinearFileRedirectError(linearProviderErrorDetails('download_file', { message }));
+    LinearFileRedirectError.make(linearProviderErrorDetails('download_file', { message }));
 
 const redirectTarget = (response: HttpClientResponse, current: string) => {
     const location = response.headers.location;
@@ -62,7 +62,7 @@ const openHop = (url: string, policy: LinearFileTransferPolicy) =>
             duration: Duration.millis(policy.timeoutMs),
             orElse: () =>
                 Effect.fail(
-                    new LinearTransportError(
+                    LinearTransportError.make(
                         linearProviderErrorDetails('download_file', {
                             retryable: true,
                             message: 'Linear file request timed out',
@@ -80,7 +80,7 @@ export const downloadLinearFile = Effect.fn('linear.api.download_file')(function
     const canonical = canonicalLinearFileUrl(input.request.url);
 
     if (canonical === null)
-        return yield* new LinearFileOriginRejectedError(
+        return yield* LinearFileOriginRejectedError.make(
             linearProviderErrorDetails('download_file', { message: 'Not a canonical Linear upload URL' }),
         );
     let url = canonical;
@@ -97,14 +97,13 @@ export const downloadLinearFile = Effect.fn('linear.api.download_file')(function
     const download: LinearFileDownload<LinearTransportError> = {
         contentLength: parseContentLength(opened.headers['content-length']),
         stream: opened.stream.pipe(
-            Stream.mapError(
-                () =>
-                    new LinearTransportError(
-                        linearProviderErrorDetails('download_file', {
-                            retryable: true,
-                            message: 'Linear file stream failed',
-                        }),
-                    ),
+            Stream.mapError(() =>
+                LinearTransportError.make(
+                    linearProviderErrorDetails('download_file', {
+                        retryable: true,
+                        message: 'Linear file stream failed',
+                    }),
+                ),
             ),
         ),
     };

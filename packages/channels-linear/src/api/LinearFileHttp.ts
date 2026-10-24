@@ -33,17 +33,17 @@ export const inspectLinearFileResponse = (
     if (status >= 200 && status < 300) return Effect.succeed(response);
 
     if (credentialed && status === 401)
-        return Effect.fail(new LinearAuthenticationError(linearProviderErrorDetails(operation, { status })));
+        return Effect.fail(LinearAuthenticationError.make(linearProviderErrorDetails(operation, { status })));
 
     if (credentialed && status === 403)
-        return Effect.fail(new LinearForbiddenError(linearProviderErrorDetails(operation, { status })));
+        return Effect.fail(LinearForbiddenError.make(linearProviderErrorDetails(operation, { status })));
 
     if (status === 404)
-        return Effect.fail(new LinearResourceNotFoundError(linearProviderErrorDetails(operation, { status })));
+        return Effect.fail(LinearResourceNotFoundError.make(linearProviderErrorDetails(operation, { status })));
 
     if (status === 429)
         return Effect.fail(
-            new LinearRateLimitedError(
+            LinearRateLimitedError.make(
                 linearProviderErrorDetails(operation, {
                     status,
                     retryable: true,
@@ -54,8 +54,8 @@ export const inspectLinearFileResponse = (
 
     if (status >= 500)
         return Effect.fail(
-            new LinearUnavailableError(linearProviderErrorDetails(operation, { status, retryable: true })),
+            LinearUnavailableError.make(linearProviderErrorDetails(operation, { status, retryable: true })),
         );
 
-    return Effect.fail(new LinearFileTransferRejectedError(linearProviderErrorDetails(operation, { status })));
+    return Effect.fail(LinearFileTransferRejectedError.make(linearProviderErrorDetails(operation, { status })));
 };

@@ -5,7 +5,7 @@ import {
     WebhookAuthenticationError,
     WebhookPayloadInvalidError,
 } from '@stegosaurus/channels-delivery/ProviderWebhooks';
-import { Effect, Logger, Schema } from 'effect';
+import { Effect, Logger, Schema, Array as Arr } from 'effect';
 import { Headers } from 'effect/http';
 
 import { issueCreatePayload, makeLinearTestProvider, signedLinearBody, signedLinearInput } from './fixtures';
@@ -63,9 +63,7 @@ describe('Linear webhook handling', () => {
         Effect.gen(function* () {
             const logs: Array<string> = [];
 
-            const logger = Logger.layer([
-                Logger.make((entry) => logs.push(JSON.stringify(Logger.formatStructured.log(entry)))),
-            ]);
+            const logger = Logger.layer([Logger.make((entry) => logs.push(Logger.formatJson.log(entry)))]);
 
             const provider = makeLinearTestProvider();
 
@@ -97,7 +95,7 @@ describe('Linear webhook handling', () => {
 
             expect(invalidEnvelopeError).toEqual(WebhookPayloadInvalidError.make({ reason: 'invalid_event_envelope' }));
 
-            const output = logs.join('\n');
+            const output = Arr.join(logs, '\n');
             expect(output).toContain('"decode_stage":"headers"');
             expect(output).toContain('"has_linear_signature":false');
             expect(output).toContain('"decode_stage":"json"');
@@ -114,9 +112,7 @@ describe('Linear webhook handling', () => {
         Effect.gen(function* () {
             const logs: Array<string> = [];
 
-            const logger = Logger.layer([
-                Logger.make((entry) => logs.push(JSON.stringify(Logger.formatStructured.log(entry)))),
-            ]);
+            const logger = Logger.layer([Logger.make((entry) => logs.push(Logger.formatJson.log(entry)))]);
 
             const payload = {
                 ...issueCreatePayload,
@@ -129,7 +125,7 @@ describe('Linear webhook handling', () => {
 
             expect(error).toEqual(WebhookPayloadInvalidError.make({ reason: 'invalid_supported_event' }));
 
-            const output = logs.join('\n');
+            const output = Arr.join(logs, '\n');
             expect(output).toContain('"decode_stage":"supported_event"');
             expect(output).toContain('"/data/number"');
             expect(output).not.toContain('private-supported-boundary-sentinel');

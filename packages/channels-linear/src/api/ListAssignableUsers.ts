@@ -1,4 +1,4 @@
-import { Effect, Schema, Struct } from 'effect';
+import { Effect, Schema, Struct, Array as Arr } from 'effect';
 
 import { type LinearListAssignableUsersRequest, LinearUserPageOptions } from '../LinearApiContract';
 import { LinearIssueId } from '../LinearIdentity';
@@ -42,9 +42,10 @@ export const listAssignableUsers = Effect.fn('linear.api.list_assignable_users')
         }).pipe(
             Effect.map(({ issue }) =>
                 LinearUserPage.make({
-                    users: issue.team.members.nodes
-                        .map(projectLinearUser)
-                        .filter((value) => value.active && !value.app && value.isAssignable),
+                    users: Arr.filter(
+                        Arr.map(issue.team.members.nodes, projectLinearUser),
+                        (value) => value.active && !value.app && value.isAssignable,
+                    ),
                     pageInfo: LinearPageInfo.make(issue.team.members.pageInfo),
                 }),
             ),

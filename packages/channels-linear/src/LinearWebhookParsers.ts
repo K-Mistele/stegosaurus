@@ -1,4 +1,4 @@
-import { Effect, Match, Predicate, Schema } from 'effect';
+import { Effect, Match, Predicate, Schema, Array as Arr } from 'effect';
 
 import { LinearCommentId, LinearIssueId, LinearUserId } from './LinearIdentity';
 import {
@@ -11,12 +11,12 @@ import {
     LinearWebhookActor,
 } from './LinearWebhookEventSchemas';
 
-export class LinearWebhookRelationshipError extends Schema.TaggedError<LinearWebhookRelationshipError>()(
-    'LinearWebhookRelationshipError',
-    {
-        reason: Schema.Literals(['notification_identity_mismatch', 'session_identity_mismatch']),
-    },
-) {}
+export class LinearWebhookRelationshipError extends Schema.TaggedError<
+    LinearWebhookRelationshipError,
+    { readonly brand: unique symbol }
+>()('LinearWebhookRelationshipError', {
+    reason: Schema.Literals(['notification_identity_mismatch', 'session_identity_mismatch']),
+}) {}
 
 const sameWhenPresent = <A>(left: A | null | undefined, right: A | null | undefined): boolean =>
     Predicate.isNullish(left) || Predicate.isNullish(right) || left === right;
@@ -80,7 +80,9 @@ const agentSessionRelationshipsMatch = (webhook: LinearAgentSessionEventWebhookT
     )
         return false;
 
-    return collection(webhook.previousComments).every((comment) => sameWhenPresent(comment.issueId, session.issueId));
+    return Arr.every(collection(webhook.previousComments), (comment) =>
+        sameWhenPresent(comment.issueId, session.issueId),
+    );
 };
 
 export const normalizeLinearAppUserNotificationWebhook = (webhook: LinearAppUserNotificationWebhookType) =>
@@ -146,13 +148,13 @@ const normalizeAgentSession = (
                 commentId: nullable(created.agentSession.commentId),
                 sourceCommentId: nullable(created.agentSession.sourceCommentId),
                 promptContext: nullable(created.promptContext),
-                previousComments: collection(created.previousComments).map((comment) => ({
+                previousComments: Arr.map(collection(created.previousComments), (comment) => ({
                     id: comment.id,
                     body: comment.body,
                     issueId: nullable(comment.issueId),
                     userId: nullable(comment.userId),
                 })),
-                guidance: collection(created.guidance).map((rule) => ({
+                guidance: Arr.map(collection(created.guidance), (rule) => ({
                     body: rule.body,
                     origin: rule.origin.type,
                 })),
@@ -167,13 +169,13 @@ const normalizeAgentSession = (
                 commentId: nullable(prompted.agentSession.commentId),
                 sourceCommentId: nullable(prompted.agentSession.sourceCommentId),
                 promptContext: nullable(prompted.promptContext),
-                previousComments: collection(prompted.previousComments).map((comment) => ({
+                previousComments: Arr.map(collection(prompted.previousComments), (comment) => ({
                     id: comment.id,
                     body: comment.body,
                     issueId: nullable(comment.issueId),
                     userId: nullable(comment.userId),
                 })),
-                guidance: collection(prompted.guidance).map((rule) => ({
+                guidance: Arr.map(collection(prompted.guidance), (rule) => ({
                     body: rule.body,
                     origin: rule.origin.type,
                 })),

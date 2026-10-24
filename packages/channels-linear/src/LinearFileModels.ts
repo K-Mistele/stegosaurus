@@ -1,4 +1,4 @@
-import { Match, Predicate, Schema } from 'effect';
+import { Match, Predicate, Schema, Array as Arr, String as Str } from 'effect';
 import type { Nodes } from 'mdast';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
@@ -15,7 +15,8 @@ export const linearMaxUploadBytes = 50 * 1024 * 1024;
 
 const linearFilePathSegment = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 
-const isLinearFilePathSegment = (segment: string) => linearFilePathSegment.test(segment) && !segment.includes('..');
+const isLinearFilePathSegment = (segment: string) =>
+    linearFilePathSegment.test(segment) && !Str.includes('..')(segment);
 
 /**
  * Returns the canonical `https://uploads.linear.app/<workspace>/<asset>/<file>` form of a Linear upload URL, or
@@ -26,9 +27,9 @@ export const canonicalLinearFileUrl = (value: string): string | null => {
     const url = new URL(value);
 
     if (url.origin !== linearFileOrigin || url.username !== '' || url.password !== '') return null;
-    const segments = url.pathname.split('/').slice(1);
+    const segments = Str.split(url.pathname, '/').slice(1);
 
-    if (segments.length !== 3 || !segments.every(isLinearFilePathSegment)) return null;
+    if (segments.length !== 3 || !Arr.every(segments, isLinearFilePathSegment)) return null;
 
     return `${url.origin}${url.pathname}`;
 };
@@ -124,14 +125,14 @@ export const defaultLinearFileTransferPolicy = LinearFileTransferPolicy.make({
     timeoutMs: 60_000,
 });
 
-export class LinearFileSizeLimitExceeded extends Schema.TaggedError<LinearFileSizeLimitExceeded>()(
-    'LinearFileSizeLimitExceeded',
-    {
-        maxBytes: Schema.Int,
-        observedBytes: LinearByteCount,
-        source: Schema.Literals(['declared_size', 'content_length', 'received_bytes']),
-    },
-) {}
+export class LinearFileSizeLimitExceeded extends Schema.TaggedError<
+    LinearFileSizeLimitExceeded,
+    { readonly brand: unique symbol }
+>()('LinearFileSizeLimitExceeded', {
+    maxBytes: Schema.Int,
+    observedBytes: LinearByteCount,
+    source: Schema.Literals(['declared_size', 'content_length', 'received_bytes']),
+}) {}
 
 const contentTypeByExtension = new Map([
     ['csv', 'text/csv'],
@@ -161,11 +162,11 @@ const contentTypeByExtension = new Map([
 
 const contentTypeFromName = (name: string | null) => {
     if (name === null) return null;
-    const extension = /\.([A-Za-z0-9]+)$/.exec(name)?.[1]?.toLowerCase();
+    const extension = /\.([A-Za-z0-9]+)$/.exec(name)?.[1];
 
     if (Predicate.isUndefined(extension)) return null;
 
-    return contentTypeByExtension.get(extension) ?? null;
+    return contentTypeByExtension.get(Str.toLowerCase(extension)) ?? null;
 };
 
 type LinearFileCandidate = {
@@ -183,15 +184,15 @@ const textOf = (node: Nodes): string =>
     Match.value(node).pipe(
         Match.discriminator('type')('text', 'inlineCode', (literal) => literal.value),
         Match.discriminator('type')('image', (image) => image.alt ?? ''),
-        Match.orElse((other) => childrenOf(other).map(textOf).join('')),
+        Match.orElse((other) => Arr.join(Arr.map(childrenOf(other), textOf), '')),
     );
 
 const safeLabel = (label: string | null | undefined, url: string) => {
-    const trimmed = label?.trim() ?? '';
+    const trimmed = Str.trim(label ?? '');
 
     if (trimmed.length === 0 || trimmed === url) return null;
 
-    return trimmed.slice(0, 255);
+    return Str.slice(0, 255)(trimmed);
 };
 
 const collectDefinitions = (node: Nodes, definitions: Map<string, string>) => {
@@ -241,7 +242,7 @@ export const discoverLinearFileRecords = (
     ref: LinearFileRef,
     markdown: string | null,
 ): ReadonlyArray<LinearFileRecord> => {
-    if (markdown === null || !markdown.toLowerCase().includes('uploads.linear.app')) return [];
+    if (markdown === null || !Str.includes('uploads.linear.app')(Str.toLowerCase(markdown))) return [];
 
     const tree = fromMarkdown(markdown, {
         extensions: [gfm()],

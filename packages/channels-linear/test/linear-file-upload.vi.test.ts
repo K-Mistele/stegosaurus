@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Effect, Layer, Match, Queue, Redacted, Schema } from 'effect';
+import { Effect, Layer, Match, Queue, Redacted, Schema, Array as Arr, Record as Rec, String as Str } from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 
 import { narrowLinearProviderErrors } from '../src/api/LinearApiErrors';
@@ -35,7 +35,7 @@ type UploadScript = {
     readonly attachmentSuccess?: boolean;
 };
 
-const linearReturnedStorageKey = assetUrl.replace('https://uploads.linear.app/', '');
+const linearReturnedStorageKey = Str.replace('https://uploads.linear.app/', '')(assetUrl);
 
 const uploadTarget = {
     assetUrl,
@@ -69,13 +69,13 @@ const makeHttp = (requests: Queue.Queue<RecordedRequest>, script: UploadScript =
                 url: web.url,
                 method: web.method,
                 authorization: web.headers.get('authorization'),
-                headers: Object.fromEntries(web.headers.entries()),
+                headers: Rec.fromEntries(web.headers.entries()),
                 operation,
                 variables: parsed?.variables ?? null,
                 body,
             });
 
-            if (web.url.startsWith('https://storage.googleapis.com/'))
+            if (Str.startsWith('https://storage.googleapis.com/')(web.url))
                 return HttpClientResponse.fromWeb(request, new Response(null, { status: script.putStatus ?? 200 }));
 
             const response = yield* Match.value(operation).pipe(
@@ -115,7 +115,7 @@ const makeHttp = (requests: Queue.Queue<RecordedRequest>, script: UploadScript =
     );
 
 const operationsOf = (recorded: ReadonlyArray<RecordedRequest>) =>
-    recorded.map((request) => request.operation ?? `${request.method} ${new URL(request.url).host}`);
+    Arr.map(recorded, (request) => request.operation ?? `${request.method} ${new URL(request.url).host}`);
 
 describe('Linear file upload', () => {
     it.effect('owns the fileUpload document, variables, and signed-target decoding', ({ expect }) =>
@@ -164,9 +164,9 @@ describe('Linear file upload', () => {
                 'cache-control': 'public, max-age=31536000',
                 'x-goog-meta-source': 'linear',
             });
-            expect(recorded.slice(0, 2).every((request) => request.authorization === 'Bearer token-never-log')).toBe(
-                true,
-            );
+            expect(
+                Arr.every(recorded.slice(0, 2), (request) => request.authorization === 'Bearer token-never-log'),
+            ).toBe(true);
             expect(Schema.is(LinearFileRecord)(file)).toBe(true);
             expect(file).toMatchObject({
                 ref: { organizationId: issue.organizationId, issueId: issue.issueId },
@@ -175,7 +175,7 @@ describe('Linear file upload', () => {
                 contentType: 'text/plain',
                 size: bytes.byteLength,
             });
-            expect(Object.values(file)).not.toContain(uploadUrl);
+            expect(Rec.values(file)).not.toContain(uploadUrl);
         }),
     );
 
@@ -219,8 +219,8 @@ describe('Linear file upload', () => {
 
                     const upload = Effect.flatMap(LinearApi, (api) =>
                         attach
-                            ? Effect.asVoid(api.uploadAttachment({ issue, input }))
-                            : Effect.asVoid(api.uploadFile({ issue, input })),
+                            ? api.uploadAttachment({ issue, input }).pipe(Effect.andThen(Effect.void))
+                            : api.uploadFile({ issue, input }).pipe(Effect.andThen(Effect.void)),
                     );
 
                     const error = yield* upload.pipe(Effect.provide(apiLayer(makeHttp(requests, script))), Effect.flip);

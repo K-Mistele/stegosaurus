@@ -2,12 +2,13 @@ import { describe, it } from '@effect/vitest';
 import { ProviderEventHandled, ProviderEventIgnored } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
 import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
-import { Effect, Layer } from 'effect';
+import { Effect, Layer, Array as Arr } from 'effect';
 import { vi } from 'vite-plus/test';
 
 import { LinearApi } from '../src/LinearApi';
 import type { LinearCallbackHandler, LinearCallbackHandlers } from '../src/LinearCallbacks';
 import { makeLinearEventProcessor } from '../src/LinearEventProcessor';
+import { LinearComment, LinearIssueAttachment, LinearReaction } from '../src/LinearResources';
 import {
     firstAttempt,
     appUserNotificationPayloads,
@@ -100,7 +101,7 @@ describe('Linear subscribed events', () => {
                 },
             ] as const;
 
-            const admissions = payloads.map((payload, index) =>
+            const admissions = Arr.map(payloads, (payload, index) =>
                 DeliveryAdmission.make({
                     namespace,
                     provider: 'linear',
@@ -132,20 +133,21 @@ describe('Linear subscribed events', () => {
                 .pipe(Effect.provide(services));
 
             expect(result).toEqual(ProviderEventHandled.make({}));
-            expect(callback.mock.calls[0]?.[0].events.map((event) => event._tag)).toEqual([
+            expect(Arr.map(callback.mock.calls[0]?.[0].events, (event) => event._tag)).toEqual([
                 'LinearCommentCreated',
                 'LinearReactionAdded',
                 'LinearIssueUpdated',
             ]);
+            expect(callback.mock.calls[0]?.[0].events[0]).toMatchObject({ comment: expect.any(LinearComment) });
             expect(callback.mock.calls[0]?.[0].events[0]).toMatchObject({
                 comment: {
-                    _tag: 'LinearComment',
                     ref: { issueId, commentId: 'comment-1' },
                     content: { markdown: 'one' },
                 },
             });
+            expect(callback.mock.calls[0]?.[0].events[1]).toMatchObject({ reaction: expect.any(LinearReaction) });
             expect(callback.mock.calls[0]?.[0].events[1]).toMatchObject({
-                reaction: { _tag: 'LinearReaction', issueId, commentId: 'comment-1' },
+                reaction: { issueId, commentId: 'comment-1' },
             });
             expect(callback.mock.calls[0]?.[0].events[2]?.actor).toBeNull();
         }),
@@ -185,7 +187,7 @@ describe('Linear subscribed events', () => {
                 },
             ] as const;
 
-            const admissions = payloads.map((payload, index) =>
+            const admissions = Arr.map(payloads, (payload, index) =>
                 DeliveryAdmission.make({
                     namespace,
                     provider: 'linear',
@@ -207,12 +209,12 @@ describe('Linear subscribed events', () => {
                 .process([admissions[0], admissions[1]], yield* firstAttempt())
                 .pipe(Effect.provide(services));
             const event = callback.mock.calls[0]?.[0];
-            expect(event?.events).toHaveLength(2);
-            expect(event?.events[0]).toMatchObject({ _tag: 'LinearIssueUpdated', changes: [] });
-            expect(event?.events[1]).toMatchObject({
-                _tag: 'LinearCommentUpdated',
-                previousBody: 'before',
-            });
+            expect(Arr.map(event?.events ?? [], (subscribed) => subscribed._tag)).toEqual([
+                'LinearIssueUpdated',
+                'LinearCommentUpdated',
+            ]);
+            expect(event?.events[0]).toMatchObject({ changes: [] });
+            expect(event?.events[1]).toMatchObject({ previousBody: 'before' });
 
             const attachmentAdmission = DeliveryAdmission.make({
                 namespace,
@@ -254,7 +256,10 @@ describe('Linear subscribed events', () => {
             expect(reducedIssue?.ref.teamId).toBeNull();
             expect(reducedIssue?.identifier).toBeNull();
             expect(callback.mock.calls[1]?.[0].events[0]).toMatchObject({
-                attachment: { _tag: 'LinearIssueAttachment', issueId, id: 'attachment-1' },
+                attachment: expect.any(LinearIssueAttachment),
+            });
+            expect(callback.mock.calls[1]?.[0].events[0]).toMatchObject({
+                attachment: { issueId, id: 'attachment-1' },
             });
             yield* makeLinearEventProcessor({ namespace, handlers })
                 .process([attachmentAdmission, admissions[0]], yield* firstAttempt())
@@ -288,7 +293,7 @@ describe('Linear subscribed events', () => {
                 },
             } as const;
 
-            const admissions = [notification, comment].map((payload, index) =>
+            const admissions = Arr.map([notification, comment], (payload, index) =>
                 DeliveryAdmission.make({
                     namespace,
                     provider: 'linear',
@@ -314,7 +319,9 @@ describe('Linear subscribed events', () => {
                 .pipe(Effect.provide(services));
 
             expect(result).toEqual(ProviderEventHandled.make({}));
-            expect(callback.mock.calls[0]?.[0].events.map((event) => event._tag)).toEqual(['LinearCommentCreated']);
+            expect(Arr.map(callback.mock.calls[0]?.[0].events, (event) => event._tag)).toEqual([
+                'LinearCommentCreated',
+            ]);
         }),
     );
 
@@ -344,7 +351,7 @@ describe('Linear subscribed events', () => {
                 },
             } as const;
 
-            const admissions = [notification, comment].map((payload, index) =>
+            const admissions = Arr.map([notification, comment], (payload, index) =>
                 DeliveryAdmission.make({
                     namespace,
                     provider: 'linear',
@@ -367,7 +374,9 @@ describe('Linear subscribed events', () => {
                 .pipe(Effect.provide(services));
 
             expect(result).toEqual(ProviderEventHandled.make({}));
-            expect(onMentioned.mock.calls[0]?.[0].events.map((event) => event._tag)).toEqual(['LinearCommentCreated']);
+            expect(Arr.map(onMentioned.mock.calls[0]?.[0].events, (event) => event._tag)).toEqual([
+                'LinearCommentCreated',
+            ]);
             expect(onSubscribedEvent).not.toHaveBeenCalled();
         }),
     );

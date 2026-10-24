@@ -10,10 +10,25 @@ import { ExternalLink } from '@stegosaurus/channels-delivery/DeliveryLink';
 import { type DeliveryClient } from '@stegosaurus/channels-delivery/DeliveryHttpClient';
 import * as DeliveryHttpClient from '@stegosaurus/channels-delivery/DeliveryHttpClient';
 import { type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
+import { DeliveryOperationUnsupported } from '@stegosaurus/channels-delivery/DeliveryControl';
 import { DeliveryActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
 import * as Channels from '@stegosaurus/channels-delivery/Channels';
 import * as ChannelsMemory from '@stegosaurus/channels-delivery/ChannelsMemory';
-import { Clock, Config, Data, Effect, Layer, Predicate, Queue, Redacted, Ref, Schedule, type Schema } from 'effect';
+import {
+    Clock,
+    Config,
+    Data,
+    Effect,
+    Layer,
+    Predicate,
+    Queue,
+    Redacted,
+    Ref,
+    Schedule,
+    type Schema,
+    Array as Arr,
+    String as Str,
+} from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 import { expect } from 'vite-plus/test';
 
@@ -44,11 +59,12 @@ type Shown = string;
 const describeActivity = (request: LinearCreateAgentActivityRequest): Shown => {
     const { content } = request;
 
-    const kind = Predicate.isTagged(content, 'Thought') && request.ephemeral ? 'thought~' : content._tag.toLowerCase();
+    const kind =
+        Predicate.isTagged(content, 'Thought') && request.ephemeral ? 'thought~' : Str.toLowerCase(content._tag);
 
     const options =
         Predicate.isTagged(content, 'Elicitation') && content.options !== undefined
-            ? ` [${content.options.join('|')}]`
+            ? ` [${Arr.join(content.options, '|')}]`
             : '';
 
     return `${kind}: ${content.body}${options}`;
@@ -128,14 +144,20 @@ const makeFakeLinear = (options: FakeLinearOptions = {}) =>
                     if (request.addedExternalUrls !== undefined) {
                         yield* Queue.offer(
                             shown,
-                            `link: ${request.addedExternalUrls.map(({ label, url }) => `${label} ${url}`).join(', ')}`,
+                            `link: ${Arr.join(
+                                Arr.map(request.addedExternalUrls, ({ label, url }) => `${label} ${url}`),
+                                ', ',
+                            )}`,
                         );
                     }
 
                     if (request.plan !== undefined) {
                         yield* Queue.offer(
                             shown,
-                            `plan: ${request.plan.map(({ content, status }) => `${content} [${status}]`).join(', ')}`,
+                            `plan: ${Arr.join(
+                                Arr.map(request.plan, ({ content, status }) => `${content} [${status}]`),
+                                ', ',
+                            )}`,
                         );
                     }
                 }),
@@ -150,7 +172,8 @@ const makeFakeLinear = (options: FakeLinearOptions = {}) =>
                 Queue.offer(shown, `edit ${request.comment.commentId}: ${request.content.markdown}`).pipe(
                     Effect.as(commentOn(request.comment.issueId, request.comment.commentId, request.content.markdown)),
                 ),
-            deleteComment: (request) => Queue.offer(shown, `delete ${request.comment.commentId}`).pipe(Effect.asVoid),
+            deleteComment: (request) =>
+                Queue.offer(shown, `delete ${request.comment.commentId}`).pipe(Effect.andThen(Effect.void)),
         });
 
         return { api, shown, requests };
@@ -204,7 +227,7 @@ const startBot = (api: Layer.Layer<LinearApi>) =>
                             ),
                         onAgentSessionPrompted: (event, delivery) =>
                             Queue.offer(events, Event.SessionPrompted({ delivery, signal: event.prompt.signal })).pipe(
-                                Effect.asVoid,
+                                Effect.andThen(Effect.void),
                             ),
                         onIssueCreated: (_event, delivery) =>
                             Queue.offer(events, Event.IssueCreated({ delivery })).pipe(
@@ -324,16 +347,14 @@ describe('Linear remote delivery: Agent Session', () => {
                     .update({ ...target, messageId: summary, message: { markdown: 'other' } })
                     .pipe(Effect.flip);
 
-                expect(edit).toMatchObject({
-                    _tag: 'DeliveryOperationUnsupported',
-                    operation: 'UpdateMessage',
-                });
+                expect(edit).toBeInstanceOf(DeliveryOperationUnsupported);
+                expect(edit).toMatchObject({ operation: 'UpdateMessage' });
                 yield* client.activity.set({ ...target, activity: DeliveryActivity.cases.Idle.make({}) });
                 yield* client.complete({ ...target, payload: { markdown: 'Fixed the flaky test.' } });
                 expect(yield* Queue.take(linear.shown)).toBe('response: Fixed the flaky test.');
 
                 const retired = yield* awaitRetired(client, delivery);
-                expect(retired.output.map(({ kind, state }) => `${kind}:${state}`)).toEqual([
+                expect(Arr.map(retired.output, ({ kind, state }) => `${kind}:${state}`)).toEqual([
                     'AddExternalLink:Delivered',
                     'SetActivity:Delivered',
                     'SetActivity:Delivered',
@@ -342,8 +363,8 @@ describe('Linear remote delivery: Agent Session', () => {
                     'PresentOutcome:Delivered',
                 ]);
                 expect(yield* Queue.size(linear.shown)).toBe(0);
-                const ids = (yield* Ref.get(linear.requests)).map(({ activityId }) => activityId);
-                expect(ids.every((id) => id !== undefined)).toBe(true);
+                const ids = Arr.map(yield* Ref.get(linear.requests), ({ activityId }) => activityId);
+                expect(Arr.every(ids, (id) => id !== undefined)).toBe(true);
                 expect(new Set(ids).size).toBe(ids.length);
             }),
     );
@@ -364,7 +385,7 @@ describe('Linear remote delivery: Agent Session', () => {
                 });
                 expect(yield* Queue.size(linear.shown)).toBe(0);
 
-                const responses = (yield* Ref.get(linear.requests)).filter(({ content }) =>
+                const responses = Arr.filter(yield* Ref.get(linear.requests), ({ content }) =>
                     Predicate.isTagged(content, 'Response'),
                 );
 
@@ -429,7 +450,8 @@ describe('Linear remote delivery: Agent Session', () => {
                 yield* client.fail({ ...target, payload: { markdown: 'Stopped as requested.' } });
                 expect(yield* Queue.take(linear.shown)).toBe('error: Stopped as requested.');
                 const stop = yield* Queue.take(events);
-                expect(stop).toMatchObject({ _tag: 'SessionPrompted', signal: 'stop' });
+                expect(Event.$is('SessionPrompted')(stop)).toBe(true);
+                expect(stop).toMatchObject({ signal: 'stop' });
                 const retired = yield* awaitRetired(client, delivery);
                 expect(retired.interruptRequested).toBe(true);
                 expect(yield* Queue.size(linear.shown)).toBe(0);
@@ -491,7 +513,7 @@ describe('Linear remote delivery: output accepted while an earlier Linear output
                         ...target,
                         activity: DeliveryActivity.cases.Working.make({ message: 'Still going' }),
                     })
-                    .pipe(Effect.asVoid, Effect.orDie),
+                    .pipe(Effect.andThen(Effect.void), Effect.orDie),
             );
             yield* client.messages.create({
                 ...target,
@@ -521,10 +543,8 @@ describe('Linear remote delivery: issue', () => {
                 .set({ ...target, activity: DeliveryActivity.cases.Working.make({ message: 'x' }) })
                 .pipe(Effect.flip);
 
-            expect(refused).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'SetActivity',
-            });
+            expect(refused).toBeInstanceOf(DeliveryOperationUnsupported);
+            expect(refused).toMatchObject({ operation: 'SetActivity' });
 
             const progress = MessageId.make('progress');
             yield* client.messages.create({

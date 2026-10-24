@@ -1,7 +1,7 @@
 import { describe, it } from '@effect/vitest';
 import { ProviderEventHandled, ProviderEventIgnored } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
-import { Effect, Layer, Schema } from 'effect';
+import { Effect, Layer, Schema, Array as Arr } from 'effect';
 import { vi } from 'vite-plus/test';
 
 import { LinearApi } from '../src/LinearApi';
@@ -86,7 +86,7 @@ describe('Linear directed entry points', () => {
 
             expect(result).toEqual(ProviderEventHandled.make({}));
             expect(onMentioned).toHaveBeenCalledOnce();
-            expect(onMentioned.mock.calls[0]?.[0].events.every(Schema.is(LinearIssueOpened))).toBe(true);
+            expect(Arr.every(onMentioned.mock.calls[0]?.[0].events, Schema.is(LinearIssueOpened))).toBe(true);
             expect(onIssueCreated).not.toHaveBeenCalled();
         }),
     );
@@ -102,7 +102,9 @@ describe('Linear directed entry points', () => {
 
             expect(result).toEqual(ProviderEventHandled.make({}));
             expect(onAssigned).toHaveBeenCalledOnce();
-            expect(onAssigned.mock.calls[0]?.[0].events.map((event) => event._tag)).toEqual(['LinearIssueMention']);
+            expect(Arr.map(onAssigned.mock.calls[0]?.[0].events, (event) => event._tag)).toEqual([
+                'LinearIssueMention',
+            ]);
         }),
     );
 });

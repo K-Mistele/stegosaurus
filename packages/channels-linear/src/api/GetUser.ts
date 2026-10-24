@@ -15,7 +15,7 @@ const GetUserResponse = Schema.Struct({ user: LinearApiParticipant });
 
 export const getUser = Effect.fn('linear.api.get_user')((input: LinearGetUserRequest) => {
     if (input.issue.teamId === null) {
-        return Effect.fail(new LinearValidationError(linearProviderErrorDetails('get_user')));
+        return Effect.fail(LinearValidationError.make(linearProviderErrorDetails('get_user')));
     }
 
     return linearGraphql({

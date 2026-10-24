@@ -84,7 +84,7 @@ const activityInput = (request: LinearCreateAgentActivityRequest): CreateAgentAc
                     content,
                     signal: 'select',
                     signalMetadata: {
-                        options: choices.map((option) => SelectOption.make({ label: option, value: option })),
+                        options: Arr.map(choices, (option) => SelectOption.make({ label: option, value: option })),
                     },
                 };
             },

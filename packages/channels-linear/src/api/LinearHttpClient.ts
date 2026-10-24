@@ -37,28 +37,31 @@ export type LinearFixedCredentialOptions = {
     readonly accessToken: Redacted.Redacted;
 };
 
-const executeAuthenticated = (accessToken: Redacted.Redacted, input: LinearHttpRequest) =>
-    Effect.flatMap(HttpClient.HttpClient, (client) =>
-        client
-            .pipe(
-                HttpClient.mapRequest(HttpClientRequestModule.prependUrl('https://api.linear.app')),
-                HttpClient.mapRequest(HttpClientRequestModule.bearerToken(accessToken)),
-                HttpClient.mapRequest(HttpClientRequestModule.acceptJson),
-            )
-            .execute(input.request),
-    ).pipe(
-        Effect.mapError(
-            () => new LinearTransportError(linearProviderErrorDetails(input.operation, { retryable: true })),
-        ),
-        Effect.withSpan('linear.http_request', {
-            attributes: { 'linear.operation': input.operation, method: input.request.method },
-        }),
-    );
+const executeAuthenticated = (
+    client: HttpClient.HttpClient,
+    accessToken: Redacted.Redacted,
+    input: LinearHttpRequest,
+) =>
+    client
+        .pipe(
+            HttpClient.mapRequest(HttpClientRequestModule.prependUrl('https://api.linear.app')),
+            HttpClient.mapRequest(HttpClientRequestModule.bearerToken(accessToken)),
+            HttpClient.mapRequest(HttpClientRequestModule.acceptJson),
+        )
+        .execute(input.request)
+        .pipe(
+            Effect.mapError(() =>
+                LinearTransportError.make(linearProviderErrorDetails(input.operation, { retryable: true })),
+            ),
+            Effect.withSpan('linear.http_request', {
+                attributes: { 'linear.operation': input.operation, method: input.request.method },
+            }),
+        );
 
-const sendFileRequest = (input: LinearHttpRequest) =>
-    Effect.flatMap(HttpClient.HttpClient, (client) => client.execute(input.request)).pipe(
-        Effect.mapError(
-            () => new LinearTransportError(linearProviderErrorDetails(input.operation, { retryable: true })),
+const sendFileRequest = (client: HttpClient.HttpClient, input: LinearHttpRequest) =>
+    client.execute(input.request).pipe(
+        Effect.mapError(() =>
+            LinearTransportError.make(linearProviderErrorDetails(input.operation, { retryable: true })),
         ),
         Effect.provideService(FetchHttpClient.RequestInit, { redirect: 'manual' }),
         Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
@@ -68,23 +71,20 @@ const sendFileRequest = (input: LinearHttpRequest) =>
     );
 
 const executeFileRequest = (
+    client: HttpClient.HttpClient,
     accessToken: Effect.Effect<Redacted.Redacted, LinearApiError>,
     input: LinearHttpRequest,
-): Effect.Effect<
-    HttpClientResponse,
-    LinearTransportError | LinearFileOriginRejectedError | LinearApiError,
-    HttpClient.HttpClient
-> => {
+): Effect.Effect<HttpClientResponse, LinearTransportError | LinearFileOriginRejectedError | LinearApiError> => {
     const url = input.request.url;
 
     if (!URL.canParse(url) || new URL(url).protocol !== 'https:')
-        return Effect.fail(new LinearFileOriginRejectedError(linearProviderErrorDetails(input.operation)));
+        return Effect.fail(LinearFileOriginRejectedError.make(linearProviderErrorDetails(input.operation)));
 
-    if (!isLinearFileOrigin(url)) return sendFileRequest(input);
+    if (!isLinearFileOrigin(url)) return sendFileRequest(client, input);
 
     return accessToken.pipe(
         Effect.flatMap((token) =>
-            sendFileRequest({
+            sendFileRequest(client, {
                 operation: input.operation,
                 request: HttpClientRequestModule.bearerToken(input.request, token),
             }),
@@ -94,10 +94,20 @@ const executeFileRequest = (
 
 /** Sends one Linear API request with whatever token `accessToken` yields. */
 const executeApiRequest = (
+    client: HttpClient.HttpClient,
     accessToken: Effect.Effect<Redacted.Redacted, LinearApiError>,
     input: LinearHttpRequest,
-): Effect.Effect<HttpClientResponse, LinearTransportError | LinearApiError, HttpClient.HttpClient> =>
-    accessToken.pipe(Effect.flatMap((token) => executeAuthenticated(token, input)));
+): Effect.Effect<HttpClientResponse, LinearTransportError | LinearApiError> =>
+    accessToken.pipe(Effect.flatMap((token) => executeAuthenticated(client, token, input)));
+
+/** A transport sending through `client` with whatever token `accessToken` yields. */
+const transportOperations = (
+    client: HttpClient.HttpClient,
+    accessToken: Effect.Effect<Redacted.Redacted, LinearApiError>,
+): Pick<LinearHttpClientOperations, 'execute' | 'executeFile'> => ({
+    execute: (input) => executeApiRequest(client, accessToken, input),
+    executeFile: (input) => executeFileRequest(client, accessToken, input),
+});
 
 /**
  * One organization-scoped, bearer-authenticated transport for Linear API operations, sending through
@@ -105,7 +115,7 @@ const executeApiRequest = (
  * sends one known token and cannot refresh.
  */
 export class LinearHttpClient extends Context.Service<LinearHttpClient, LinearHttpClientOperations>()(
-    '@stegosaurus/channels-linear/LinearHttpClient',
+    '@stegosaurus/channels-linear/api/LinearHttpClient',
     {
         make: Effect.gen(function* () {
             const credentials = yield* LinearCredentialResolver;
@@ -117,10 +127,7 @@ export class LinearHttpClient extends Context.Service<LinearHttpClient, LinearHt
                 organizationId: credentials.organizationId,
                 canRefresh: credentials.canRefresh,
                 invalidateCredential: credentials.invalidate,
-                execute: (input) =>
-                    executeApiRequest(accessToken, input).pipe(Effect.provideService(HttpClient.HttpClient, client)),
-                executeFile: (input) =>
-                    executeFileRequest(accessToken, input).pipe(Effect.provideService(HttpClient.HttpClient, client)),
+                ...transportOperations(client, accessToken),
             };
 
             return operations;
@@ -130,23 +137,19 @@ export class LinearHttpClient extends Context.Service<LinearHttpClient, LinearHt
     static readonly layer = Layer.effect(this, this.make);
 
     /** A transport that always sends one known token, through the `HttpClient` in context. It cannot refresh. */
+    /** A transport that always sends one known token through `client`. It cannot refresh. */
+    static readonly fixedCredential = (
+        client: HttpClient.HttpClient,
+        options: LinearFixedCredentialOptions,
+    ): LinearHttpClientOperations => ({
+        organizationId: options.organizationId,
+        canRefresh: false,
+        invalidateCredential: Effect.void,
+        ...transportOperations(client, Effect.succeed(options.accessToken)),
+    });
+
     static readonly makeFixedCredential = (options: LinearFixedCredentialOptions) =>
-        Effect.gen(function* () {
-            const client = yield* HttpClient.HttpClient;
-            const accessToken = Effect.succeed(options.accessToken);
-
-            const operations: LinearHttpClientOperations = {
-                organizationId: options.organizationId,
-                canRefresh: false,
-                invalidateCredential: Effect.void,
-                execute: (input) =>
-                    executeApiRequest(accessToken, input).pipe(Effect.provideService(HttpClient.HttpClient, client)),
-                executeFile: (input) =>
-                    executeFileRequest(accessToken, input).pipe(Effect.provideService(HttpClient.HttpClient, client)),
-            };
-
-            return operations;
-        });
+        Effect.map(HttpClient.HttpClient, (client) => LinearHttpClient.fixedCredential(client, options));
 
     static readonly layerFixedCredential = (options: LinearFixedCredentialOptions) =>
         Layer.effect(this, this.makeFixedCredential(options));

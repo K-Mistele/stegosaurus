@@ -158,8 +158,8 @@ export const linearDefaultOutcomeText = {
     AwaitingInput: 'Waiting for your reply.',
 } as const;
 
-const failed = (safeCode: string, retryable: boolean, retryAfterMs?: number) =>
-    new DeliveryOutputFailed(
+const failed = (safeCode: string, retryable: boolean, retryAfterMs: number | undefined) =>
+    DeliveryOutputFailed.make(
         Predicate.isUndefined(retryAfterMs)
             ? { provider: 'linear', retryable, safeCode }
             : { provider: 'linear', retryable, safeCode, retryAfterMs },
@@ -171,7 +171,7 @@ const withNote = (title: string, note: string | undefined) =>
 
 /** The plan as Agent Plan steps. Linear has no failed status, so a failed item is `canceled` and says why. */
 export const linearAgentPlanSteps = (plan: DeliveryPlan) =>
-    plan.items.map((item) =>
+    Arr.map(plan.items, (item) =>
         Match.value(item.state).pipe(
             Match.tagsExhaustive({
                 Pending: () => LinearAgentPlanStep.make({ content: item.title, status: 'pending' }),
@@ -193,7 +193,9 @@ export const linearAgentPlanSteps = (plan: DeliveryPlan) =>
 
 /** The thought that stands in for the Agent Plan: the first item in progress, if any. */
 const planThoughtText = (plan: DeliveryPlan) => {
-    const current = plan.items.find((item: DeliveryPlanItem) => Predicate.isTagged(item.state, 'InProgress'));
+    const current = Option.getOrUndefined(
+        Arr.findFirst(plan.items, (item: DeliveryPlanItem) => Predicate.isTagged(item.state, 'InProgress')),
+    );
 
     if (Predicate.isUndefined(current) || !Predicate.isTagged(current.state, 'InProgress')) return undefined;
 
@@ -206,7 +208,11 @@ const issueOutcomeMarkdown = (outcome: DeliveryOutcome, markdown: string) =>
         Match.tag('AwaitingInput', ({ options }) =>
             Arr.match(options ?? [], {
                 onEmpty: () => markdown,
-                onNonEmpty: (listed) => `${markdown}\n\n${listed.map((option) => `- ${option}`).join('\n')}`,
+                onNonEmpty: (listed) =>
+                    `${markdown}\n\n${Arr.join(
+                        Arr.map(listed, (option) => `- ${option}`),
+                        '\n',
+                    )}`,
             }),
         ),
         Match.orElse(() => markdown),
@@ -245,12 +251,12 @@ export const makeLinearOutputProcessor = (input: {
         const annotations = { delivery_id: attempt.deliveryId, operation_id: attempt.operationId };
 
         if (attempt.prepared.presentationVersion !== LinearDeliveryPresentationVersion) {
-            return yield* failed('unsupported_presentation_version', false);
+            return yield* failed('unsupported_presentation_version', false, undefined);
         }
 
         const destination = yield* Schema.decodeEffect(LinearDeliveryDestinationJson)(
             attempt.prepared.destination,
-        ).pipe(Effect.mapError(() => failed('destination_invalid', false)));
+        ).pipe(Effect.mapError(() => failed('destination_invalid', false, undefined)));
 
         /** Log a Linear failure with the operation it belongs to, then report it as retryable or not. */
         const reportLinearFailure =
@@ -265,12 +271,12 @@ export const makeLinearOutputProcessor = (input: {
 
         const encodeReceipt = (receipt: LinearOutputReceipt) =>
             Schema.encodeEffect(LinearOutputReceiptJson)(receipt).pipe(
-                Effect.mapError(() => failed('receipt_unencodable', false)),
+                Effect.mapError(() => failed('receipt_unencodable', false, undefined)),
                 Effect.map((encoded) => DeliveryOutputApplied.make({ receipt: encoded })),
             );
 
         const applied = DeliveryOutputApplied.make({});
-        const unsupported = Effect.fail(failed('unsupported_operation', false));
+        const unsupported = Effect.fail(failed('unsupported_operation', false, undefined));
 
         /** Log saved data this processor cannot read, then report it as final. */
         const reportUnreadable =
@@ -280,7 +286,7 @@ export const makeLinearOutputProcessor = (input: {
                     Effect.tapError((error) =>
                         Effect.logWarning(message, error).pipe(Effect.annotateLogs(annotations)),
                     ),
-                    Effect.mapError(() => failed(safeCode, false)),
+                    Effect.mapError(() => failed(safeCode, false, undefined)),
                 );
 
         /** A saved receipt, read back. */
@@ -297,10 +303,11 @@ export const makeLinearOutputProcessor = (input: {
                         Match.withReturnType<Effect.Effect<LinearCommentRef, DeliveryOutputFailed>>(),
                         Match.tagsExhaustive({
                             LinearIssueComment: ({ comment: posted }) => Effect.succeed(posted),
-                            LinearAgentActivity: () => Effect.fail(failed('message_reference_invalid', false)),
-                            LinearReaction: () => Effect.fail(failed('message_reference_invalid', false)),
-                            LinearAgentPlan: () => Effect.fail(failed('message_reference_invalid', false)),
-                            LinearPlanThought: () => Effect.fail(failed('message_reference_invalid', false)),
+                            LinearAgentActivity: () =>
+                                Effect.fail(failed('message_reference_invalid', false, undefined)),
+                            LinearReaction: () => Effect.fail(failed('message_reference_invalid', false, undefined)),
+                            LinearAgentPlan: () => Effect.fail(failed('message_reference_invalid', false, undefined)),
+                            LinearPlanThought: () => Effect.fail(failed('message_reference_invalid', false, undefined)),
                         }),
                     ),
                 ),
@@ -310,7 +317,7 @@ export const makeLinearOutputProcessor = (input: {
         const activationReactionTarget = Effect.fromOption(
             Option.fromUndefinedOr(attempt.prepared.activationTarget),
         ).pipe(
-            Effect.mapError(() => failed('activation_target_missing', false)),
+            Effect.mapError(() => failed('activation_target_missing', false, undefined)),
             Effect.flatMap((encoded) =>
                 Schema.decodeEffect(LinearActivationTargetJson)(encoded).pipe(
                     reportUnreadable('Linear output activation target could not be read', 'activation_target_invalid'),
@@ -318,7 +325,7 @@ export const makeLinearOutputProcessor = (input: {
             ),
             Effect.filterOrFail(
                 (target) => target.organizationId === input.bot.organizationId,
-                () => failed('destination_identity_mismatch', false),
+                () => failed('destination_identity_mismatch', false, undefined),
             ),
             Effect.map((target) =>
                 Match.value(target).pipe(
@@ -359,7 +366,6 @@ export const makeLinearOutputProcessor = (input: {
             );
 
             return linearApi.createReaction({ target, emoji: linearPortableReactions[reaction], reactionId }).pipe(
-                Effect.asVoid,
                 Effect.catchIf(
                     (error) => error.reason === 'already_exists',
                     () =>
@@ -385,7 +391,7 @@ export const makeLinearOutputProcessor = (input: {
             const notAReaction = () =>
                 Effect.logWarning('Linear reaction removal got a receipt that is not a reaction').pipe(
                     Effect.annotateLogs(annotations),
-                    Effect.andThen(Effect.fail(failed('reaction_reference_invalid', false))),
+                    Effect.andThen(Effect.fail(failed('reaction_reference_invalid', false, undefined))),
                 );
 
             return decodeReceipt(addedReference, 'reaction_reference_invalid').pipe(
@@ -433,7 +439,7 @@ export const makeLinearOutputProcessor = (input: {
 
         const toSession = (session: LinearAgentSessionDestination) => {
             if (session.organizationId !== input.bot.organizationId || session.appUserId !== input.bot.appUserId) {
-                return Effect.fail(failed('destination_identity_mismatch', false));
+                return Effect.fail(failed('destination_identity_mismatch', false, undefined));
             }
 
             const activityId = LinearAgentActivityId.make(attempt.idempotencyKey);
@@ -492,7 +498,7 @@ export const makeLinearOutputProcessor = (input: {
             /** How the session showed the plan last time, read from its presentation. Unreadable counts as never shown. */
             const shownPlan = (presentation: Schema.Json | undefined) =>
                 Predicate.isUndefined(presentation)
-                    ? Effect.succeed(undefined)
+                    ? Effect.undefined
                     : Schema.decodeEffect(LinearOutputReceiptJson)(presentation).pipe(
                           Effect.catchTag('SchemaError', (error) =>
                               Effect.logWarning(
@@ -590,7 +596,7 @@ export const makeLinearOutputProcessor = (input: {
 
         const toIssue = (target: LinearIssueDestination) => {
             if (target.organizationId !== input.bot.organizationId) {
-                return Effect.fail(failed('destination_identity_mismatch', false));
+                return Effect.fail(failed('destination_identity_mismatch', false, undefined));
             }
 
             const issue = LinearIssueRef.make({
@@ -610,35 +616,36 @@ export const makeLinearOutputProcessor = (input: {
              * Show the plan in one comment: comment it the first time, then edit that comment, whose receipt
              * is the plan's presentation. An unchanged plan makes no call; a deleted one is commented again.
              */
-            const renderPlan = ({ plan, rendered }: ProviderRenderPlan) =>
-                Effect.gen(function* () {
-                    const markdown = deliveryPlanMarkdown(plan);
-                    const presentation = rendered?.presentation;
+            const renderPlan = Effect.fn('linear.output.render_issue_plan')(function* ({
+                plan,
+                rendered,
+            }: ProviderRenderPlan) {
+                const markdown = deliveryPlanMarkdown(plan);
+                const presentation = rendered?.presentation;
 
-                    if (Predicate.isUndefined(rendered) || Predicate.isUndefined(presentation))
-                        return yield* comment(markdown);
+                if (Predicate.isUndefined(rendered) || Predicate.isUndefined(presentation))
+                    return yield* comment(markdown);
 
-                    if (sameDeliveryPlan(rendered.plan, plan))
-                        return DeliveryOutputApplied.make({ receipt: presentation });
-                    const posted = yield* postedComment(presentation);
+                if (sameDeliveryPlan(rendered.plan, plan)) return DeliveryOutputApplied.make({ receipt: presentation });
+                const posted = yield* postedComment(presentation);
 
-                    const edited = yield* linearApi
-                        .updateComment({ comment: posted, content: LinearContent.make({ markdown }) })
-                        .pipe(
-                            Effect.as(true),
-                            Effect.catchIf(
-                                (error) => error.reason === 'not_found',
-                                (error) =>
-                                    Effect.logInfo(
-                                        'Linear plan comment is gone; commenting the plan again',
-                                        error,
-                                    ).pipe(Effect.annotateLogs(annotations), Effect.as(false)),
-                            ),
-                            reportLinearFailure('Linear plan comment update failed', 'linear_comment_update_failed'),
-                        );
+                const edited = yield* linearApi
+                    .updateComment({ comment: posted, content: LinearContent.make({ markdown }) })
+                    .pipe(
+                        Effect.as(true),
+                        Effect.catchIf(
+                            (error) => error.reason === 'not_found',
+                            (error) =>
+                                Effect.logInfo('Linear plan comment is gone; commenting the plan again', error).pipe(
+                                    Effect.annotateLogs(annotations),
+                                    Effect.as(false),
+                                ),
+                        ),
+                        reportLinearFailure('Linear plan comment update failed', 'linear_comment_update_failed'),
+                    );
 
-                    return edited ? DeliveryOutputApplied.make({ receipt: presentation }) : yield* comment(markdown);
-                }).pipe(Effect.withSpan('linear.output.render_issue_plan'));
+                return edited ? DeliveryOutputApplied.make({ receipt: presentation }) : yield* comment(markdown);
+            });
 
             return Match.value(attempt.operation).pipe(
                 Match.tagsExhaustive({

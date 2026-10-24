@@ -311,7 +311,10 @@ export const LinearIssueAssigned = Schema.TaggedStruct('LinearIssueAssigned', {
 
 export type LinearIssueAssigned = typeof LinearIssueAssigned.Type;
 
-export class LinearSubscribedEvents extends Schema.TaggedClass<LinearSubscribedEvents>()('LinearSubscribedEvents', {
+export class LinearSubscribedEvents extends Schema.TaggedClass<
+    LinearSubscribedEvents,
+    { readonly brand: unique symbol }
+>()('LinearSubscribedEvents', {
     issue: LinearIssue,
     events: Schema.NonEmptyArray(LinearSubscribedIssueEvent),
 }) {}

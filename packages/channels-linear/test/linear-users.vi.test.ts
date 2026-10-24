@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Effect, Ref, Schema } from 'effect';
+import { Effect, Ref, Schema, Array as Arr, String as Str } from 'effect';
 import { HttpClient, HttpClientResponse } from 'effect/http';
 
 import { GetIssueVariables } from '../src/api/GetIssue';
@@ -41,10 +41,10 @@ describe('Linear user directories', () => {
                 Effect.gen(function* () {
                     const body = yield* decodeAppUsersRequest(request);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(request, Response.json(viewer));
 
-                    if (body.query.includes('query LinearIssue('))
+                    if (Str.includes('query LinearIssue(')(body.query))
                         return HttpClientResponse.fromWeb(request, Response.json({ data: { issue: issueJson } }));
                     yield* Ref.set(appQuery, body);
 
@@ -69,7 +69,7 @@ describe('Linear user directories', () => {
                 api.listAppUsers({ issue: nullable, first: 25, after: 'cursor', query: 'bot' }),
             ).pipe(Effect.provide(apiLayer(http)));
 
-            expect(page.users.map(({ id }) => id)).toEqual(['direct']);
+            expect(Arr.map(page.users, ({ id }) => id)).toEqual(['direct']);
             const request = yield* Ref.get(appQuery);
             expect(request?.query).toContain(' users(first: $first');
             expect(request?.query).not.toContain('organization { users');
@@ -91,10 +91,10 @@ describe('Linear user directories', () => {
                 Effect.gen(function* () {
                     const body = yield* decodeAppUsersRequest(request);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(request, Response.json(viewer));
 
-                    if (body.query.includes('query LinearIssue('))
+                    if (Str.includes('query LinearIssue(')(body.query))
                         return HttpClientResponse.fromWeb(request, Response.json({ data: { issue: issueJson } }));
 
                     return HttpClientResponse.fromWeb(
@@ -116,7 +116,7 @@ describe('Linear user directories', () => {
                 Effect.provide(apiLayer(http)),
             );
 
-            expect(page.users.map(({ id }) => id)).toEqual(['public-only']);
+            expect(Arr.map(page.users, ({ id }) => id)).toEqual(['public-only']);
         }),
     );
 
@@ -126,7 +126,7 @@ describe('Linear user directories', () => {
                 Effect.gen(function* () {
                     const body = yield* decodeAssignableUsersRequest(request);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(request, Response.json(viewer));
                     expect(body.query).toContain('issue(id: $issueId)');
                     expect(body.query).not.toContain('$teamId');

@@ -127,10 +127,13 @@ const logInvalidJson = (deliveryId: string, bodyByteLength: number) =>
 const formatIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
 const issuePointer = ({ path = [] }: StandardSchema.StandardSchemaV1.Issue) =>
-    path
-        .map((segment) => (Predicate.isPropertyKey(segment) ? segment : segment.key))
-        .map((key) => `/${JsonPointer.escapeToken(String(key))}`)
-        .join('');
+    Arr.join(
+        Arr.map(
+            Arr.map(path, (segment) => (Predicate.isPropertyKey(segment) ? segment : segment.key)),
+            (key) => `/${JsonPointer.escapeToken(String(key))}`,
+        ),
+        '',
+    );
 
 /** Logs where a webhook body failed its schema as JSON Pointers, never the values found there. */
 const logWebhookDecodeFailure = (
@@ -143,7 +146,7 @@ const logWebhookDecodeFailure = (
             provider: 'linear',
             delivery_id: deliveryId,
             decode_stage: stage,
-            issue_paths: Arr.dedupe(formatIssues(error.issue).issues.map(issuePointer)),
+            issue_paths: Arr.dedupe(Arr.map(formatIssues(error.issue).issues, issuePointer)),
         }),
     );
 

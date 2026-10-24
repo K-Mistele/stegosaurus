@@ -1,4 +1,4 @@
-import { Clock, Effect, Predicate, Redacted, Schema } from 'effect';
+import { Clock, Effect, Predicate, Redacted, Schema, Array as Arr } from 'effect';
 import * as HttpClient from 'effect/http/HttpClient';
 import * as HttpClientRequest from 'effect/http/HttpClientRequest';
 
@@ -24,7 +24,7 @@ export type AcquireClientCredentialsTokenInput = {
     readonly scopes: ReadonlyArray<string>;
 };
 
-const tokenError = (reason: LinearApiError['reason'], retryable: boolean, status?: number) =>
+const tokenError = (reason: LinearApiError['reason'], retryable: boolean, status: number | undefined) =>
     Predicate.isUndefined(status)
         ? LinearApiError.make({ operation: 'acquire_client_credentials_token', reason, retryable })
         : LinearApiError.make({
@@ -36,19 +36,19 @@ const tokenError = (reason: LinearApiError['reason'], retryable: boolean, status
 
 /** Exchanges static client credentials for short-lived token material without exposing the token. */
 const acquireClientCredentialsTokenRequest = Effect.fn('linear.auth.acquire_client_credentials_token.request')(
-    function* (input: AcquireClientCredentialsTokenInput) {
-        const client = yield* HttpClient.HttpClient;
-
+    function* (client: HttpClient.HttpClient, input: AcquireClientCredentialsTokenInput) {
         const request = HttpClientRequest.post('https://api.linear.app/oauth/token').pipe(
             HttpClientRequest.bodyUrlParams({
                 grant_type: 'client_credentials',
                 client_id: input.clientId,
                 client_secret: Redacted.value(input.clientSecret),
-                scope: input.scopes.join(','),
+                scope: Arr.join(input.scopes, ','),
             }),
         );
 
-        const response = yield* client.execute(request).pipe(Effect.mapError(() => tokenError('unavailable', true)));
+        const response = yield* client
+            .execute(request)
+            .pipe(Effect.mapError(() => tokenError('unavailable', true, undefined)));
 
         if (response.status === 401) return yield* tokenError('unauthorized', false, response.status);
 
@@ -76,8 +76,12 @@ const acquireClientCredentialsTokenRequest = Effect.fn('linear.auth.acquire_clie
     },
 );
 
-export const acquireClientCredentialsToken = (input: AcquireClientCredentialsTokenInput) =>
-    acquireClientCredentialsTokenRequest(input).pipe(
+/** Exchanges the client credentials through `client`, the raw HTTP client the resolver was built with. */
+export const acquireClientCredentialsToken = (
+    client: HttpClient.HttpClient,
+    input: AcquireClientCredentialsTokenInput,
+) =>
+    acquireClientCredentialsTokenRequest(client, input).pipe(
         Effect.tapError((error) =>
             Effect.logError('Linear client-credentials token acquisition failed').pipe(
                 Effect.annotateLogs({

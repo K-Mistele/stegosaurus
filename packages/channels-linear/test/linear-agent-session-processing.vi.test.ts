@@ -1,11 +1,12 @@
 import { describe, it } from '@effect/vitest';
 import {
+    ProviderEventExecutionFailed,
     ProviderEventHandled,
     ProviderEventIgnored,
     ProviderEventInvalid,
 } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
-import { Effect, Layer, Ref } from 'effect';
+import { Effect, Layer, Ref, Array as Arr } from 'effect';
 
 import {
     TEST_DELIVERY_IDEMPOTENCY_KEY,
@@ -155,7 +156,7 @@ describe('Linear Agent Session processing', () => {
                 expect(result).toEqual(ProviderEventHandled.make({}));
                 expect(yield* Ref.get(attempts)).toEqual(2);
                 const captured = yield* Ref.get(requests);
-                expect(captured.map(({ activityId }) => activityId)).toEqual([
+                expect(Arr.map(captured, ({ activityId }) => activityId)).toEqual([
                     TEST_DELIVERY_IDEMPOTENCY_KEY,
                     TEST_DELIVERY_IDEMPOTENCY_KEY,
                 ]);
@@ -179,8 +180,8 @@ describe('Linear Agent Session processing', () => {
                 .process([yield* linearAgentSessionAdmission(agentSessionPayloads[0])], yield* firstAttempt())
                 .pipe(Effect.provide(layer), Effect.flip);
 
+            expect(result).toBeInstanceOf(ProviderEventExecutionFailed);
             expect(result).toMatchObject({
-                _tag: 'ProviderEventExecutionFailed',
                 retryable: true,
                 safeCode: 'initial_thought_failed',
             });

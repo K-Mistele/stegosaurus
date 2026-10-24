@@ -15,7 +15,7 @@ import {
     type PreparedDeliveryInvocation,
     type ProviderDeliveryExecution,
 } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Array as Arr, Effect, Match, Option, Predicate, Schema, Struct } from 'effect';
+import { Array as Arr, Effect, Match, Option, Predicate, Schema, Struct, String as Str } from 'effect';
 
 import { LinearApi } from './LinearApi';
 import {
@@ -54,8 +54,8 @@ import {
     type LinearCallbackHandlers,
     LinearCallbackName,
     type LinearCallbackOperations,
-    makeLinearCallbacks,
 } from './LinearCallbacks';
+import * as LinearCallbacks from './LinearCallbacks';
 import {
     type LinearActivationTarget,
     LinearAgentSessionDestination,
@@ -155,7 +155,7 @@ const decodeWebhook = (admission: DeliveryAdmission) =>
 
 const parseIssueAddress = (resourceId: string) =>
     Effect.gen(function* () {
-        const parts = resourceId.split(':');
+        const parts = Str.split(resourceId, ':');
 
         if (parts.length !== 4 || parts[0] !== 'linear' || parts[1] !== 'v1' || parts[2] !== 'issue')
             return yield* identityMismatch();
@@ -175,8 +175,8 @@ const parseAgentSessionAddress = (resourceId: string) =>
     Effect.gen(function* () {
         const prefix = 'linear:v1:agent-session:';
 
-        if (!resourceId.startsWith(prefix)) return yield* identityMismatch();
-        const encoded = resourceId.slice(prefix.length);
+        if (!Str.startsWith(prefix)(resourceId)) return yield* identityMismatch();
+        const encoded = Str.slice(prefix.length)(resourceId);
 
         if (encoded.length === 0) return yield* identityMismatch();
 
@@ -619,17 +619,14 @@ const requireCallbackInput = <A>(value: A | undefined) =>
     Predicate.isUndefined(value) ? Effect.fail(preparedCallbackUnbuildable()) : Effect.succeed(value);
 
 const callbackFailure = <A, R>(effect: Effect.Effect<A, LinearCallbackError, R>) =>
-    effect.pipe(
-        Effect.mapError((error) => executionFailure('callback_failed', error.retryable)),
-        Effect.asVoid,
-    );
+    effect.pipe(Effect.mapError((error) => executionFailure('callback_failed', error.retryable)));
 
 /** A selected callback: what to save before it runs, and how to run it with its delivery context. */
 type LinearCallbackInvocation<R> = {
     readonly preparation: LinearDeliveryPreparation;
     readonly invoke: (
         execution: ProviderDeliveryExecution,
-    ) => Effect.Effect<void, ProviderEventExecutionFailed, LinearApi | R>;
+    ) => Effect.Effect<DeliveryCallbackResult, ProviderEventExecutionFailed, LinearApi | R>;
 };
 
 const issueActivationTarget = (issue: LinearIssue) =>
@@ -764,7 +761,6 @@ const postInitialThought = (session: LinearAgentSession, execution: ProviderDeli
             activityId: LinearAgentActivityId.make(execution.idempotencyKey),
         })
         .pipe(
-            Effect.asVoid,
             Effect.catchIf(
                 (error) => error.reason === 'already_exists',
                 () => Effect.logInfo('Linear automatic thought already posted by an earlier attempt'),
@@ -787,10 +783,10 @@ const agentSessionInvocation = <R>(batch: LinearAgentSessionBatch<R>, callback: 
                     session,
                     issue,
                     promptContext: created.promptContext,
-                    previousComments: created.previousComments.map((comment) =>
+                    previousComments: Arr.map(created.previousComments, (comment) =>
                         LinearAgentSessionComment.make(comment),
                     ),
-                    guidance: created.guidance.map((guidance) => LinearAgentGuidance.make(guidance)),
+                    guidance: Arr.map(created.guidance, (guidance) => LinearAgentGuidance.make(guidance)),
                     deliveryId,
                 });
 
@@ -951,7 +947,7 @@ const processLifecycleBatch = (
 
         yield* Effect.logInfo('Linear installation lifecycle event observed').pipe(
             Effect.annotateLogs({
-                disposition: webhooks.some((webhook) => webhook.type === 'OAuthApp')
+                disposition: Arr.some(webhooks, (webhook) => webhook.type === 'OAuthApp')
                     ? 'observed_revocation'
                     : 'observed_team_access_change',
             }),
@@ -1073,11 +1069,15 @@ const issueCallbackInvocation = <R>(
 
 /** The issue snapshot and events for `onSubscribedEvent`, when the batch has any. */
 const subscribedCallbackInput = <R>(batch: LinearIssueBatch<R>) => {
-    const resourceWebhooks = batch.webhooks.filter(
+    const resourceWebhooks = Arr.filter(
+        batch.webhooks,
         (webhook): webhook is LinearResourceWebhookEvent => webhook.type !== 'AppUserNotification',
     );
 
-    const firstResource = resourceWebhooks.find(hasIssueSnapshot) ?? resourceWebhooks[0];
+    const firstResource = Option.getOrElse(
+        Arr.findFirst(resourceWebhooks, hasIssueSnapshot),
+        () => resourceWebhooks[0],
+    );
 
     if (!Arr.isReadonlyArrayNonEmpty(batch.subscribedEvents) || Predicate.isUndefined(firstResource)) return undefined;
 
@@ -1095,8 +1095,12 @@ const issueInvocation = <R>(batch: LinearIssueBatch<R>, callback: LinearCallback
         Match.when('onMentioned', (name) =>
             Effect.gen(function* () {
                 const handler = yield* requireHandler(callbacks.onMentioned);
-                const trigger = yield* requireCallbackInput(activationEvents.find(isMention));
-                const events = callbackEvents.filter((event) => event !== trigger);
+
+                const trigger = yield* requireCallbackInput(
+                    Option.getOrUndefined(Arr.findFirst(activationEvents, isMention)),
+                );
+
+                const events = Arr.filter(callbackEvents, (event) => event !== trigger);
 
                 return Match.value(trigger).pipe(
                     Match.tagsExhaustive({
@@ -1131,10 +1135,10 @@ const issueInvocation = <R>(batch: LinearIssueBatch<R>, callback: LinearCallback
                 const handler = yield* requireHandler(callbacks.onAssigned);
 
                 const trigger = yield* requireCallbackInput(
-                    activationEvents.find(Schema.is(LinearAssignmentNotification)),
+                    Option.getOrUndefined(Arr.findFirst(activationEvents, Schema.is(LinearAssignmentNotification))),
                 );
 
-                const events = callbackEvents.filter((event) => event !== trigger);
+                const events = Arr.filter(callbackEvents, (event) => event !== trigger);
 
                 return issueCallbackInvocation(name, trigger.issue, issueActivationTarget(trigger.issue), (delivery) =>
                     handler(LinearIssueAssigned.make({ issue: trigger.issue, trigger, events }), delivery),
@@ -1145,9 +1149,11 @@ const issueInvocation = <R>(batch: LinearIssueBatch<R>, callback: LinearCallback
             Effect.gen(function* () {
                 const handler = yield* requireHandler(callbacks.onIssueCreated);
 
-                const trigger = yield* requireCallbackInput(activationEvents.find(Schema.is(LinearIssueOpened)));
+                const trigger = yield* requireCallbackInput(
+                    Option.getOrUndefined(Arr.findFirst(activationEvents, Schema.is(LinearIssueOpened))),
+                );
 
-                const events = callbackEvents.filter((event) => event !== trigger);
+                const events = Arr.filter(callbackEvents, (event) => event !== trigger);
 
                 return issueCallbackInvocation(name, trigger.issue, issueActivationTarget(trigger.issue), (delivery) =>
                     handler(LinearIssueCreated.make({ issue: trigger.issue, trigger, events }), delivery),
@@ -1173,11 +1179,13 @@ const selectEntryCallback = <R>(
     batch: LinearIssueBatch<R>,
     supplementalSignal: boolean,
 ): LinearCallbackName | undefined => {
-    const directed = supplementalSignal ? undefined : batch.activationEvents.find(isDirectedTrigger(batch.callbacks));
+    const directed = supplementalSignal
+        ? undefined
+        : Option.getOrUndefined(Arr.findFirst(batch.activationEvents, isDirectedTrigger(batch.callbacks)));
 
     if (Predicate.isNotUndefined(directed))
         return Schema.is(LinearAssignmentNotification)(directed) ? 'onAssigned' : 'onMentioned';
-    const opened = batch.activationEvents.some(Schema.is(LinearIssueOpened));
+    const opened = Arr.some(batch.activationEvents, Schema.is(LinearIssueOpened));
 
     return opened && Predicate.isNotUndefined(batch.callbacks.onIssueCreated) ? 'onIssueCreated' : undefined;
 };
@@ -1204,7 +1212,8 @@ const unsubscribedIssueDisposition = (
 ) => {
     if (supplementalSignal) return ProviderEventIgnored.make({ reason: 'supplemental_signal' });
 
-    const hasUnconfiguredEntry = activationEvents.some(
+    const hasUnconfiguredEntry = Arr.some(
+        activationEvents,
         (event) => isEntrySignal(event) || Schema.is(LinearIssueOpened)(event),
     );
 
@@ -1226,7 +1235,7 @@ const processSelectedIssueBatch = <R>(
             Predicate.isNotUndefined(callbacks.onAgentSessionCreated) ||
             Predicate.isNotUndefined(callbacks.onAgentSessionPrompted);
 
-        const supplementalSignal = hasAgentSessionCallbacks && activationEvents.some(isEntrySignal);
+        const supplementalSignal = hasAgentSessionCallbacks && Arr.some(activationEvents, isEntrySignal);
         const entryCallback = selectEntryCallback(batch, supplementalSignal);
 
         if (Predicate.isNotUndefined(entryCallback)) {
@@ -1289,7 +1298,7 @@ const processIssueBatch = <R>(
                 : Effect.succeed(activationEvent(options, webhook, admission, mailboxKey));
         });
 
-        const subscribedEventsByIndex = issueWebhooks.map((webhook, index) => {
+        const subscribedEventsByIndex = Arr.map(issueWebhooks, (webhook, index) => {
             if (webhook.type === 'AppUserNotification' || isSelfAuthoredResource(webhook, options)) return undefined;
             const admission = admissions[index];
 
@@ -1299,16 +1308,17 @@ const processIssueBatch = <R>(
         const batch: LinearIssueBatch<R> = {
             callbacks,
             webhooks: issueWebhooks,
-            activationEvents: normalized.filter(Predicate.isNotUndefined),
-            callbackEvents: normalized
-                .map((event, index) => event ?? subscribedEventsByIndex[index])
-                .filter(Predicate.isNotUndefined),
-            subscribedEvents: subscribedEventsByIndex.filter(Predicate.isNotUndefined),
+            activationEvents: Arr.filter(normalized, Predicate.isNotUndefined),
+            callbackEvents: Arr.filter(
+                Arr.map(normalized, (event, index) => event ?? subscribedEventsByIndex[index]),
+                Predicate.isNotUndefined,
+            ),
+            subscribedEvents: Arr.filter(subscribedEventsByIndex, Predicate.isNotUndefined),
             issueId,
             mailboxKey,
         };
 
-        const removed = issueWebhooks.some((webhook) => webhook.type === 'Issue' && webhook.action === 'remove');
+        const removed = Arr.some(issueWebhooks, (webhook) => webhook.type === 'Issue' && webhook.action === 'remove');
 
         if (Option.isNone(execution.prepared)) return yield* processSelectedIssueBatch(execution, batch, removed);
 
@@ -1338,9 +1348,9 @@ const processLinearBatch = <R>(options: LinearEventProcessorOptions, callbacks: 
 
         if (Predicate.isNotUndefined(webhooks[0]) && Schema.is(LinearStoredAgentSessionWebhook)(webhooks[0]))
             return yield* processAgentSessionBatch(options, callbacks, admissions, webhooks, execution);
-        const lifecycleWebhooks = webhooks.map(lifecycleWebhook);
+        const lifecycleWebhooks = Arr.map(webhooks, lifecycleWebhook);
 
-        if (lifecycleWebhooks.every(Predicate.isNotUndefined))
+        if (Arr.every(lifecycleWebhooks, Predicate.isNotUndefined))
             return yield* processLifecycleBatch(options, admissions, lifecycleWebhooks);
 
         return yield* processIssueBatch(options, callbacks, admissions, webhooks, execution);
@@ -1355,5 +1365,5 @@ export const makeLinearEventProcessor = <E = never, R = never>(
 ): ProviderEventProcessor<LinearApi | MailboxSubscriptions | R> => ({
     namespace: options.namespace,
     providerName: 'linear',
-    process: processLinearBatch(options, makeLinearCallbacks(options.handlers)),
+    process: processLinearBatch(options, LinearCallbacks.makeLinearCallbacks(options.handlers)),
 });

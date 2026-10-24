@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Effect, Queue, Redacted, Stream } from 'effect';
+import { Effect, Queue, Redacted, Stream, Array as Arr, String as Str } from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 
 import { narrowLinearProviderErrors } from '../src/api/LinearApiErrors';
@@ -60,7 +60,7 @@ const file = (size: number | null = null) =>
     });
 
 const fileDownloads = (recorded: ReadonlyArray<RecordedRequest>) =>
-    recorded.filter((request) => request.url !== 'https://api.linear.app/graphql');
+    Arr.filter(recorded, (request) => request.url !== 'https://api.linear.app/graphql');
 
 describe('Linear file download', () => {
     it.effect('streams authenticated bytes from the approved Linear upload origin', ({ expect }) =>
@@ -73,7 +73,7 @@ describe('Linear file download', () => {
                 .download()
                 .pipe(Effect.flatMap(Stream.runCollect), Effect.provide(apiLayer(http)));
 
-            expect(new Uint8Array(collected.flatMap((chunk) => Array.from(chunk)))).toEqual(bytes);
+            expect(new Uint8Array(Arr.flatMap(collected, (chunk) => Array.from(chunk)))).toEqual(bytes);
             const downloads = fileDownloads(Array.from(yield* Queue.takeAll(requests)));
             expect(downloads).toEqual([{ url: fileUrl, authorization: 'Bearer token-never-log' }]);
         }),
@@ -87,7 +87,7 @@ describe('Linear file download', () => {
                 if (url === fileUrl)
                     return new Response(null, { status: 302, headers: { location: `${fileUrl}?hop=1` } });
 
-                if (url.startsWith('https://uploads.linear.app/'))
+                if (Str.startsWith('https://uploads.linear.app/')(url))
                     return new Response(null, { status: 307, headers: { location: signedUrl } });
 
                 return new Response(bytes, { headers: { 'content-length': String(bytes.byteLength) } });
@@ -99,7 +99,7 @@ describe('Linear file download', () => {
 
             expect(buffered).toEqual(bytes);
             const downloads = fileDownloads(Array.from(yield* Queue.takeAll(requests)));
-            expect(downloads.map((request) => request.authorization)).toEqual([
+            expect(Arr.map(downloads, (request) => request.authorization)).toEqual([
                 'Bearer token-never-log',
                 'Bearer token-never-log',
                 null,
@@ -140,7 +140,7 @@ describe('Linear file download', () => {
                 });
                 const downloads = fileDownloads(Array.from(yield* Queue.takeAll(requests)));
                 expect(downloads).toHaveLength(testCase.requests);
-                expect(downloads.every((request) => request.url.startsWith('https://'))).toBe(true);
+                expect(Arr.every(downloads, (request) => Str.startsWith('https://')(request.url))).toBe(true);
             }
         }),
     );

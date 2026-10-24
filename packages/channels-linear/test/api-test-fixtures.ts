@@ -5,7 +5,7 @@ import * as HttpClientRequest from 'effect/http/HttpClientRequest';
 import { linearGraphqlRequest } from '../src/api/LinearGraphql';
 import { LinearAuth } from '../src/index';
 import type { LinearApi } from '../src/LinearApi';
-import { LinearApiLiveOptions, makeLinearApiLiveBase } from '../src/LinearApiLive';
+import * as LinearApiLive from '../src/LinearApiLive';
 import { LinearIssueId, LinearOrganizationId, LinearTeamId, LinearUserId } from '../src/LinearIdentity';
 import { LinearIssueRef } from '../src/LinearModels';
 
@@ -19,14 +19,14 @@ export const issue = LinearIssueRef.make({
     issueId: LinearIssueId.make('issue-1'),
 });
 
-export const options = LinearApiLiveOptions.make({
+export const options = LinearApiLive.LinearApiLiveOptions.make({
     auth: LinearAuth.developerToken({ token: Config.succeed(Redacted.make('token-never-log')) }),
     organizationId: Config.succeed(organizationId),
     appUserId: Config.succeed(appUserId),
 });
 
 export const apiLayer = (http: HttpClient.HttpClient) =>
-    makeLinearApiLiveBase(options).pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, http)));
+    LinearApiLive.makeLinearApiLiveBase(options).pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, http)));
 
 export const viewer = { data: { viewer: { id: appUserId, organization: { id: organizationId } } } };
 

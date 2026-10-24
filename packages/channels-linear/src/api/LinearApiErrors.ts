@@ -12,70 +12,88 @@ const LinearProviderErrorFields = {
     retryAfterMs: Schema.NullOr(RetryAfterMilliseconds),
 };
 
-export class LinearTransportError extends Schema.TaggedError<LinearTransportError>()('LinearTransportError', {
-    ...LinearProviderErrorFields,
-}) {}
-
-export class LinearAuthenticationError extends Schema.TaggedError<LinearAuthenticationError>()(
-    'LinearAuthenticationError',
-    { ...LinearProviderErrorFields },
+export class LinearTransportError extends Schema.TaggedError<LinearTransportError, { readonly brand: unique symbol }>()(
+    'LinearTransportError',
+    {
+        ...LinearProviderErrorFields,
+    },
 ) {}
 
-export class LinearForbiddenError extends Schema.TaggedError<LinearForbiddenError>()('LinearForbiddenError', {
-    ...LinearProviderErrorFields,
-}) {}
+export class LinearAuthenticationError extends Schema.TaggedError<
+    LinearAuthenticationError,
+    { readonly brand: unique symbol }
+>()('LinearAuthenticationError', { ...LinearProviderErrorFields }) {}
 
-export class LinearResourceNotFoundError extends Schema.TaggedError<LinearResourceNotFoundError>()(
-    'LinearResourceNotFoundError',
-    { ...LinearProviderErrorFields },
+export class LinearForbiddenError extends Schema.TaggedError<LinearForbiddenError, { readonly brand: unique symbol }>()(
+    'LinearForbiddenError',
+    {
+        ...LinearProviderErrorFields,
+    },
 ) {}
 
-export class LinearValidationError extends Schema.TaggedError<LinearValidationError>()('LinearValidationError', {
+export class LinearResourceNotFoundError extends Schema.TaggedError<
+    LinearResourceNotFoundError,
+    { readonly brand: unique symbol }
+>()('LinearResourceNotFoundError', { ...LinearProviderErrorFields }) {}
+
+export class LinearValidationError extends Schema.TaggedError<
+    LinearValidationError,
+    { readonly brand: unique symbol }
+>()('LinearValidationError', {
     ...LinearProviderErrorFields,
 }) {}
 
-export class LinearRateLimitedError extends Schema.TaggedError<LinearRateLimitedError>()('LinearRateLimitedError', {
+export class LinearRateLimitedError extends Schema.TaggedError<
+    LinearRateLimitedError,
+    { readonly brand: unique symbol }
+>()('LinearRateLimitedError', {
     ...LinearProviderErrorFields,
 }) {}
 
-export class LinearUnavailableError extends Schema.TaggedError<LinearUnavailableError>()('LinearUnavailableError', {
+export class LinearUnavailableError extends Schema.TaggedError<
+    LinearUnavailableError,
+    { readonly brand: unique symbol }
+>()('LinearUnavailableError', {
     ...LinearProviderErrorFields,
 }) {}
 
-export class LinearGraphqlRequestError extends Schema.TaggedError<LinearGraphqlRequestError>()(
-    'LinearGraphqlRequestError',
-    { ...LinearProviderErrorFields },
-) {}
+export class LinearGraphqlRequestError extends Schema.TaggedError<
+    LinearGraphqlRequestError,
+    { readonly brand: unique symbol }
+>()('LinearGraphqlRequestError', { ...LinearProviderErrorFields }) {}
 
-export class LinearResponseDecodeError extends Schema.TaggedError<LinearResponseDecodeError>()(
-    'LinearResponseDecodeError',
-    { ...LinearProviderErrorFields },
-) {}
+export class LinearResponseDecodeError extends Schema.TaggedError<
+    LinearResponseDecodeError,
+    { readonly brand: unique symbol }
+>()('LinearResponseDecodeError', { ...LinearProviderErrorFields }) {}
 
 /** Linear refused to create an entity because one with the caller's chosen ID exists. */
-export class LinearAlreadyExistsError extends Schema.TaggedError<LinearAlreadyExistsError>()(
-    'LinearAlreadyExistsError',
-    { ...LinearProviderErrorFields },
-) {}
+export class LinearAlreadyExistsError extends Schema.TaggedError<
+    LinearAlreadyExistsError,
+    { readonly brand: unique symbol }
+>()('LinearAlreadyExistsError', { ...LinearProviderErrorFields }) {}
 
-export class LinearMutationRejectedError extends Schema.TaggedError<LinearMutationRejectedError>()(
-    'LinearMutationRejectedError',
-    { ...LinearProviderErrorFields },
-) {}
+export class LinearMutationRejectedError extends Schema.TaggedError<
+    LinearMutationRejectedError,
+    { readonly brand: unique symbol }
+>()('LinearMutationRejectedError', { ...LinearProviderErrorFields }) {}
 
-export class LinearFileOriginRejectedError extends Schema.TaggedError<LinearFileOriginRejectedError>()(
-    'LinearFileOriginRejectedError',
-    { ...LinearProviderErrorFields },
-) {}
+export class LinearFileOriginRejectedError extends Schema.TaggedError<
+    LinearFileOriginRejectedError,
+    { readonly brand: unique symbol }
+>()('LinearFileOriginRejectedError', { ...LinearProviderErrorFields }) {}
 
-export class LinearFileRedirectError extends Schema.TaggedError<LinearFileRedirectError>()('LinearFileRedirectError', {
+export class LinearFileRedirectError extends Schema.TaggedError<
+    LinearFileRedirectError,
+    { readonly brand: unique symbol }
+>()('LinearFileRedirectError', {
     ...LinearProviderErrorFields,
 }) {}
 
-export class LinearFileTransferRejectedError extends Schema.TaggedError<LinearFileTransferRejectedError>()(
-    'LinearFileTransferRejectedError',
-    { ...LinearProviderErrorFields },
-) {}
+export class LinearFileTransferRejectedError extends Schema.TaggedError<
+    LinearFileTransferRejectedError,
+    { readonly brand: unique symbol }
+>()('LinearFileTransferRejectedError', { ...LinearProviderErrorFields }) {}
 
 export type LinearProviderError =
     | LinearTransportError
@@ -169,4 +187,4 @@ export const narrowLinearProviderStreamErrors = <A, R>(
     );
 
 export const failLinearMutation = (operation: LinearApiOperation) =>
-    Effect.fail(new LinearMutationRejectedError(linearProviderErrorDetails(operation)));
+    Effect.fail(LinearMutationRejectedError.make(linearProviderErrorDetails(operation)));

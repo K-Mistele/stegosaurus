@@ -2,7 +2,7 @@ import { describe, it } from '@effect/vitest';
 import { ProviderEventHandled } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
 import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
-import { Effect, Layer, Queue, Schema, Stream } from 'effect';
+import { Effect, Layer, Queue, Schema, Stream, Array as Arr } from 'effect';
 
 import { LinearApi } from '../src/LinearApi';
 import type { LinearIssueCreated, LinearSubscribedEvents } from '../src/LinearCallbackEvents';
@@ -35,27 +35,30 @@ const fileRef = LinearFileRef.make({
     issueId: issue.issueId,
 });
 
-const markdown = [
-    `Intro ![screenshot.png](${imageUrl}) and [notes.txt](${textUrl}).`,
-    `Autolink <${autolinkUrl}> and bare ${bareUrl} here.`,
-    `Reference [spec][spec] and a duplicate [again](${imageUrl}).`,
-    'Ordinary [site](https://example.com/file.png) stays content.',
-    `Lookalike [x](https://uploads.linear.app.example.com/${workspace}/a/b) and [y](http://uploads.linear.app/${workspace}/a/b).`,
-    `Wrong shape [z](https://uploads.linear.app/${workspace}/only-two).`,
-    `Code \`${upload('66666666-6666-4666-8666-666666666666')}\` is not a link.`,
-    '',
-    `[spec]: ${referenceUrl}`,
-].join('\n');
+const markdown = Arr.join(
+    [
+        `Intro ![screenshot.png](${imageUrl}) and [notes.txt](${textUrl}).`,
+        `Autolink <${autolinkUrl}> and bare ${bareUrl} here.`,
+        `Reference [spec][spec] and a duplicate [again](${imageUrl}).`,
+        'Ordinary [site](https://example.com/file.png) stays content.',
+        `Lookalike [x](https://uploads.linear.app.example.com/${workspace}/a/b) and [y](http://uploads.linear.app/${workspace}/a/b).`,
+        `Wrong shape [z](https://uploads.linear.app/${workspace}/only-two).`,
+        `Code \`${upload('66666666-6666-4666-8666-666666666666')}\` is not a link.`,
+        '',
+        `[spec]: ${referenceUrl}`,
+    ],
+    '\n',
+);
 
 describe('Linear file discovery', () => {
     it.effect('parses Markdown structurally and keeps only canonical Linear upload URLs in order', ({ expect }) =>
         Effect.sync(() => {
             const files = discoverLinearFiles(fileRef, markdown);
-            expect(files.map((file) => file.url)).toEqual([imageUrl, textUrl, autolinkUrl, bareUrl, referenceUrl]);
-            expect(files.map((file) => file.name)).toEqual(['screenshot.png', 'notes.txt', null, null, 'spec']);
-            expect(files.map((file) => file.contentType)).toEqual(['image/png', 'text/plain', null, null, null]);
-            expect(files.map((file) => file.size)).toEqual([null, null, null, null, null]);
-            expect(files.map((file) => file.ref)).toEqual(files.map(() => fileRef));
+            expect(Arr.map(files, (file) => file.url)).toEqual([imageUrl, textUrl, autolinkUrl, bareUrl, referenceUrl]);
+            expect(Arr.map(files, (file) => file.name)).toEqual(['screenshot.png', 'notes.txt', null, null, 'spec']);
+            expect(Arr.map(files, (file) => file.contentType)).toEqual(['image/png', 'text/plain', null, null, null]);
+            expect(Arr.map(files, (file) => file.size)).toEqual([null, null, null, null, null]);
+            expect(Arr.map(files, (file) => file.ref)).toEqual(Arr.map(files, () => fileRef));
             expect(discoverLinearFiles(fileRef, null)).toEqual([]);
             expect(discoverLinearFiles(fileRef, 'no files')).toEqual([]);
         }),
@@ -97,8 +100,8 @@ describe('Linear file discovery', () => {
             const subscribedEvents = yield* Queue.unbounded<LinearSubscribedEvents>();
 
             const handlers: LinearCallbackHandlers<never, never> = {
-                onIssueCreated: (event) => Effect.asVoid(Queue.offer(createdEvents, event)),
-                onSubscribedEvent: (event) => Effect.asVoid(Queue.offer(subscribedEvents, event)),
+                onIssueCreated: (event) => Queue.offer(createdEvents, event).pipe(Effect.andThen(Effect.void)),
+                onSubscribedEvent: (event) => Queue.offer(subscribedEvents, event).pipe(Effect.andThen(Effect.void)),
             };
 
             const services = Layer.mergeAll(
@@ -135,7 +138,7 @@ describe('Linear file discovery', () => {
             expect(opened).toEqual(ProviderEventHandled.make({}));
             const createdEvent = yield* Queue.take(createdEvents);
             expect(createdEvent.issue.description).toBe(description);
-            expect(createdEvent.issue.files.map((file) => [file.url, file.name, file.ref.issueId])).toEqual([
+            expect(Arr.map(createdEvent.issue.files, (file) => [file.url, file.name, file.ref.issueId])).toEqual([
                 [imageUrl, 'diagram.png', created.data.id],
             ]);
 
@@ -166,7 +169,7 @@ describe('Linear file discovery', () => {
 
             if (event?._tag !== 'LinearCommentCreated') return yield* Effect.die('expected LinearCommentCreated');
             expect(event.comment.content.markdown).toBe(commentBody);
-            expect(event.comment.files.map((file) => file.url)).toEqual([textUrl]);
+            expect(Arr.map(event.comment.files, (file) => file.url)).toEqual([textUrl]);
         }),
     );
 });

@@ -1,4 +1,4 @@
-import { Effect, Schema, Struct } from 'effect';
+import { Effect, Schema, Struct, Array as Arr } from 'effect';
 
 import { type LinearListAppUsersRequest, LinearUserPageOptions } from '../LinearApiContract';
 import { LinearIssueId, LinearTeamId } from '../LinearIdentity';
@@ -25,7 +25,7 @@ const ListAppUsersResponse = Schema.Struct({
 
 export const listAppUsers = Effect.fn('linear.api.list_app_users')((input: LinearListAppUsersRequest) => {
     if (input.issue.teamId === null) {
-        return Effect.fail(new LinearValidationError(linearProviderErrorDetails('list_app_users')));
+        return Effect.fail(LinearValidationError.make(linearProviderErrorDetails('list_app_users')));
     }
 
     return linearGraphql({
@@ -42,17 +42,18 @@ export const listAppUsers = Effect.fn('linear.api.list_app_users')((input: Linea
     }).pipe(
         Effect.map(({ issue, users }) =>
             LinearAppUserPage.make({
-                users: users.nodes
-                    .map(projectLinearUser)
-                    .filter(
+                users: Arr.map(
+                    Arr.filter(
+                        Arr.map(users.nodes, projectLinearUser),
                         (value) =>
                             value.active &&
                             value.app &&
                             value.isAssignable &&
                             (value.teamIds.includes(issue.team.id) ||
                                 (issue.team.visibility === 'public' && value.canAccessAnyPublicTeam)),
-                    )
-                    .map((value) => LinearAppUser.make({ ...value, app: true })),
+                    ),
+                    (value) => LinearAppUser.make({ ...value, app: true }),
+                ),
                 pageInfo: LinearPageInfo.make(users.pageInfo),
             }),
         ),

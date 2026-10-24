@@ -1,5 +1,5 @@
 import { NodeCrypto, NodeRuntime } from '@effect/platform-node';
-import { Array as Arr, Config, Crypto, Effect, Layer, Ref, Schema, Stream } from 'effect';
+import { Array as Arr, Config, Crypto, Effect, Layer, ManagedRuntime, Ref, Schema, Stream } from 'effect';
 import { Base64, Hex } from 'effect/encoding';
 
 import {
@@ -27,7 +27,7 @@ const sha256 = Effect.fn('linear.files_smoke.sha256')(function* (bytes: Uint8Arr
 });
 
 const concatenate = (chunks: ReadonlyArray<Uint8Array>) => {
-    const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0));
+    const bytes = new Uint8Array(Arr.reduce(chunks, 0, (size, chunk) => size + chunk.byteLength));
     let offset = 0;
 
     for (const chunk of chunks) {
@@ -93,13 +93,10 @@ const program = Effect.gen(function* () {
         files: [],
     });
 
-    const cleanup = yield* Ref.make<ReadonlyArray<Effect.Effect<void>>>([]);
+    const cleanup = yield* Ref.make<ReadonlyArray<Effect.Effect<void, never, LinearApi>>>([]);
 
     const remember = (effect: Effect.Effect<void, LinearApiError, LinearApi>) =>
-        Ref.update(cleanup, (effects) => [
-            ...effects,
-            effect.pipe(Effect.provideService(LinearApi, api), Effect.ignore),
-        ]);
+        Ref.update(cleanup, (effects) => [...effects, effect.pipe(Effect.ignore)]);
 
     yield* Effect.gen(function* () {
         const textBytes = new TextEncoder().encode(`${marker} text asset\n`);
@@ -132,12 +129,15 @@ const program = Effect.gen(function* () {
         yield* remember(card.remove());
 
         const comment = yield* issue.postComment({
-            markdown: [
-                `${marker} files`,
-                `![${image.name ?? 'image'}](${image.url})`,
-                `[${text.name ?? 'text'}](${text.url})`,
-                '[external](https://example.com/not-a-linear-file.png)',
-            ].join('\n\n'),
+            markdown: Arr.join(
+                [
+                    `${marker} files`,
+                    `![${image.name ?? 'image'}](${image.url})`,
+                    `[${text.name ?? 'text'}](${text.url})`,
+                    '[external](https://example.com/not-a-linear-file.png)',
+                ],
+                '\n\n',
+            ),
         });
 
         yield* remember(comment.remove());
@@ -170,4 +170,10 @@ const program = Effect.gen(function* () {
     );
 });
 
-NodeRuntime.runMain(program.pipe(Effect.provide(Layer.mergeAll(LinearApiLive, NodeCrypto.layer))));
+const runtime = ManagedRuntime.make(Layer.mergeAll(LinearApiLive, NodeCrypto.layer));
+
+NodeRuntime.runMain(
+    Effect.flatMap(runtime.contextEffect, (context) => Effect.provideContext(program, context)).pipe(
+        Effect.ensuring(runtime.disposeEffect),
+    ),
+);

@@ -7,24 +7,24 @@ import {
     type ProviderEventProcessor,
 } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import { DeliveryAdmission, DeliveryReceipt, MailboxDelivery } from '@stegosaurus/channels-delivery/MailboxDelivery';
-import { Effect, Match, Queue, Redacted, Schema } from 'effect';
+import { Effect, Match, Queue, Redacted, Result, Schema } from 'effect';
 import { Headers } from 'effect/http';
 
-import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution';
+import * as DeliveryExecution from '../../channels-delivery/test/delivery-execution';
 import { LinearOrganizationId, LinearUserId, LinearWebhookDeliveryId } from '../src/LinearIdentity';
 import { LinearAgentSessionEventWebhook, type LinearIssueCreateWebhook } from '../src/LinearWebhookEventSchemas';
-import { makeLinearWebhookProvider } from '../src/LinearWebhookProvider';
+import * as LinearWebhookProvider from '../src/LinearWebhookProvider';
 import { LinearStoredAgentSessionWebhook } from '../src/LinearWebhookSchemas';
-import agentSessionCreatedJson from './fixtures/agent-session-events/created.json' with { type: 'json' };
-import agentSessionPromptedJson from './fixtures/agent-session-events/prompted.json' with { type: 'json' };
-import issueAssignedJson from './fixtures/app-user-notifications/issue-assigned-to-you.json' with { type: 'json' };
-import issueCommentMentionJson from './fixtures/app-user-notifications/issue-comment-mention.json' with { type: 'json' };
-import issueCommentReactionJson from './fixtures/app-user-notifications/issue-comment-reaction.json' with { type: 'json' };
-import issueEmojiReactionJson from './fixtures/app-user-notifications/issue-emoji-reaction.json' with { type: 'json' };
-import issueMentionJson from './fixtures/app-user-notifications/issue-mention.json' with { type: 'json' };
-import issueNewCommentJson from './fixtures/app-user-notifications/issue-new-comment.json' with { type: 'json' };
-import issueStatusChangedJson from './fixtures/app-user-notifications/issue-status-changed.json' with { type: 'json' };
-import issueUnassignedJson from './fixtures/app-user-notifications/issue-unassigned-from-you.json' with { type: 'json' };
+import agentSessionCreatedJson from './fixtures/agent-session-events/created';
+import agentSessionPromptedJson from './fixtures/agent-session-events/prompted';
+import issueAssignedJson from './fixtures/app-user-notifications/issue-assigned-to-you';
+import issueCommentMentionJson from './fixtures/app-user-notifications/issue-comment-mention';
+import issueCommentReactionJson from './fixtures/app-user-notifications/issue-comment-reaction';
+import issueEmojiReactionJson from './fixtures/app-user-notifications/issue-emoji-reaction';
+import issueMentionJson from './fixtures/app-user-notifications/issue-mention';
+import issueNewCommentJson from './fixtures/app-user-notifications/issue-new-comment';
+import issueStatusChangedJson from './fixtures/app-user-notifications/issue-status-changed';
+import issueUnassignedJson from './fixtures/app-user-notifications/issue-unassigned-from-you';
 
 export const issueCreatePayload = {
     action: 'create',
@@ -134,9 +134,13 @@ export const linearIssueCreateAdmission = (namespace = 'linear-processing-test')
         payload: issueCreatePayload,
     });
 
+const defaultLinearDeliveryId = '6d601ea0-cafe-4e33-8db1-d7c21fc6a773';
+
+const encodeJsonText = Schema.encodeResult(Schema.fromJsonString(Schema.Json));
+
 export const signedLinearBody = (
     body: Uint8Array,
-    deliveryId = '6d601ea0-cafe-4e33-8db1-d7c21fc6a773',
+    deliveryId = defaultLinearDeliveryId,
     timestamp = 0,
     event = 'Issue',
 ): RawWebhookInput => ({
@@ -152,12 +156,18 @@ export const signedLinearBody = (
 export const signedLinearInput = (
     payload: Schema.Json = issueCreatePayload,
     eventType = 'Issue',
-    deliveryId?: string,
-    timestamp?: number,
-) => signedLinearBody(new TextEncoder().encode(JSON.stringify(payload)), deliveryId, timestamp, eventType);
+    deliveryId = defaultLinearDeliveryId,
+    timestamp = 0,
+) =>
+    signedLinearBody(
+        new TextEncoder().encode(Result.getOrThrow(encodeJsonText(payload))),
+        deliveryId,
+        timestamp,
+        eventType,
+    );
 
 export const makeLinearTestProvider = (namespace = 'linear-test') => {
-    const provider = makeLinearWebhookProvider({
+    const provider = LinearWebhookProvider.makeLinearWebhookProvider({
         namespace,
         webhookSecret: Redacted.make(linearWebhookSecret),
         organizationId: linearOrganizationId,
@@ -212,5 +222,5 @@ export const makeControlledMailbox = <R>(processors: ReadonlyArray<ProviderEvent
     });
 
 /** A delivery execution for a batch's first attempt, with nothing prepared yet. */
-export const firstAttempt = (mailboxKey?: string) =>
-    makeTestDeliveryExecution(mailboxKey).pipe(Effect.map(({ execution }) => execution));
+export const firstAttempt = (mailboxKey = 'test-mailbox') =>
+    DeliveryExecution.makeTestDeliveryExecution(mailboxKey).pipe(Effect.map(({ execution }) => execution));

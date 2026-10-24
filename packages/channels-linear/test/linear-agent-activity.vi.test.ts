@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Config, Effect, Layer, Redacted, Ref, Schema } from 'effect';
+import { Config, Effect, Layer, Redacted, Ref, Schema, String as Str } from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 
 import { LinearAuth } from '../src';
@@ -76,7 +76,7 @@ describe('Linear Agent Activity API', () => {
                     expect(web.headers.get('authorization')).toBe('Bearer developer-token-never-log');
                     const body = yield* decodeAgentActivityRequest(httpRequest);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(
                             httpRequest,
                             Response.json({
@@ -138,7 +138,7 @@ describe('Linear Agent Activity API', () => {
                     expect(web.headers.get('authorization')).toBe('Bearer access-token-never-log');
                     const body = yield* decodeAgentActivityRequest(httpRequest);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(
                             httpRequest,
                             Response.json({
@@ -235,7 +235,7 @@ describe('Linear Agent Activity API', () => {
                 Effect.gen(function* () {
                     const body = yield* decodeAgentActivityRequest(httpRequest);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(
                             httpRequest,
                             Response.json({

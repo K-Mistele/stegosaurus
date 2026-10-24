@@ -1,3 +1,4 @@
+import { Array as Arr } from 'effect';
 import type { LinearIssueRequest } from '../LinearApiContract';
 import { discoverLinearFileRecords, LinearFileRecord, LinearFileRef } from '../LinearFileModels';
 import {
@@ -33,7 +34,7 @@ export const projectLinearIssue = (ref: LinearIssueRequest['issue'], value: type
         priority: value.priority,
         url: value.url,
         state: LinearWorkflowState.make(value.state),
-        labels: value.labels.nodes.map((label) => LinearIssueLabel.make(label)),
+        labels: Arr.map(value.labels.nodes, (label) => LinearIssueLabel.make(label)),
         assignee: projectLinearParticipant(value.assignee),
         delegate: projectLinearParticipant(value.delegate),
     });
@@ -81,5 +82,5 @@ export const projectLinearUser = (value: typeof LinearApiParticipant.Type) =>
         app: value.app ?? false,
         isAssignable: value.isAssignable ?? false,
         canAccessAnyPublicTeam: value.canAccessAnyPublicTeam ?? false,
-        teamIds: (value.teams?.nodes ?? []).map(({ id }) => id),
+        teamIds: Arr.map(value.teams?.nodes ?? [], ({ id }) => id),
     });

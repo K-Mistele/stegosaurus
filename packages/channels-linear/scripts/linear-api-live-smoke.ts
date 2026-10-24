@@ -1,4 +1,4 @@
-import { Config, Console, Effect, Redacted, Ref, Schema } from 'effect';
+import { Config, Console, Effect, ManagedRuntime, Predicate, Redacted, Ref, Schema } from 'effect';
 
 import {
     LinearApi,
@@ -12,13 +12,13 @@ import {
     LinearTeamId,
     LinearUserId,
     LinearWorkflowStateId,
-    makeLinearApiLive,
 } from '../src/index';
+import * as LinearApiLive from '../src/LinearApiLive';
 
 const required = (name: string) => {
     const value = Bun.env[name];
 
-    if (!value) throw new Error(`Missing ${name}`);
+    if (Predicate.isUndefined(value) || value === '') throw new Error(`Missing ${name}`);
 
     return value;
 };
@@ -26,7 +26,7 @@ const required = (name: string) => {
 const mutationInputs = () => {
     const marker = Bun.env.LINEAR_SMOKE_CONFIRM_MUTATIONS;
 
-    if (!marker) return null;
+    if (Predicate.isUndefined(marker) || marker === '') return null;
 
     if (!/^channels-live-p4-\d+$/.test(marker))
         throw new Error('LINEAR_SMOKE_CONFIRM_MUTATIONS must end in a numeric timestamp: channels-live-p4-<timestamp>');
@@ -155,15 +155,17 @@ const program = Effect.gen(function* () {
     }).pipe(Effect.ensuring(cleanup));
 });
 
-const layer = makeLinearApiLive(
-    LinearApiLiveOptions.make({
-        auth: LinearAuth.clientCredentials({
-            clientId: Config.succeed(required('LINEAR_CLIENT_ID')),
-            clientSecret: Config.succeed(Redacted.make(required('LINEAR_CLIENT_SECRET'))),
+const runtime = ManagedRuntime.make(
+    LinearApiLive.makeLinearApiLive(
+        LinearApiLiveOptions.make({
+            auth: LinearAuth.clientCredentials({
+                clientId: Config.succeed(required('LINEAR_CLIENT_ID')),
+                clientSecret: Config.succeed(Redacted.make(required('LINEAR_CLIENT_SECRET'))),
+            }),
+            organizationId: Config.succeed(LinearOrganizationId.make(required('LINEAR_ORGANIZATION_ID'))),
+            appUserId: Config.succeed(LinearUserId.make(required('LINEAR_APP_USER_ID'))),
         }),
-        organizationId: Config.succeed(LinearOrganizationId.make(required('LINEAR_ORGANIZATION_ID'))),
-        appUserId: Config.succeed(LinearUserId.make(required('LINEAR_APP_USER_ID'))),
-    }),
+    ),
 );
 
-await Effect.runPromise(program.pipe(Effect.provide(layer)));
+await runtime.runPromise(program).finally(() => runtime.dispose());

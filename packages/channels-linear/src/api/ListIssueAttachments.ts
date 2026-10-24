@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect';
+import { Effect, Schema, Array as Arr } from 'effect';
 
 import type { LinearApiError, LinearIssueRequest } from '../LinearApiContract';
 import { LinearIssueId } from '../LinearIdentity';
@@ -43,14 +43,14 @@ export const listIssueAttachments = Effect.fn('linear.api.list_issue_attachments
         }).pipe(
             Effect.flatMap(({ issue }) => {
                 const values = accumulated.concat(
-                    issue.attachments.nodes.map((value) => projectLinearAttachment(input.issue, value)),
+                    Arr.map(issue.attachments.nodes, (value) => projectLinearAttachment(input.issue, value)),
                 );
 
                 if (!issue.attachments.pageInfo.hasNextPage) return Effect.succeed(values);
 
                 if (issue.attachments.pageInfo.endCursor === null) {
                     return Effect.fail(
-                        new LinearResponseDecodeError(linearProviderErrorDetails('list_issue_attachments')),
+                        LinearResponseDecodeError.make(linearProviderErrorDetails('list_issue_attachments')),
                     );
                 }
 

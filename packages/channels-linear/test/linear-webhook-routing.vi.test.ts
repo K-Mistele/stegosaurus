@@ -2,7 +2,7 @@ import { NodeCrypto } from '@effect/platform-node';
 import { describe, it } from '@effect/vitest';
 import { webhookRoutes } from '@stegosaurus/channels-delivery/ProviderWebhooks';
 import { DeliveryReceipt, MailboxDelivery } from '@stegosaurus/channels-delivery/MailboxDelivery';
-import { Clock, Context, Effect, Redacted } from 'effect';
+import { Clock, Context, Effect, Redacted, String as Str } from 'effect';
 import { HttpRouter } from 'effect/http';
 
 import { makeLinearWebhookProvider } from '../src/LinearWebhookProvider';
@@ -66,7 +66,7 @@ describe('Linear webhook routing', () => {
 
             const invalid = {
                 ...signed,
-                headers: { ...signed.headers, 'linear-signature': '0'.repeat(64) },
+                headers: { ...signed.headers, 'linear-signature': Str.repeat(64)('0') },
             };
 
             expect((yield* request(invalid)).status).toBe(401);
@@ -74,7 +74,7 @@ describe('Linear webhook routing', () => {
             const mismatch = { ...issueCreatePayload, organizationId: 'another-workspace' };
             expect((yield* request(signedLinearInput(mismatch, 'Issue', undefined, now))).status).toBe(403);
 
-            const oversized = { ...issueCreatePayload, padding: 'x'.repeat(8192) };
+            const oversized = { ...issueCreatePayload, padding: Str.repeat(8192)('x') };
             expect((yield* request(signedLinearInput(oversized, 'Issue', undefined, now))).status).toBe(413);
         }),
     );

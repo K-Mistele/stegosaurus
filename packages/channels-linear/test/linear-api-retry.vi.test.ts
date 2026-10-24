@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Effect, Fiber, Ref, Schema } from 'effect';
+import { Effect, Fiber, Ref, Schema, String as Str } from 'effect';
 import { HttpClient, HttpClientResponse } from 'effect/http';
 import { TestClock } from 'effect/testing';
 
@@ -23,10 +23,10 @@ describe('Linear API retry policy', () => {
                 Effect.gen(function* () {
                     const body = yield* decodeRequest(request);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(request, Response.json(viewer));
 
-                    if (body.query.includes('mutation')) {
+                    if (Str.includes('mutation')(body.query)) {
                         yield* Ref.update(mutations, (n) => n + 1);
 
                         return HttpClientResponse.fromWeb(request, Response.json({}, { status: 503 }));
@@ -67,7 +67,7 @@ describe('Linear API retry policy', () => {
                 Effect.gen(function* () {
                     const body = yield* decodeRequest(request);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(request, Response.json(viewer));
                     const count = yield* Ref.updateAndGet(reads, (n) => n + 1);
 

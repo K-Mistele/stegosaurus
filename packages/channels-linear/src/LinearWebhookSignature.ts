@@ -1,5 +1,5 @@
 import { WebhookAuthenticationError } from '@stegosaurus/channels-delivery/ProviderWebhooks';
-import { Clock, Crypto, Effect, Redacted, Schema } from 'effect';
+import { Clock, Crypto, Effect, Redacted, Schema, String as Str } from 'effect';
 
 const LinearSignatureInput = Schema.Struct({
     body: Schema.Uint8Array,
@@ -45,12 +45,12 @@ const hmacSha256 = Effect.fn('linear.crypto.hmac_sha256')(function* (secret: Red
 });
 
 const decodeHex = (value: string) => {
-    const signature = value.startsWith('sha256=') ? value.slice(7) : value;
+    const signature = Str.startsWith('sha256=')(value) ? Str.slice(7)(value) : value;
 
     if (signature.length !== 64 || !hexadecimal.test(signature)) return undefined;
 
     return Uint8Array.from({ length: 32 }, (_, index) =>
-        Number.parseInt(signature.slice(index * 2, index * 2 + 2), 16),
+        Number.parseInt(Str.slice(index * 2, index * 2 + 2)(signature), 16),
     );
 };
 

@@ -1,5 +1,5 @@
 import type { DeliveryCallbackResult, DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Cause, Effect, Option, Predicate, Schema } from 'effect';
+import { Cause, Effect, Option, Predicate, Schema, Array as Arr } from 'effect';
 
 import type { LinearCallbackEventMap } from './LinearCallbackEvents';
 
@@ -20,11 +20,14 @@ export const LinearCallbackRetryability = Schema.Struct({
 
 const LinearCallbackRetryableFlag = Schema.Struct({ retryable: Schema.Boolean });
 
-export class LinearCallbackError extends Schema.TaggedError<LinearCallbackError>()('LinearCallbackError', {
-    callback: LinearCallbackName,
-    retryable: Schema.Boolean,
-    reason: Schema.Literals(['failed', 'unexpected']),
-}) {}
+export class LinearCallbackError extends Schema.TaggedError<LinearCallbackError, { readonly brand: unique symbol }>()(
+    'LinearCallbackError',
+    {
+        callback: LinearCallbackName,
+        retryable: Schema.Boolean,
+        reason: Schema.Literals(['failed', 'unexpected']),
+    },
+) {}
 
 /**
  * The application handler for one Linear callback.
@@ -55,7 +58,10 @@ const retryableFromCause = (cause: Cause.Cause<unknown>): boolean =>
 
 const narrowCause = (callback: LinearCallbackName, cause: Cause.Cause<unknown>) => {
     if (Cause.hasInterrupts(cause)) {
-        const reasons = cause.reasons.filter((reason) => Cause.isInterruptReason(reason) || Cause.isDieReason(reason));
+        const reasons = Arr.filter(
+            cause.reasons,
+            (reason) => Cause.isInterruptReason(reason) || Cause.isDieReason(reason),
+        );
 
         const preserve = Effect.failCause(Cause.fromReasons<never>(reasons));
 

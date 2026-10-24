@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Config, Effect, Layer, Logger, Predicate, Redacted, Ref, Schema } from 'effect';
+import { Config, Effect, Layer, Logger, Predicate, Redacted, Ref, Schema, Array as Arr, String as Str } from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 
 import { GetIssueVariables } from '../src/api/GetIssue';
@@ -32,7 +32,7 @@ describe('LinearApiLive', () => {
                     const body = yield* decodeRequest(request);
                     yield* Ref.update(calls, (values) => [...values, body.query]);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(request, Response.json(viewer));
 
                     return HttpClientResponse.fromWeb(request, Response.json({ data: { issue: issueJson } }));
@@ -68,7 +68,7 @@ describe('LinearApiLive', () => {
 
                     const body = yield* decodeRequest(request);
 
-                    if (body.query.includes('viewer'))
+                    if (Str.includes('viewer')(body.query))
                         return HttpClientResponse.fromWeb(request, Response.json(viewer));
                     const count = yield* Ref.updateAndGet(issueCalls, (n) => n + 1);
 
@@ -135,22 +135,19 @@ describe('LinearApiLive', () => {
             Effect.gen(function* () {
                 const logs: Array<string> = [];
 
-                const logger = Logger.layer([
-                    Logger.make((entry) => logs.push(JSON.stringify(Logger.formatStructured.log(entry)))),
-                ]);
+                const logger = Logger.layer([Logger.make((entry) => logs.push(Logger.formatJson.log(entry)))]);
 
                 const http = HttpClient.make((request) =>
                     Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({}, { status: 401 }))),
                 );
 
                 const error = yield* Effect.flatMap(LinearApi, (api) => api.getIssue({ issue })).pipe(
-                    Effect.provide(apiLayer(http)),
-                    Effect.provide(logger),
+                    Effect.provide(apiLayer(http).pipe(Layer.provideMerge(logger))),
                     Effect.flip,
                 );
 
                 expect(error).toMatchObject({ reason: 'unauthorized', retryable: false });
-                const output = logs.join('\n');
+                const output = Arr.join(logs, '\n');
                 expect(output).toContain('Linear rejected the developer token; check LINEAR_DEVELOPER_TOKEN');
                 expect(output).toContain('"credential":"developer_token"');
                 expect(output).toContain('"level":"ERROR"');
@@ -162,9 +159,7 @@ describe('LinearApiLive', () => {
         Effect.gen(function* () {
             const logs: Array<string> = [];
 
-            const logger = Logger.layer([
-                Logger.make((entry) => logs.push(JSON.stringify(Logger.formatStructured.log(entry)))),
-            ]);
+            const logger = Logger.layer([Logger.make((entry) => logs.push(Logger.formatJson.log(entry)))]);
 
             const http = HttpClient.make((request) =>
                 Effect.gen(function* () {
@@ -195,13 +190,12 @@ describe('LinearApiLive', () => {
             );
 
             const error = yield* Effect.flatMap(LinearApi, (api) => api.getIssue({ issue })).pipe(
-                Effect.provide(layer),
-                Effect.provide(logger),
+                Effect.provide(layer.pipe(Layer.provideMerge(logger))),
                 Effect.flip,
             );
 
             expect(error).toMatchObject({ reason: 'unauthorized' });
-            const output = logs.join('\n');
+            const output = Arr.join(logs, '\n');
             expect(output).toContain(
                 'Linear rejected the app client credentials; check LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET',
             );

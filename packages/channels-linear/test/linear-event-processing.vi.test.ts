@@ -19,10 +19,10 @@ import { firstAttempt, linearIssueCreateAdmission } from './fixtures';
 
 const namespace = 'linear-processing-test';
 
-const processor = <E, R>(handler?: LinearCallbackHandler<'onIssueCreated', E, R>) =>
+const processor = <E, R>(handler: LinearCallbackHandler<'onIssueCreated', E, R> | null) =>
     makeLinearEventProcessor({
         namespace,
-        handlers: handler === undefined ? {} : { onIssueCreated: handler },
+        handlers: handler === null ? {} : { onIssueCreated: handler },
     });
 
 const services = Layer.mergeAll(
@@ -56,7 +56,7 @@ describe('Linear event processing', () => {
         Effect.gen(function* () {
             const admission = linearIssueCreateAdmission(namespace);
 
-            const result = yield* processor<never, never>()
+            const result = yield* processor<never, never>(null)
                 .process([admission], yield* firstAttempt())
                 .pipe(Effect.provide(services));
 
@@ -73,7 +73,7 @@ describe('Linear event processing', () => {
                 installationId: 'another-workspace',
             });
 
-            const error = yield* processor<never, never>()
+            const error = yield* processor<never, never>(null)
                 .process([mismatched], yield* firstAttempt())
                 .pipe(Effect.provide(services), Effect.flip);
 

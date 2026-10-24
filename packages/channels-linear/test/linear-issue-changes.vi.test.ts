@@ -1,6 +1,11 @@
 import { describe, it } from '@effect/vitest';
 import { Effect } from 'effect';
 
+import {
+    LinearIssueLabelsChanged,
+    LinearIssueStatusChange,
+    LinearIssueTitleChanged,
+} from '../src/LinearCallbackEvents';
 import { normalizeLinearIssueChanges } from '../src/LinearIssueChanges';
 
 describe('Linear issue changes', () => {
@@ -14,9 +19,9 @@ describe('Linear issue changes', () => {
                     labelIds: ['old-label'],
                 }),
             ).toEqual([
-                { _tag: 'LinearIssueTitleChanged', previous: { title: 'Old title' } },
-                { _tag: 'LinearIssueStatusChanged', previous: { stateId: 'old-state', startedAt: null } },
-                { _tag: 'LinearIssueLabelsChanged', previous: { labelIds: ['old-label'] } },
+                LinearIssueTitleChanged.make({ previous: { title: 'Old title' } }),
+                LinearIssueStatusChange.make({ previous: { stateId: 'old-state', startedAt: null } }),
+                LinearIssueLabelsChanged.make({ previous: { labelIds: ['old-label'] } }),
             ]);
         }),
     );

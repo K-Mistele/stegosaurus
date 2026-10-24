@@ -3,7 +3,7 @@ import {
     type MailboxSubscriptionResult,
     MailboxSubscriptions,
 } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
-import { Effect, Predicate, Schema } from 'effect';
+import { Effect, Predicate, Schema, Array as Arr } from 'effect';
 
 import {
     LinearApi,
@@ -56,7 +56,7 @@ const issueAttributes = (issueId: string) => ({ 'linear.issue_id': issueId });
 const linearListUsersRequest = (issue: LinearIssueRef, options: LinearUserPageOptions) =>
     LinearListUsersRequest.make({ issue, ...options });
 
-export class LinearIssue extends Schema.TaggedClass<LinearIssue>()('LinearIssue', {
+export class LinearIssue extends Schema.TaggedClass<LinearIssue, { readonly brand: unique symbol }>()('LinearIssue', {
     ...LinearIssueSnapshot.fields,
     mailboxKey: Schema.NonEmptyString,
     files: Schema.Array(LinearFile),
@@ -108,12 +108,12 @@ export class LinearIssue extends Schema.TaggedClass<LinearIssue>()('LinearIssue'
     listComments(): Effect.Effect<ReadonlyArray<LinearComment>, LinearApiError, LinearApi> {
         return Effect.flatMap(LinearApi, (api) =>
             api.listIssueComments(LinearIssueRequest.make({ issue: this.ref })),
-        ).pipe(Effect.map((records) => records.map((record) => LinearComment.fromRecord(record))));
+        ).pipe(Effect.map((records) => Arr.map(records, (record) => LinearComment.fromRecord(record))));
     }
     listAttachments(): Effect.Effect<ReadonlyArray<LinearIssueAttachment>, LinearApiError, LinearApi> {
         return Effect.flatMap(LinearApi, (api) =>
             api.listIssueAttachments(LinearIssueRequest.make({ issue: this.ref })),
-        ).pipe(Effect.map((records) => records.map((record) => LinearIssueAttachment.make(record))));
+        ).pipe(Effect.map((records) => Arr.map(records, (record) => LinearIssueAttachment.make(record))));
     }
     postComment(content: LinearContent): Effect.Effect<LinearComment, LinearApiError, LinearApi> {
         return Effect.flatMap(LinearApi, (api) =>
@@ -186,15 +186,18 @@ export class LinearIssue extends Schema.TaggedClass<LinearIssue>()('LinearIssue'
     }
 }
 
-export class LinearComment extends Schema.TaggedClass<LinearComment>()('LinearComment', {
-    ...LinearCommentSnapshot.fields,
-    files: Schema.Array(LinearFile),
-}) {
+export class LinearComment extends Schema.TaggedClass<LinearComment, { readonly brand: unique symbol }>()(
+    'LinearComment',
+    {
+        ...LinearCommentSnapshot.fields,
+        files: Schema.Array(LinearFile),
+    },
+) {
     /** Wraps a comment record from `LinearApi`, and each of its files. */
     static fromRecord(record: LinearCommentRecord): LinearComment {
         return LinearComment.make({
             ...record,
-            files: record.files.map((file) => LinearFile.make(file)),
+            files: Arr.map(record.files, (file) => LinearFile.make(file)),
         });
     }
 
@@ -231,7 +234,7 @@ export class LinearComment extends Schema.TaggedClass<LinearComment>()('LinearCo
     }
 }
 
-export class LinearReaction extends Schema.TaggedClass<LinearReaction>()(
+export class LinearReaction extends Schema.TaggedClass<LinearReaction, { readonly brand: unique symbol }>()(
     'LinearReaction',
     LinearReactionRecord.fields,
 ) {
@@ -247,10 +250,10 @@ export class LinearReaction extends Schema.TaggedClass<LinearReaction>()(
     }
 }
 
-export class LinearIssueAttachment extends Schema.TaggedClass<LinearIssueAttachment>()(
-    'LinearIssueAttachment',
-    LinearIssueAttachmentRecord.fields,
-) {
+export class LinearIssueAttachment extends Schema.TaggedClass<
+    LinearIssueAttachment,
+    { readonly brand: unique symbol }
+>()('LinearIssueAttachment', LinearIssueAttachmentRecord.fields) {
     update(input: LinearUpdateAttachmentInput): Effect.Effect<LinearIssueAttachment, LinearApiError, LinearApi> {
         return Effect.flatMap(LinearApi, (api) =>
             api.updateAttachment(LinearUpdateAttachmentRequest.make({ attachment: this.ref, input })),
@@ -272,11 +275,14 @@ export type LinearAgentThoughtOptions = {
     readonly activityId?: LinearAgentActivityId;
 };
 
-export class LinearAgentSession extends Schema.TaggedClass<LinearAgentSession>()('LinearAgentSession', {
-    ...LinearAgentSessionSnapshot.fields,
-    mailboxKey: Schema.NonEmptyString,
-    deliveryId: LinearWebhookDeliveryId,
-}) {
+export class LinearAgentSession extends Schema.TaggedClass<LinearAgentSession, { readonly brand: unique symbol }>()(
+    'LinearAgentSession',
+    {
+        ...LinearAgentSessionSnapshot.fields,
+        mailboxKey: Schema.NonEmptyString,
+        deliveryId: LinearWebhookDeliveryId,
+    },
+) {
     private createActivity(
         purpose: 'thought' | 'response' | 'error',
         content: LinearActivityContent,

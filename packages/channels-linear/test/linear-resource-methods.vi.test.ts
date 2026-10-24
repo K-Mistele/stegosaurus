@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Effect, Layer, Queue } from 'effect';
+import { Effect, Layer, Queue, Array as Arr, Option } from 'effect';
 
 import { LinearApi } from '../src/LinearApi';
 import {
@@ -153,7 +153,7 @@ describe('Linear resource methods', () => {
             yield* run(attachment.remove());
 
             const recorded = Array.from(yield* Queue.takeAll(calls));
-            expect(recorded.map(({ method }) => method)).toEqual([
+            expect(Arr.map(recorded, ({ method }) => method)).toEqual([
                 'getIssue',
                 'listAssignableUsers',
                 'listAppUsers',
@@ -177,11 +177,18 @@ describe('Linear resource methods', () => {
                 'updateAttachment',
                 'deleteAttachment',
             ]);
-            expect(recorded.find(({ method }) => method === 'updateAttachment')?.input).toEqual({
+            expect(
+                Option.getOrUndefined(Arr.findFirst(recorded, ({ method }) => method === 'updateAttachment'))?.input,
+            ).toEqual({
                 attachment: attachment.ref,
                 input: { title: 'Renamed', subtitle: null },
             });
-            expect(recorded.filter(({ method }) => method === 'updateIssue').map(({ input }) => input)).toEqual([
+            expect(
+                Arr.map(
+                    Arr.filter(recorded, ({ method }) => method === 'updateIssue'),
+                    ({ input }) => input,
+                ),
+            ).toEqual([
                 { issue, update: { stateId: 'done' } },
                 { issue, update: { priority: 2 } },
                 { issue, update: { addLabelIds: ['label'] } },

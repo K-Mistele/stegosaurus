@@ -1,4 +1,4 @@
-import { Effect, Match, Schema } from 'effect';
+import { Effect, Match, Predicate, Schema, String as Str } from 'effect';
 import * as HttpClientRequest from 'effect/http/HttpClientRequest';
 
 import type { LinearApiError, LinearApiOperation } from '../LinearApiContract';
@@ -150,26 +150,27 @@ const failGraphqlResponseError = (
 
     const details = linearProviderErrorDetails(operation, {
         status: payload.extensions?.statusCode ?? status,
-        message: payload.message?.slice(0, 1024) ?? null,
+        message: Predicate.isString(payload.message) ? Str.slice(0, 1024)(payload.message) : null,
         retryAfterMs: headerRetryAfterMs ?? extensionRetryAfterMs,
     });
 
-    const code = payload.extensions?.code?.toUpperCase();
+    const rawCode = payload.extensions?.code;
+    const code = Predicate.isString(rawCode) ? Str.toUpperCase(rawCode) : undefined;
 
-    if (isAlreadyExists(code, payload)) return Effect.fail(new LinearAlreadyExistsError(details));
+    if (isAlreadyExists(code, payload)) return Effect.fail(LinearAlreadyExistsError.make(details));
 
-    if (isEntityNotFound(code, payload)) return Effect.fail(new LinearResourceNotFoundError(details));
+    if (isEntityNotFound(code, payload)) return Effect.fail(LinearResourceNotFoundError.make(details));
 
     if (code === undefined || !Schema.is(LinearKnownGraphqlCode)(code)) {
-        return Effect.fail(new LinearGraphqlRequestError(details));
+        return Effect.fail(LinearGraphqlRequestError.make(details));
     }
 
     return Match.value(graphqlErrorCategoryByCode[code]).pipe(
-        Match.when('rate_limited', () => Effect.fail(new LinearRateLimitedError({ ...details, retryable: true }))),
-        Match.when('forbidden', () => Effect.fail(new LinearForbiddenError(details))),
-        Match.when('authentication', () => Effect.fail(new LinearAuthenticationError(details))),
-        Match.when('not_found', () => Effect.fail(new LinearResourceNotFoundError(details))),
-        Match.when('validation', () => Effect.fail(new LinearValidationError(details))),
+        Match.when('rate_limited', () => Effect.fail(LinearRateLimitedError.make({ ...details, retryable: true }))),
+        Match.when('forbidden', () => Effect.fail(LinearForbiddenError.make(details))),
+        Match.when('authentication', () => Effect.fail(LinearAuthenticationError.make(details))),
+        Match.when('not_found', () => Effect.fail(LinearResourceNotFoundError.make(details))),
+        Match.when('validation', () => Effect.fail(LinearValidationError.make(details))),
         Match.exhaustive,
     );
 };
@@ -186,13 +187,12 @@ export const linearGraphql = <V, A>(
                 query: input.query,
                 variables: input.input,
             }),
-            Effect.mapError(
-                () =>
-                    new LinearResponseDecodeError(
-                        linearProviderErrorDetails(input.operation, {
-                            message: 'Could not encode Linear GraphQL request',
-                        }),
-                    ),
+            Effect.mapError(() =>
+                LinearResponseDecodeError.make(
+                    linearProviderErrorDetails(input.operation, {
+                        message: 'Could not encode Linear GraphQL request',
+                    }),
+                ),
             ),
         );
 
@@ -200,25 +200,25 @@ export const linearGraphql = <V, A>(
         const headerRetryAfterMs = parseRetryAfterHeader(response.headers['retry-after']);
 
         if (response.status === 401) {
-            return yield* new LinearAuthenticationError(
+            return yield* LinearAuthenticationError.make(
                 linearProviderErrorDetails(input.operation, { status: response.status }),
             );
         }
 
         if (response.status === 403) {
-            return yield* new LinearForbiddenError(
+            return yield* LinearForbiddenError.make(
                 linearProviderErrorDetails(input.operation, { status: response.status }),
             );
         }
 
         if (response.status === 404) {
-            return yield* new LinearResourceNotFoundError(
+            return yield* LinearResourceNotFoundError.make(
                 linearProviderErrorDetails(input.operation, { status: response.status }),
             );
         }
 
         if (response.status === 429) {
-            return yield* new LinearRateLimitedError(
+            return yield* LinearRateLimitedError.make(
                 linearProviderErrorDetails(input.operation, {
                     status: response.status,
                     retryable: true,
@@ -228,20 +228,19 @@ export const linearGraphql = <V, A>(
         }
 
         if (response.status >= 500) {
-            return yield* new LinearUnavailableError(
+            return yield* LinearUnavailableError.make(
                 linearProviderErrorDetails(input.operation, { status: response.status, retryable: true }),
             );
         }
 
         const body = yield* response.json.pipe(
-            Effect.mapError(
-                () =>
-                    new LinearResponseDecodeError(
-                        linearProviderErrorDetails(input.operation, {
-                            status: response.status,
-                            message: 'Linear returned invalid JSON',
-                        }),
-                    ),
+            Effect.mapError(() =>
+                LinearResponseDecodeError.make(
+                    linearProviderErrorDetails(input.operation, {
+                        status: response.status,
+                        message: 'Linear returned invalid JSON',
+                    }),
+                ),
             ),
         );
 
@@ -251,11 +250,10 @@ export const linearGraphql = <V, A>(
         });
 
         const envelope = yield* Schema.decodeUnknownEffect(LinearGraphqlOperationResponse)(body).pipe(
-            Effect.mapError(
-                () =>
-                    new LinearResponseDecodeError(
-                        linearProviderErrorDetails(input.operation, { status: response.status }),
-                    ),
+            Effect.mapError(() =>
+                LinearResponseDecodeError.make(
+                    linearProviderErrorDetails(input.operation, { status: response.status }),
+                ),
             ),
         );
 
@@ -266,13 +264,13 @@ export const linearGraphql = <V, A>(
         }
 
         if (response.status < 200 || response.status >= 300) {
-            return yield* new LinearGraphqlRequestError(
+            return yield* LinearGraphqlRequestError.make(
                 linearProviderErrorDetails(input.operation, { status: response.status }),
             );
         }
 
         if (envelope.data === null || envelope.data === undefined) {
-            return yield* new LinearResponseDecodeError(
+            return yield* LinearResponseDecodeError.make(
                 linearProviderErrorDetails(input.operation, { status: response.status }),
             );
         }

@@ -7,10 +7,10 @@ import type { LinearApi } from './LinearApi';
 import type { AuthenticationInput } from './LinearAuth';
 import * as LinearAuth from './LinearAuth';
 import type { LinearCallbackHandlers } from './LinearCallbacks';
-import { makeLinearOutputProcessor } from './LinearDeliveryOutput';
-import { makeLinearEventProcessor } from './LinearEventProcessor';
+import * as LinearDeliveryOutput from './LinearDeliveryOutput';
+import * as LinearEventProcessor from './LinearEventProcessor';
 import { LinearOrganizationId, LinearUserId } from './LinearIdentity';
-import { makeLinearWebhookProvider } from './LinearWebhookProvider';
+import * as LinearWebhookProvider from './LinearWebhookProvider';
 
 export const LinearBotConfiguration = Schema.Struct({
     organizationId: LinearOrganizationId,
@@ -69,7 +69,7 @@ export const make = <E, R>(
             const bot = yield* readBotConfiguration;
             const oauthClientId = yield* readOauthClientId;
 
-            return makeLinearWebhookProvider({
+            return LinearWebhookProvider.makeLinearWebhookProvider({
                 namespace,
                 webhookSecret,
                 organizationId: bot.organizationId,
@@ -83,7 +83,7 @@ export const make = <E, R>(
             const bot = yield* readBotConfiguration;
             const oauthClientId = yield* readOauthClientId;
 
-            return makeLinearEventProcessor({
+            return LinearEventProcessor.makeLinearEventProcessor({
                 namespace,
                 bot,
                 oauthClientId: Option.getOrUndefined(oauthClientId),
@@ -94,7 +94,7 @@ export const make = <E, R>(
         outputProcessor: Effect.fn('linear.bot.build_output_processor')(function* ({ namespace }) {
             const bot = yield* readBotConfiguration;
 
-            return yield* makeLinearOutputProcessor({ namespace, bot });
+            return yield* LinearDeliveryOutput.makeLinearOutputProcessor({ namespace, bot });
         }),
     };
 };

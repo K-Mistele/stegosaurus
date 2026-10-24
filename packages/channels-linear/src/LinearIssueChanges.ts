@@ -61,4 +61,4 @@ const issueChanges = [
 
 /** One change event per field group that the update touched, each carrying the previous values Linear sent for that group. */
 export const normalizeLinearIssueChanges = (updatedFrom: LinearIssueUpdatedFrom): Array<LinearIssueChange> =>
-    Arr.getSomes(issueChanges.map((change) => change(updatedFrom)));
+    Arr.getSomes(Arr.map(issueChanges, (change) => change(updatedFrom)));

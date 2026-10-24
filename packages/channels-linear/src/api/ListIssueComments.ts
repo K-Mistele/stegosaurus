@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect';
+import { Effect, Schema, Array as Arr } from 'effect';
 
 import type { LinearApiError, LinearIssueRequest } from '../LinearApiContract';
 import { LinearIssueId } from '../LinearIdentity';
@@ -36,14 +36,14 @@ export const listIssueComments = Effect.fn('linear.api.list_issue_comments')((in
         }).pipe(
             Effect.flatMap(({ issue }) => {
                 const values = accumulated.concat(
-                    issue.comments.nodes.map((value) => projectLinearComment(input.issue, value)),
+                    Arr.map(issue.comments.nodes, (value) => projectLinearComment(input.issue, value)),
                 );
 
                 if (!issue.comments.pageInfo.hasNextPage) return Effect.succeed(values);
 
                 if (issue.comments.pageInfo.endCursor === null) {
                     return Effect.fail(
-                        new LinearResponseDecodeError(linearProviderErrorDetails('list_issue_comments')),
+                        LinearResponseDecodeError.make(linearProviderErrorDetails('list_issue_comments')),
                     );
                 }
 

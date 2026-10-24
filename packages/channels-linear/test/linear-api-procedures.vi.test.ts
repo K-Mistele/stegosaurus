@@ -14,20 +14,18 @@ import { narrowLinearProviderErrors } from '../src/api/LinearApiErrors';
 import { LinearHttpClient } from '../src/api/LinearHttpClient';
 import { ListIssueAttachmentsVariables } from '../src/api/ListIssueAttachments';
 import { ListIssueCommentsVariables } from '../src/api/ListIssueComments';
-import {
-    createAttachment,
-    createComment,
-    createReaction,
-    deleteAttachment,
-    deleteComment,
-    deleteReaction,
-    getUser,
-    listIssueAttachments,
-    listIssueComments,
-    updateAttachment,
-    updateComment,
-    updateIssue,
-} from '../src/api/Operations';
+import { createAttachment } from '../src/api/CreateAttachment';
+import { createComment } from '../src/api/CreateComment';
+import { createReaction } from '../src/api/CreateReaction';
+import { deleteAttachment } from '../src/api/DeleteAttachment';
+import { deleteComment } from '../src/api/DeleteComment';
+import { deleteReaction } from '../src/api/DeleteReaction';
+import { getUser } from '../src/api/GetUser';
+import { listIssueAttachments } from '../src/api/ListIssueAttachments';
+import { listIssueComments } from '../src/api/ListIssueComments';
+import { updateAttachment } from '../src/api/UpdateAttachment';
+import { updateComment } from '../src/api/UpdateComment';
+import { updateIssue } from '../src/api/UpdateIssue';
 import { UpdateAttachmentVariables } from '../src/api/UpdateAttachment';
 import { UpdateCommentVariables } from '../src/api/UpdateComment';
 import { UpdateIssueVariables } from '../src/api/UpdateIssue';

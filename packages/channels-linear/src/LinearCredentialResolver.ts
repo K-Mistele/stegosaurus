@@ -31,7 +31,7 @@ type AcquiredLinearCredential = {
 };
 
 const makeResolver = Effect.fn('linear.credentials.make')(function* (options: {
-    readonly acquire: Effect.Effect<AcquiredLinearCredential, LinearApiError, HttpClient.HttpClient>;
+    readonly acquire: (client: HttpClient.HttpClient) => Effect.Effect<AcquiredLinearCredential, LinearApiError>;
     readonly canRefresh: boolean;
     readonly organizationId: LinearOrganizationId;
     readonly appUserId: LinearUserId;
@@ -41,12 +41,12 @@ const makeResolver = Effect.fn('linear.credentials.make')(function* (options: {
     const semaphore = yield* Semaphore.make(1);
 
     const acquire = Effect.gen(function* () {
-        const token = yield* options.acquire.pipe(Effect.provideService(HttpClient.HttpClient, client));
+        const token = yield* options.acquire(client);
 
-        const http = yield* LinearHttpClient.makeFixedCredential({
+        const http = LinearHttpClient.fixedCredential(client, {
             organizationId: options.organizationId,
             accessToken: token.accessToken,
-        }).pipe(Effect.provideService(HttpClient.HttpClient, client));
+        });
 
         const identity = yield* getViewerIdentity.pipe(
             Effect.provideService(LinearHttpClient, http),
@@ -101,11 +101,12 @@ const makeResolver = Effect.fn('linear.credentials.make')(function* (options: {
 /** Builds the one-workspace, expiry-aware client-credentials resolver. No network call occurs until resolve. */
 export const makeLinearCredentialResolver = (options: LinearCredentialResolverOptions) =>
     makeResolver({
-        acquire: acquireClientCredentialsToken({
-            clientId: options.clientId,
-            clientSecret: options.clientSecret,
-            scopes: ['read', 'write', 'app:assignable', 'app:mentionable'],
-        }),
+        acquire: (client) =>
+            acquireClientCredentialsToken(client, {
+                clientId: options.clientId,
+                clientSecret: options.clientSecret,
+                scopes: ['read', 'write', 'app:assignable', 'app:mentionable'],
+            }),
         canRefresh: true,
         organizationId: options.organizationId,
         appUserId: options.appUserId,
@@ -114,10 +115,11 @@ export const makeLinearCredentialResolver = (options: LinearCredentialResolverOp
 /** Builds a resolver for a caller-managed app developer token. The token is verified lazily once per runtime. */
 export const makeLinearDeveloperTokenResolver = (options: LinearDeveloperTokenResolverOptions) =>
     makeResolver({
-        acquire: Effect.succeed({
-            accessToken: options.token,
-            expiresAt: Number.MAX_SAFE_INTEGER,
-        }),
+        acquire: () =>
+            Effect.succeed({
+                accessToken: options.token,
+                expiresAt: Number.MAX_SAFE_INTEGER,
+            }),
         canRefresh: false,
         organizationId: options.organizationId,
         appUserId: options.appUserId,

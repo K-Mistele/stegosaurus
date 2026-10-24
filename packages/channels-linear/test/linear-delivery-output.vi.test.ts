@@ -1,6 +1,7 @@
 import { describe, it } from '@effect/vitest';
 import {
     DeliveryOutputApplied,
+    DeliveryOutputFailed,
     ProviderOutputAttempt,
     ProviderPresentOutcome,
     type ProviderOutputOperation,
@@ -17,11 +18,16 @@ import {
 } from '@stegosaurus/channels-delivery/DeliveryPlan';
 import { DeliveryOutcome } from '@stegosaurus/channels-delivery/DeliveryOutcome';
 import { DeliveryOperationId } from '@stegosaurus/channels-delivery/DeliveryOperation';
-import { MessageId } from '@stegosaurus/channels-delivery/DeliveryMessage';
-import { ExternalLink } from '@stegosaurus/channels-delivery/DeliveryLink';
+import {
+    CreateMessage,
+    MessageId,
+    ProviderDeleteMessage,
+    ProviderUpdateMessage,
+} from '@stegosaurus/channels-delivery/DeliveryMessage';
+import { AddExternalLink, ExternalLink } from '@stegosaurus/channels-delivery/DeliveryLink';
 import { PreparedDeliveryCallback } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { DeliveryActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
-import { Effect, Layer, Match, Ref, Result, Schema } from 'effect';
+import { DeliveryActivity, SetActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
+import { Effect, Layer, Option, Ref, Result, Schema, Array as Arr } from 'effect';
 
 import {
     commentOutputScenarios,
@@ -29,10 +35,12 @@ import {
     type CommentOutputHarness,
 } from '../../channels-delivery/test/comment-output-scenarios';
 import {
+    LinearActivityContent,
     LinearAgentActivityReceipt,
     LinearCommentRef,
     LinearContent,
     LinearIssueRef,
+    LinearReactionTarget,
     type LinearCreateAgentActivityRequest,
     type LinearCreateCommentRequest,
     type LinearDeleteCommentRequest,
@@ -54,7 +62,16 @@ import {
     LinearIssueDestination,
     linearSupportedOperations,
 } from '../src/LinearDeliveryDestination';
-import { LinearOutputReceipt, linearDefaultOutcomeText, makeLinearOutputProcessor } from '../src/LinearDeliveryOutput';
+import {
+    LinearActivityReceipt,
+    LinearAgentPlanReceipt,
+    LinearCommentReceipt,
+    LinearOutputReceipt,
+    LinearPlanThoughtReceipt,
+    LinearReactionReceipt,
+    linearDefaultOutcomeText,
+    makeLinearOutputProcessor,
+} from '../src/LinearDeliveryOutput';
 import {
     LinearAgentActivityId,
     LinearAgentSessionId,
@@ -87,24 +104,36 @@ const issueDestination = LinearIssueDestination.make({
     issueId,
 });
 
+const encodeDestination = Schema.encodeResult(Schema.toCodecJson(LinearDeliveryDestination));
+
+const encodeActivationTarget = Schema.encodeResult(Schema.toCodecJson(LinearActivationTarget));
+
+const encodeReceipt = Schema.encodeResult(Schema.toCodecJson(LinearOutputReceipt));
+
+/** A receipt as the store saves it. Throws, failing the test, when it cannot be encoded. */
+const encodeLinearReceipt = (receipt: LinearOutputReceipt) => Result.getOrThrow(encodeReceipt(receipt));
+
+/** The failure of a run that failed. Throws, failing the test, when the run succeeded. */
+const failureOf = <A, E>(result: Result.Result<A, E>) => Option.getOrThrow(Result.getFailure(result));
+
 const prepared = (
     destination: LinearDeliveryDestination,
-    presentationVersion = 1,
-    activationTarget?: LinearActivationTarget,
+    presentationVersion: number,
+    activationTarget: LinearActivationTarget | null,
 ) => {
     const fields = {
         name: 'onAgentSessionCreated',
         presentationVersion,
-        destination: Schema.encodeSync(Schema.toCodecJson(LinearDeliveryDestination))(destination),
+        destination: Result.getOrThrow(encodeDestination(destination)),
         supportedOperations: linearSupportedOperations(destination),
     };
 
     return PreparedDeliveryCallback.make(
-        activationTarget === undefined
+        activationTarget === null
             ? fields
             : {
                   ...fields,
-                  activationTarget: Schema.encodeSync(Schema.toCodecJson(LinearActivationTarget))(activationTarget),
+                  activationTarget: Result.getOrThrow(encodeActivationTarget(activationTarget)),
               },
     );
 };
@@ -112,7 +141,7 @@ const prepared = (
 const attempt = (
     operation: ProviderOutputOperation,
     destination: LinearDeliveryDestination = sessionDestination,
-    activationTarget?: LinearActivationTarget,
+    activationTarget: LinearActivationTarget | null = null,
 ) =>
     ProviderOutputAttempt.make({
         deliveryId: formatDeliveryId({
@@ -127,9 +156,9 @@ const attempt = (
         operation,
     });
 
-const outcome = (result: DeliveryOutcome, markdown?: string) =>
+const outcome = (result: DeliveryOutcome, markdown: string | null = null) =>
     ProviderPresentOutcome.make(
-        markdown === undefined
+        markdown === null
             ? { outcome: result, clearActivity: true }
             : { outcome: result, markdown, clearActivity: true },
     );
@@ -141,10 +170,7 @@ const commentRef = LinearCommentRef.make({
     commentId: LinearCommentId.make('72000000-0000-4000-8000-00000000c0de'),
 });
 
-const commentReceipt = Schema.encodeSync(Schema.toCodecJson(LinearOutputReceipt))({
-    _tag: 'LinearIssueComment',
-    comment: commentRef,
-});
+const commentReceipt = encodeLinearReceipt(LinearCommentReceipt.make({ comment: commentRef }));
 
 type Calls = {
     readonly activities: ReadonlyArray<LinearCreateAgentActivityRequest>;
@@ -281,24 +307,20 @@ const run = (
 
         const processor = yield* makeLinearOutputProcessor({ namespace: 'linear-output-test', bot });
 
-        const result = yield* processor.process(input).pipe(
-            Effect.provide(api),
-            Effect.match({
-                onSuccess: (success) => ({ _tag: 'Success' as const, success }),
-                onFailure: (failure) => ({ _tag: 'Failure' as const, failure }),
-            }),
-        );
+        const result = yield* processor.process(input).pipe(Effect.provide(api), Effect.result);
 
         return { result, calls: yield* Ref.get(calls) };
     });
 
-const activityReceipt = DeliveryOutputApplied.make({
-    receipt: { _tag: 'LinearAgentActivity', activityId: idempotencyKey },
-});
+const activityReference = encodeLinearReceipt(
+    LinearActivityReceipt.make({ activityId: LinearAgentActivityId.make(idempotencyKey) }),
+);
 
-const linearError = (reason: LinearApiError['reason'], retryable: boolean, retryAfterMs?: number) =>
+const activityReceipt = DeliveryOutputApplied.make({ receipt: activityReference });
+
+const linearError = (reason: LinearApiError['reason'], retryable: boolean, retryAfterMs: number | null = null) =>
     LinearApiError.make(
-        retryAfterMs === undefined
+        retryAfterMs === null
             ? { operation: 'create_agent_activity', reason, retryable }
             : { operation: 'create_agent_activity', reason, retryable, retryAfterMs },
     );
@@ -325,19 +347,16 @@ const linearIssueHarness: CommentOutputHarness = {
 
         const input =
             options.futureVersion === true
-                ? ProviderOutputAttempt.make({ ...base, prepared: prepared(issueDestination, 2) })
+                ? ProviderOutputAttempt.make({ ...base, prepared: prepared(issueDestination, 2, null) })
                 : base;
 
         return run(input, options.fault === undefined ? {} : { commentError: commentFault[options.fault] }).pipe(
             Effect.map(({ result, calls }) => ({
-                result: Match.valueTags(result, {
-                    Success: ({ success }) => Result.succeed(success),
-                    Failure: ({ failure }) => Result.fail(failure),
-                }),
+                result,
                 shown: [
-                    ...calls.comments.map(({ content }) => `post: ${content.markdown}`),
-                    ...calls.commentUpdates.map(({ content }) => `edit: ${content.markdown}`),
-                    ...calls.commentDeletes.map(() => 'delete'),
+                    ...Arr.map(calls.comments, ({ content }) => `post: ${content.markdown}`),
+                    ...Arr.map(calls.commentUpdates, ({ content }) => `edit: ${content.markdown}`),
+                    ...Arr.map(calls.commentDeletes, () => 'delete'),
                 ],
             })),
         );
@@ -369,14 +388,12 @@ const sessionPlan = DeliveryPlan.make({
     ],
 });
 
-const encodeLinearReceipt = Schema.encodeSync(Schema.toCodecJson(LinearOutputReceipt));
-
-const thoughtShown = (text?: string) =>
+const thoughtShown = (text: string | null = null) =>
     RenderedDeliveryPlan.make({
         revision: 1,
         plan: sessionPlan,
         presentation: encodeLinearReceipt(
-            text === undefined ? { _tag: 'LinearPlanThought' } : { _tag: 'LinearPlanThought', text },
+            text === null ? LinearPlanThoughtReceipt.make({}) : LinearPlanThoughtReceipt.make({ text }),
         ),
     });
 
@@ -398,10 +415,11 @@ describe('Linear output: session plan', () => {
                 },
             ]);
             expect(calls.activities).toEqual([]);
-            expect(result).toEqual({
-                _tag: 'Success',
-                success: DeliveryOutputApplied.make({ receipt: { _tag: 'LinearAgentPlan' } }),
-            });
+            expect(result).toEqual(
+                Result.succeed(
+                    DeliveryOutputApplied.make({ receipt: encodeLinearReceipt(LinearAgentPlanReceipt.make({})) }),
+                ),
+            );
         }),
     );
 
@@ -423,17 +441,22 @@ describe('Linear output: session plan', () => {
                     {
                         organizationId: linearOrganizationId,
                         sessionId,
-                        content: { _tag: 'Thought', body: 'Rotate secret: Updating production' },
+                        content: LinearActivityContent.cases.Thought.make({
+                            body: 'Rotate secret: Updating production',
+                        }),
                         ephemeral: true,
                         activityId: idempotencyKey,
                     },
                 ]);
-                expect(first.result).toEqual({
-                    _tag: 'Success',
-                    success: DeliveryOutputApplied.make({
-                        receipt: { _tag: 'LinearPlanThought', text: 'Rotate secret: Updating production' },
-                    }),
-                });
+                expect(first.result).toEqual(
+                    Result.succeed(
+                        DeliveryOutputApplied.make({
+                            receipt: encodeLinearReceipt(
+                                LinearPlanThoughtReceipt.make({ text: 'Rotate secret: Updating production' }),
+                            ),
+                        }),
+                    ),
+                );
 
                 const unchanged = yield* run(
                     attempt(
@@ -463,8 +486,8 @@ describe('Linear output: session plan', () => {
                 );
 
                 expect(next.calls.sessionUpdates).toEqual([]);
-                expect(next.calls.activities.map(({ content }) => content)).toEqual([
-                    { _tag: 'Thought', body: 'Verify deployment' },
+                expect(Arr.map(next.calls.activities, ({ content }) => content)).toEqual([
+                    LinearActivityContent.cases.Thought.make({ body: 'Verify deployment' }),
                 ]);
             }),
     );
@@ -480,10 +503,7 @@ describe('Linear output: session plan', () => {
             });
 
             expect(calls.activities).toEqual([]);
-            expect(result).toMatchObject({
-                _tag: 'Failure',
-                failure: { retryable: true, safeCode: 'linear_plan_failed' },
-            });
+            expect(failureOf(result)).toMatchObject({ retryable: true, safeCode: 'linear_plan_failed' });
         }),
     );
 });
@@ -494,42 +514,47 @@ describe('Linear output: Agent Session', () => {
         ({ expect }) =>
             Effect.gen(function* () {
                 const cases = [
-                    [outcome(DeliveryOutcome.cases.Completed.make({}), 'Fixed.'), { type: 'Response', body: 'Fixed.' }],
+                    [
+                        outcome(DeliveryOutcome.cases.Completed.make({}), 'Fixed.'),
+                        LinearActivityContent.cases.Response.make({ body: 'Fixed.' }),
+                    ],
                     [
                         outcome(DeliveryOutcome.cases.Completed.make({})),
-                        { type: 'Response', body: linearDefaultOutcomeText.Completed },
+                        LinearActivityContent.cases.Response.make({ body: linearDefaultOutcomeText.Completed }),
                     ],
                     [
                         outcome(DeliveryOutcome.cases.Failed.make({}), 'Stopped as requested.'),
-                        { type: 'Error', body: 'Stopped as requested.' },
+                        LinearActivityContent.cases.Error.make({ body: 'Stopped as requested.' }),
                     ],
                     [
                         outcome(DeliveryOutcome.cases.Failed.make({})),
-                        { type: 'Error', body: linearDefaultOutcomeText.Failed },
+                        LinearActivityContent.cases.Error.make({ body: linearDefaultOutcomeText.Failed }),
                     ],
                     [
                         outcome(
                             DeliveryOutcome.cases.AwaitingInput.make({ options: ['staging', 'production'] }),
                             'Where to?',
                         ),
-                        { type: 'Elicitation', body: 'Where to?', options: ['staging', 'production'] },
+                        LinearActivityContent.cases.Elicitation.make({
+                            body: 'Where to?',
+                            options: ['staging', 'production'],
+                        }),
                     ],
                     [
                         outcome(DeliveryOutcome.cases.AwaitingInput.make({})),
-                        { type: 'Elicitation', body: linearDefaultOutcomeText.AwaitingInput },
+                        LinearActivityContent.cases.Elicitation.make({ body: linearDefaultOutcomeText.AwaitingInput }),
                     ],
                 ] as const;
 
                 for (const [operation, expected] of cases) {
                     const { result, calls } = yield* run(attempt(operation));
-                    expect(result).toEqual({ _tag: 'Success', success: activityReceipt });
+                    expect(result).toEqual(Result.succeed(activityReceipt));
                     expect(calls.activities).toHaveLength(1);
                     const [request] = calls.activities;
-                    const { type, ...content } = expected;
                     expect(request).toEqual({
                         organizationId: linearOrganizationId,
                         sessionId,
-                        content: { _tag: type, ...content },
+                        content: expected,
                         ephemeral: false,
                         activityId: idempotencyKey,
                     });
@@ -542,28 +567,27 @@ describe('Linear output: Agent Session', () => {
         ({ expect }) =>
             Effect.gen(function* () {
                 const working = yield* run(
-                    attempt({
-                        _tag: 'SetActivity',
-                        activity: DeliveryActivity.cases.Working.make({ message: 'Running tests' }),
-                    }),
+                    attempt(
+                        SetActivity.make({
+                            activity: DeliveryActivity.cases.Working.make({ message: 'Running tests' }),
+                        }),
+                    ),
                 );
 
-                expect(working.result).toEqual({ _tag: 'Success', success: activityReceipt });
+                expect(working.result).toEqual(Result.succeed(activityReceipt));
                 expect(working.calls.activities).toEqual([
                     {
                         organizationId: linearOrganizationId,
                         sessionId,
-                        content: { _tag: 'Thought', body: 'Running tests' },
+                        content: LinearActivityContent.cases.Thought.make({ body: 'Running tests' }),
                         ephemeral: true,
                         activityId: idempotencyKey,
                     },
                 ]);
 
-                const idle = yield* run(
-                    attempt({ _tag: 'SetActivity', activity: DeliveryActivity.cases.Idle.make({}) }),
-                );
+                const idle = yield* run(attempt(SetActivity.make({ activity: DeliveryActivity.cases.Idle.make({}) })));
 
-                expect(idle.result).toEqual({ _tag: 'Success', success: DeliveryOutputApplied.make({}) });
+                expect(idle.result).toEqual(Result.succeed(DeliveryOutputApplied.make({})));
                 expect(idle.calls.activities).toEqual([]);
             }),
     );
@@ -571,16 +595,12 @@ describe('Linear output: Agent Session', () => {
     it.effect('posts a message as a lasting thought', ({ expect }) =>
         Effect.gen(function* () {
             const { result, calls } = yield* run(
-                attempt({
-                    _tag: 'CreateMessage',
-                    messageId: MessageId.make('summary'),
-                    markdown: 'Summary',
-                }),
+                attempt(CreateMessage.make({ messageId: MessageId.make('summary'), markdown: 'Summary' })),
             );
 
-            expect(result).toEqual({ _tag: 'Success', success: activityReceipt });
+            expect(result).toEqual(Result.succeed(activityReceipt));
             expect(calls.activities[0]).toMatchObject({
-                content: { _tag: 'Thought', body: 'Summary' },
+                content: LinearActivityContent.cases.Thought.make({ body: 'Summary' }),
                 ephemeral: false,
             });
         }),
@@ -592,7 +612,7 @@ describe('Linear output: Agent Session', () => {
                 activityError: linearError('already_exists', false),
             });
 
-            expect(result).toEqual({ _tag: 'Success', success: activityReceipt });
+            expect(result).toEqual(Result.succeed(activityReceipt));
             expect(calls.activities).toHaveLength(1);
         }),
     );
@@ -603,41 +623,32 @@ describe('Linear output: Agent Session', () => {
                 activityError: linearError('rate_limited', true, 2_000),
             });
 
-            expect(retryable.result).toMatchObject({
-                _tag: 'Failure',
-                failure: {
-                    _tag: 'DeliveryOutputFailed',
-                    retryable: true,
-                    retryAfterMs: 2_000,
-                    safeCode: 'linear_activity_failed',
-                },
+            expect(failureOf(retryable.result)).toBeInstanceOf(DeliveryOutputFailed);
+            expect(failureOf(retryable.result)).toMatchObject({
+                retryable: true,
+                retryAfterMs: 2_000,
+                safeCode: 'linear_activity_failed',
             });
 
             const invalidId = yield* run(attempt(outcome(DeliveryOutcome.cases.Completed.make({}))), {
                 activityError: linearError('rejected', false),
             });
 
-            expect(invalidId.result).toMatchObject({
-                _tag: 'Failure',
-                failure: { retryable: false, safeCode: 'linear_activity_failed' },
-            });
+            expect(failureOf(invalidId.result)).toMatchObject({ retryable: false, safeCode: 'linear_activity_failed' });
         }),
     );
 
     it.effect('refuses message update and delete, which a session cannot show', ({ expect }) =>
         Effect.gen(function* () {
             const messageId = MessageId.make('summary');
-            const reference = { _tag: 'LinearAgentActivity', activityId: idempotencyKey };
+            const reference = activityReference;
 
             for (const operation of [
-                { _tag: 'UpdateMessage', messageId, markdown: 'x', reference },
-                { _tag: 'DeleteMessage', messageId, reference },
+                ProviderUpdateMessage.make({ messageId, markdown: 'x', reference }),
+                ProviderDeleteMessage.make({ messageId, reference }),
             ] as const) {
                 const { result, calls } = yield* run(attempt(operation));
-                expect(result).toMatchObject({
-                    _tag: 'Failure',
-                    failure: { retryable: false, safeCode: 'unsupported_operation' },
-                });
+                expect(failureOf(result)).toMatchObject({ retryable: false, safeCode: 'unsupported_operation' });
                 expect(calls.activities).toEqual([]);
             }
 
@@ -650,8 +661,8 @@ describe('Linear output: Agent Session', () => {
     it.effect('adds a link to the session', ({ expect }) =>
         Effect.gen(function* () {
             const link = ExternalLink.make({ label: 'Run log', url: 'https://example.com/run/1' });
-            const { result, calls } = yield* run(attempt({ _tag: 'AddExternalLink', link }));
-            expect(result).toEqual({ _tag: 'Success', success: DeliveryOutputApplied.make({}) });
+            const { result, calls } = yield* run(attempt(AddExternalLink.make({ link })));
+            expect(result).toEqual(Result.succeed(DeliveryOutputApplied.make({})));
             expect(calls.sessionUpdates).toEqual([
                 {
                     organizationId: linearOrganizationId,
@@ -680,9 +691,9 @@ describe('Linear output: Agent Session', () => {
 
                 for (const destination of [otherOrganization, otherApp]) {
                     const { result, calls } = yield* run(attempt(operation, destination));
-                    expect(result).toMatchObject({
-                        _tag: 'Failure',
-                        failure: { retryable: false, safeCode: 'destination_identity_mismatch' },
+                    expect(failureOf(result)).toMatchObject({
+                        retryable: false,
+                        safeCode: 'destination_identity_mismatch',
                     });
                     expect(calls.activities).toEqual([]);
                 }
@@ -690,14 +701,11 @@ describe('Linear output: Agent Session', () => {
                 const version = yield* run(
                     ProviderOutputAttempt.make({
                         ...attempt(operation),
-                        prepared: prepared(sessionDestination, 2),
+                        prepared: prepared(sessionDestination, 2, null),
                     }),
                 );
 
-                expect(version.result).toMatchObject({
-                    _tag: 'Failure',
-                    failure: { safeCode: 'unsupported_presentation_version' },
-                });
+                expect(failureOf(version.result)).toMatchObject({ safeCode: 'unsupported_presentation_version' });
             }),
     );
 });
@@ -717,10 +725,7 @@ describe('Linear output: issue', () => {
                     ),
                 );
 
-                expect(asked.result).toEqual({
-                    _tag: 'Success',
-                    success: DeliveryOutputApplied.make({ receipt: commentReceipt }),
-                });
+                expect(asked.result).toEqual(Result.succeed(DeliveryOutputApplied.make({ receipt: commentReceipt })));
                 expect(asked.calls.comments).toEqual([
                     {
                         issue: { organizationId: linearOrganizationId, teamId: null, issueId },
@@ -730,7 +735,7 @@ describe('Linear output: issue', () => {
 
                 const silent = yield* run(attempt(outcome(DeliveryOutcome.cases.Completed.make({})), issueDestination));
 
-                expect(silent.result).toEqual({ _tag: 'Success', success: DeliveryOutputApplied.make({}) });
+                expect(silent.result).toEqual(Result.succeed(DeliveryOutputApplied.make({})));
                 expect(silent.calls.comments).toEqual([]);
                 expect(silent.calls.activities).toEqual([]);
             }),
@@ -743,17 +748,14 @@ describe('Linear output: issue', () => {
                 const messageId = MessageId.make('progress');
 
                 const created = yield* run(
-                    attempt({ _tag: 'CreateMessage', messageId, markdown: 'Running' }, issueDestination),
+                    attempt(CreateMessage.make({ messageId, markdown: 'Running' }), issueDestination),
                 );
 
-                expect(created.result).toEqual({
-                    _tag: 'Success',
-                    success: DeliveryOutputApplied.make({ receipt: commentReceipt }),
-                });
+                expect(created.result).toEqual(Result.succeed(DeliveryOutputApplied.make({ receipt: commentReceipt })));
 
                 const updated = yield* run(
                     attempt(
-                        { _tag: 'UpdateMessage', messageId, markdown: 'Passed', reference: commentReceipt },
+                        ProviderUpdateMessage.make({ messageId, markdown: 'Passed', reference: commentReceipt }),
                         issueDestination,
                     ),
                 );
@@ -763,13 +765,13 @@ describe('Linear output: issue', () => {
                 ]);
 
                 const removed = yield* run(
-                    attempt({ _tag: 'DeleteMessage', messageId, reference: commentReceipt }, issueDestination),
+                    attempt(ProviderDeleteMessage.make({ messageId, reference: commentReceipt }), issueDestination),
                 );
 
                 expect(removed.calls.commentDeletes).toEqual([{ comment: commentRef }]);
 
                 const gone = yield* run(
-                    attempt({ _tag: 'DeleteMessage', messageId, reference: commentReceipt }, issueDestination),
+                    attempt(ProviderDeleteMessage.make({ messageId, reference: commentReceipt }), issueDestination),
                     {
                         deleteError: LinearApiError.make({
                             operation: 'delete_comment',
@@ -779,40 +781,34 @@ describe('Linear output: issue', () => {
                     },
                 );
 
-                expect(gone.result).toEqual({ _tag: 'Success', success: DeliveryOutputApplied.make({}) });
+                expect(gone.result).toEqual(Result.succeed(DeliveryOutputApplied.make({})));
 
                 const badReference = yield* run(
-                    attempt({ _tag: 'DeleteMessage', messageId, reference: { something: 'else' } }, issueDestination),
+                    attempt(
+                        ProviderDeleteMessage.make({ messageId, reference: { something: 'else' } }),
+                        issueDestination,
+                    ),
                 );
 
-                expect(badReference.result).toMatchObject({
-                    _tag: 'Failure',
-                    failure: { safeCode: 'message_reference_invalid' },
-                });
+                expect(failureOf(badReference.result)).toMatchObject({ safeCode: 'message_reference_invalid' });
             }),
     );
 
     it.effect('applies a link without a call, and refuses activity, which an issue cannot show', ({ expect }) =>
         Effect.gen(function* () {
             const link = ExternalLink.make({ label: 'Run log', url: 'https://example.com/run/1' });
-            const linked = yield* run(attempt({ _tag: 'AddExternalLink', link }, issueDestination));
-            expect(linked.result).toEqual({ _tag: 'Success', success: DeliveryOutputApplied.make({}) });
+            const linked = yield* run(attempt(AddExternalLink.make({ link }), issueDestination));
+            expect(linked.result).toEqual(Result.succeed(DeliveryOutputApplied.make({})));
             expect(linked.calls.sessionUpdates).toEqual([]);
 
             const activity = yield* run(
                 attempt(
-                    {
-                        _tag: 'SetActivity',
-                        activity: DeliveryActivity.cases.Working.make({ message: 'x' }),
-                    },
+                    SetActivity.make({ activity: DeliveryActivity.cases.Working.make({ message: 'x' }) }),
                     issueDestination,
                 ),
             );
 
-            expect(activity.result).toMatchObject({
-                _tag: 'Failure',
-                failure: { safeCode: 'unsupported_operation' },
-            });
+            expect(failureOf(activity.result)).toMatchObject({ safeCode: 'unsupported_operation' });
             expect(linearSupportedOperations(issueDestination)).not.toContain('SetActivity');
         }),
     );
@@ -842,25 +838,24 @@ describe('Linear output: portable reactions', () => {
         target: ProviderReactionTarget,
         reaction: ProviderSetMessageReaction['reaction'],
         active: boolean,
-        addedReference?: Schema.Json,
+        addedReference: Schema.Json | null = null,
     ) =>
         ProviderSetMessageReaction.make(
-            addedReference === undefined ? { target, reaction, active } : { target, reaction, active, addedReference },
+            addedReference === null ? { target, reaction, active } : { target, reaction, active, addedReference },
         );
 
-    const reactionReceipt = { _tag: 'LinearReaction', issue: issueRef, reactionId: idempotencyKey };
+    const reactionReceipt = encodeLinearReceipt(
+        LinearReactionReceipt.make({ issue: issueRef, reactionId: LinearReactionId.make(idempotencyKey) }),
+    );
 
     it.effect("reacts on a session's source comment, else its issue, under the operation key", ({ expect }) =>
         Effect.gen(function* () {
             const comment = yield* run(attempt(react(onActivation, 'thumbs_up', true), sessionDestination, onComment));
 
-            expect(comment.result).toEqual({
-                _tag: 'Success',
-                success: DeliveryOutputApplied.make({ receipt: reactionReceipt }),
-            });
+            expect(comment.result).toEqual(Result.succeed(DeliveryOutputApplied.make({ receipt: reactionReceipt })));
             expect(comment.calls.reactions).toEqual([
                 {
-                    target: { _tag: 'Comment', comment: commentRef },
+                    target: LinearReactionTarget.cases.Comment.make({ comment: commentRef }),
                     emoji: '+1',
                     reactionId: idempotencyKey,
                 },
@@ -869,7 +864,11 @@ describe('Linear output: portable reactions', () => {
             const issue = yield* run(attempt(react(onActivation, 'hooray', true), sessionDestination, onIssue));
 
             expect(issue.calls.reactions).toEqual([
-                { target: { _tag: 'Issue', issue: issueRef }, emoji: 'tada', reactionId: idempotencyKey },
+                {
+                    target: LinearReactionTarget.cases.Issue.make({ issue: issueRef }),
+                    emoji: 'tada',
+                    reactionId: idempotencyKey,
+                },
             ]);
         }),
     );
@@ -880,10 +879,7 @@ describe('Linear output: portable reactions', () => {
                 reactionError: linearError('already_exists', false),
             });
 
-            expect(again.result).toEqual({
-                _tag: 'Success',
-                success: DeliveryOutputApplied.make({ receipt: reactionReceipt }),
-            });
+            expect(again.result).toEqual(Result.succeed(DeliveryOutputApplied.make({ receipt: reactionReceipt })));
         }),
     );
 
@@ -891,20 +887,15 @@ describe('Linear output: portable reactions', () => {
         'removes the reaction its add made, counts one already gone as removed, and makes no call with no add',
         ({ expect }) =>
             Effect.gen(function* () {
-                const added = Schema.encodeSync(Schema.toCodecJson(LinearOutputReceipt))({
-                    _tag: 'LinearReaction',
-                    issue: issueRef,
-                    reactionId: LinearReactionId.make('reaction-1'),
-                });
+                const added = encodeLinearReceipt(
+                    LinearReactionReceipt.make({ issue: issueRef, reactionId: LinearReactionId.make('reaction-1') }),
+                );
 
                 const removed = yield* run(
                     attempt(react(onActivation, 'eyes', false, added), sessionDestination, onIssue),
                 );
 
-                expect(removed.result).toEqual({
-                    _tag: 'Success',
-                    success: DeliveryOutputApplied.make({}),
-                });
+                expect(removed.result).toEqual(Result.succeed(DeliveryOutputApplied.make({})));
                 expect(removed.calls.reactionDeletes).toEqual([{ issue: issueRef, reactionId: 'reaction-1' }]);
 
                 const gone = yield* run(
@@ -914,14 +905,11 @@ describe('Linear output: portable reactions', () => {
                     },
                 );
 
-                expect(gone.result._tag).toEqual('Success');
+                expect(Result.isSuccess(gone.result)).toBe(true);
 
                 const nothing = yield* run(attempt(react(onActivation, 'eyes', false), sessionDestination, onIssue));
 
-                expect(nothing.result).toEqual({
-                    _tag: 'Success',
-                    success: DeliveryOutputApplied.make({}),
-                });
+                expect(nothing.result).toEqual(Result.succeed(DeliveryOutputApplied.make({})));
                 expect(nothing.calls.reactionDeletes).toEqual([]);
             }),
     );
@@ -936,7 +924,7 @@ describe('Linear output: portable reactions', () => {
             const posted = yield* run(attempt(react(onPosted, 'rocket', true), issueDestination));
             expect(posted.calls.reactions).toEqual([
                 {
-                    target: { _tag: 'Comment', comment: commentRef },
+                    target: LinearReactionTarget.cases.Comment.make({ comment: commentRef }),
                     emoji: 'rocket',
                     reactionId: idempotencyKey,
                 },
@@ -944,10 +932,7 @@ describe('Linear output: portable reactions', () => {
 
             const session = yield* run(attempt(react(onPosted, 'rocket', true), sessionDestination, onIssue));
 
-            expect(session.result).toMatchObject({
-                _tag: 'Failure',
-                failure: { safeCode: 'unsupported_operation' },
-            });
+            expect(failureOf(session.result)).toMatchObject({ safeCode: 'unsupported_operation' });
             expect(session.calls.reactions).toEqual([]);
         }),
     );
@@ -961,33 +946,25 @@ describe('Linear output: portable reactions', () => {
 
             const mismatch = yield* run(attempt(react(onActivation, 'eyes', true), issueDestination, elsewhere));
 
-            expect(mismatch.result).toMatchObject({
-                _tag: 'Failure',
-                failure: { safeCode: 'destination_identity_mismatch' },
-            });
+            expect(failureOf(mismatch.result)).toMatchObject({ safeCode: 'destination_identity_mismatch' });
             const missing = yield* run(attempt(react(onActivation, 'eyes', true), issueDestination));
-            expect(missing.result).toMatchObject({
-                _tag: 'Failure',
-                failure: { safeCode: 'activation_target_missing' },
-            });
+            expect(failureOf(missing.result)).toMatchObject({ safeCode: 'activation_target_missing' });
 
             const outage = yield* run(attempt(react(onActivation, 'eyes', true), issueDestination, onIssue), {
                 reactionError: linearError('unavailable', true, 2_000),
             });
 
-            expect(outage.result).toMatchObject({
-                _tag: 'Failure',
-                failure: { safeCode: 'linear_reaction_failed', retryable: true, retryAfterMs: 2_000 },
+            expect(failureOf(outage.result)).toMatchObject({
+                safeCode: 'linear_reaction_failed',
+                retryable: true,
+                retryAfterMs: 2_000,
             });
 
             const refused = yield* run(attempt(react(onActivation, 'eyes', true), issueDestination, onIssue), {
                 reactionError: linearError('forbidden', false),
             });
 
-            expect(refused.result).toMatchObject({
-                _tag: 'Failure',
-                failure: { safeCode: 'linear_reaction_failed', retryable: false },
-            });
+            expect(failureOf(refused.result)).toMatchObject({ safeCode: 'linear_reaction_failed', retryable: false });
         }),
     );
 });

@@ -14,13 +14,27 @@ import {
     ProviderDeliveryExecution,
     type DeliveryContext,
 } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Effect, Layer, Match, Option, Ref, type Schema } from 'effect';
+import { Effect, Layer, Match, Option, Ref, Result, Schema, Array as Arr } from 'effect';
 
 import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution';
 import { LinearApi } from '../src/LinearApi';
 import type { LinearCallbackHandlers } from '../src/LinearCallbacks';
 import { makeLinearEventProcessor } from '../src/LinearEventProcessor';
-import { LinearAgentActivityId } from '../src/LinearIdentity';
+import {
+    LinearActivationTarget,
+    LinearAgentSessionDestination,
+    LinearCommentActivationTarget,
+    LinearDeliveryDestination,
+    LinearIssueActivationTarget,
+    LinearIssueDestination,
+} from '../src/LinearDeliveryDestination';
+import {
+    LinearAgentActivityId,
+    LinearAgentSessionId,
+    LinearCommentId,
+    LinearIssueId,
+    LinearOrganizationId,
+} from '../src/LinearIdentity';
 import { LinearAgentActivityReceipt, type LinearCreateAgentActivityRequest } from '../src/LinearModels';
 import {
     agentSessionPayloads,
@@ -50,6 +64,34 @@ const organizationId = '6c5940f1-4f77-4f0b-8517-45b58f3c7d21';
 const issueId = 'b33fb278-fbe0-45e4-b4eb-94b0839f51b9';
 
 const sessionId = '71000000-0000-4000-8000-000000000001';
+
+const encodeDestination = Schema.encodeResult(Schema.toCodecJson(LinearDeliveryDestination));
+
+const encodeActivationTarget = Schema.encodeResult(Schema.toCodecJson(LinearActivationTarget));
+
+const issueRef = { organizationId: LinearOrganizationId.make(organizationId), issueId: LinearIssueId.make(issueId) };
+
+/** The prepared destinations and activation targets, as the store saves them. */
+const sessionDestinationJson = Result.getOrThrow(
+    encodeDestination(
+        LinearAgentSessionDestination.make({
+            ...issueRef,
+            appUserId: linearAppUserId,
+            sessionId: LinearAgentSessionId.make(sessionId),
+        }),
+    ),
+);
+
+const issueDestinationJson = Result.getOrThrow(encodeDestination(LinearIssueDestination.make(issueRef)));
+
+const issueActivationJson = Result.getOrThrow(encodeActivationTarget(LinearIssueActivationTarget.make(issueRef)));
+
+const commentActivationJson = (commentId: string) =>
+    Result.getOrThrow(
+        encodeActivationTarget(
+            LinearCommentActivationTarget.make({ ...issueRef, commentId: LinearCommentId.make(commentId) }),
+        ),
+    );
 
 const sessionOperations = [
     'PresentOutcome',
@@ -103,8 +145,25 @@ const failingExecution = (
         prepare: () => Effect.fail(error),
     });
 
+/** A copy of `execution` with `changes` applied. */
+const executionWith = (
+    execution: ProviderDeliveryExecution,
+    changes: {
+        readonly callbackIndex?: number;
+        readonly prepared?: Option.Option<PreparedDeliveryInvocation>;
+    },
+) =>
+    new ProviderDeliveryExecution({
+        deliveryId: execution.deliveryId,
+        callbackIndex: changes.callbackIndex ?? execution.callbackIndex,
+        idempotencyKey: execution.idempotencyKey,
+        prepared: changes.prepared ?? execution.prepared,
+        context: execution.context,
+        prepare: execution.prepare,
+    });
+
 const withPrepared = (execution: ProviderDeliveryExecution, prepared: PreparedDeliveryInvocation) =>
-    new ProviderDeliveryExecution({ ...execution, prepared: Option.some(prepared) });
+    executionWith(execution, { prepared: Option.some(prepared) });
 
 const layer = (
     createAgentActivity: (
@@ -152,13 +211,9 @@ describe('Linear delivery preparation', () => {
                 const multiple = PreparedDeliveryInvocation.make({ callbacks: [spec, spec] });
 
                 const executions = [
-                    ...[-1, 1, 0.5, NaN].flatMap((callbackIndex) => [
-                        new ProviderDeliveryExecution({ ...test.execution, callbackIndex }),
-                        new ProviderDeliveryExecution({
-                            ...test.execution,
-                            callbackIndex,
-                            prepared: Option.some(singleton),
-                        }),
+                    ...Arr.flatMap([-1, 1, 0.5, NaN], (callbackIndex) => [
+                        executionWith(test.execution, { callbackIndex }),
+                        executionWith(test.execution, { callbackIndex, prepared: Option.some(singleton) }),
                     ]),
                     withPrepared(test.execution, multiple),
                 ];
@@ -208,14 +263,8 @@ describe('Linear delivery preparation', () => {
                         {
                             name: 'onAgentSessionCreated',
                             presentationVersion: 1,
-                            destination: {
-                                _tag: 'LinearAgentSessionDestination',
-                                organizationId,
-                                appUserId: linearAppUserId,
-                                sessionId,
-                                issueId,
-                            },
-                            activationTarget: { _tag: 'LinearIssueActivationTarget', organizationId, issueId },
+                            destination: sessionDestinationJson,
+                            activationTarget: issueActivationJson,
                             supportedOperations: sessionOperations,
                             reactionTargets: ['ActivationTarget'],
                         },
@@ -241,12 +290,7 @@ describe('Linear delivery preparation', () => {
                 .pipe(Effect.provide(layer()));
             const [prepared] = yield* Ref.get(test.preparations);
             expect(prepared?.callbacks[0].name).toBe('onAgentSessionPrompted');
-            expect(prepared?.callbacks[0].activationTarget).toEqual({
-                _tag: 'LinearCommentActivationTarget',
-                organizationId,
-                issueId,
-                commentId: sourceCommentId,
-            });
+            expect(prepared?.callbacks[0].activationTarget).toEqual(commentActivationJson(sourceCommentId));
         }),
     );
 
@@ -265,13 +309,8 @@ describe('Linear delivery preparation', () => {
                         {
                             name: 'onMentioned',
                             presentationVersion: 1,
-                            destination: { _tag: 'LinearIssueDestination', organizationId, issueId },
-                            activationTarget: {
-                                _tag: 'LinearCommentActivationTarget',
-                                organizationId,
-                                issueId,
-                                commentId: 'dd45e8fb-4444-4555-8666-001122334455',
-                            },
+                            destination: issueDestinationJson,
+                            activationTarget: commentActivationJson('dd45e8fb-4444-4555-8666-001122334455'),
                             supportedOperations: issueOperations,
                             reactionTargets: ['ActivationTarget', 'MessageTarget'],
                         },
@@ -289,16 +328,8 @@ describe('Linear delivery preparation', () => {
                 .pipe(Effect.provide(layer()));
             const [prepared] = yield* Ref.get(test.preparations);
             expect(prepared?.callbacks[0].name).toBe('onAssigned');
-            expect(prepared?.callbacks[0].destination).toEqual({
-                _tag: 'LinearIssueDestination',
-                organizationId,
-                issueId,
-            });
-            expect(prepared?.callbacks[0].activationTarget).toEqual({
-                _tag: 'LinearIssueActivationTarget',
-                organizationId,
-                issueId,
-            });
+            expect(prepared?.callbacks[0].destination).toEqual(issueDestinationJson);
+            expect(prepared?.callbacks[0].activationTarget).toEqual(issueActivationJson);
         }),
     );
 
@@ -395,7 +426,7 @@ describe('Linear delivery preparation', () => {
                             {
                                 name: callback,
                                 presentationVersion: 1,
-                                destination: { _tag: 'LinearIssueDestination', organizationId, issueId },
+                                destination: issueDestinationJson,
                                 supportedOperations: [],
                             },
                         ],

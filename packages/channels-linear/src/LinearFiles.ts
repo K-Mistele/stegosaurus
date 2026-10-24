@@ -1,4 +1,4 @@
-import { Effect, Schema, type Stream } from 'effect';
+import { Effect, Schema, type Stream, Array as Arr } from 'effect';
 
 import { LinearApi, type LinearApiError, type LinearFileError } from './LinearApi';
 import {
@@ -11,7 +11,10 @@ import {
 } from './LinearFileModels';
 
 /** A Linear-hosted file whose methods download it with the workspace credential. */
-export class LinearFile extends Schema.TaggedClass<LinearFile>()('LinearFile', LinearFileRecord.fields) {
+export class LinearFile extends Schema.TaggedClass<LinearFile, { readonly brand: unique symbol }>()(
+    'LinearFile',
+    LinearFileRecord.fields,
+) {
     /** Streams the file with the workspace credential. The stream is not buffered. */
     download(): Effect.Effect<Stream.Stream<Uint8Array, LinearApiError>, LinearApiError, LinearApi> {
         return Effect.flatMap(LinearApi, (api) =>
@@ -46,4 +49,4 @@ export class LinearFile extends Schema.TaggedClass<LinearFile>()('LinearFile', L
  * Finds Linear-hosted files linked or embedded in Markdown, as `LinearFile`s. See `discoverLinearFileRecords`.
  */
 export const discoverLinearFiles = (ref: LinearFileRef, markdown: string | null): ReadonlyArray<LinearFile> =>
-    discoverLinearFileRecords(ref, markdown).map((record) => LinearFile.make(record));
+    Arr.map(discoverLinearFileRecords(ref, markdown), (record) => LinearFile.make(record));

@@ -204,25 +204,28 @@ export type LinearApiOperation = typeof LinearApiOperation.Type;
  * `already_exists` means Linear refused to create something because an entity with the caller's
  * chosen ID exists, as when an Agent Activity is retried with the same ID. The first attempt created it.
  */
-export class LinearApiError extends Schema.TaggedError<LinearApiError>()('LinearApiError', {
-    operation: LinearApiOperation,
-    reason: Schema.Literals([
-        'unavailable',
-        'unauthorized',
-        'forbidden',
-        'invalid_response',
-        'identity_mismatch',
-        'rejected',
-        'not_found',
-        'validation',
-        'rate_limited',
-        'already_exists',
-    ]),
-    retryable: Schema.Boolean,
-    status: Schema.optionalKey(Schema.Int),
-    message: Schema.optionalKey(Schema.String),
-    retryAfterMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-}) {}
+export class LinearApiError extends Schema.TaggedError<LinearApiError, { readonly brand: unique symbol }>()(
+    'LinearApiError',
+    {
+        operation: LinearApiOperation,
+        reason: Schema.Literals([
+            'unavailable',
+            'unauthorized',
+            'forbidden',
+            'invalid_response',
+            'identity_mismatch',
+            'rejected',
+            'not_found',
+            'validation',
+            'rate_limited',
+            'already_exists',
+        ]),
+        retryable: Schema.Boolean,
+        status: Schema.optionalKey(Schema.Int),
+        message: Schema.optionalKey(Schema.String),
+        retryAfterMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    },
+) {}
 
 export const LinearFileError = Schema.Union([LinearApiError, LinearFileSizeLimitExceeded]);
 
