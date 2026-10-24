@@ -1,7 +1,6 @@
 {
     "name": "@stegosaurus/fold-cli",
     "version": "0.0.0",
-    "private": false,
     "description": "Node.js CLI for the Fold agent runtime",
     "license": "MIT",
     "bin": {

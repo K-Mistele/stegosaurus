@@ -1,7 +1,6 @@
 {
   "name": "@stegosaurus/effect-ai-anthropic",
   "version": "0.0.0",
-  "private": true,
   "license": "MIT",
   "type": "module",
   "description": "HumanLayer's vendored Anthropic provider for Effect AI SDK",

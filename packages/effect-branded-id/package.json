@@ -1,7 +1,6 @@
 {
     "name": "@stegosaurus/effect-branded-id",
     "version": "0.0.0",
-    "private": true,
     "license": "MIT",
     "type": "module",
     "module": "src/index.ts",
