@@ -9,7 +9,7 @@
  * here; `StreamOperations` only ever touches its own stream.
  */
 import * as SqliteClient from '@effect/sql-sqlite-do/SqliteClient';
-import * as Cloudflare from 'alchemy/Cloudflare';
+import * as Cloudflare from '@alchemy.run/cloudflare';
 import { Clock, DateTime, Duration, Effect, Layer, Option, Ref, Schema, Stream } from 'effect';
 import { StreamPath } from '@stegosaurus/durable-streams-protocol/codec';
 import {

@@ -15,6 +15,7 @@
         "test:conformance": "vp test --testTimeout 15000 tests/conformance.test.ts"
     },
     "dependencies": {
+        "@alchemy.run/cloudflare": "catalog:",
         "@effect/sql-sqlite-do": "catalog:",
         "@stegosaurus/durable-streams-protocol": "workspace:*",
         "@stegosaurus/durable-streams-server": "workspace:*",

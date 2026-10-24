@@ -1,0 +1,389 @@
+/**
+ * The real Slack, GitHub, and Linear providers in one `ChannelsCloudflare.make`, over the Durable Object
+ * fake, with fake provider APIs. Linear Agent Session and GitHub issue handoffs run through the Worker's
+ * routes and the mailbox object, as they do when deployed.
+ */
+import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
+import { it } from '@effect/vitest';
+import { QueueDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { DeliveryActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
+import { type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
+import {
+    GitHubApi,
+    GitHubBot,
+    GitHubDiscussionRef,
+    GitHubId,
+    GitHubIssueComment,
+    type GitHubReactionTarget,
+} from '@stegosaurus/channels-github';
+import {
+    LinearAgentActivityId,
+    LinearAgentActivityReceipt,
+    LinearAgentSession,
+    LinearAgentSessionCreated,
+    LinearApi,
+    LinearAuth,
+    LinearBot,
+} from '@stegosaurus/channels-linear';
+import { SlackApi, SlackBot } from '@stegosaurus/channels-slack';
+import {
+    Config,
+    Context,
+    Effect,
+    Layer,
+    Match,
+    Option,
+    Predicate,
+    Queue,
+    Redacted,
+    Ref,
+    Schema,
+    String as Str,
+} from 'effect';
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http';
+
+import { githubWebhookSecret, issueCommentPayload, signedGitHubInput } from '../../channels-github/test/fixtures';
+import {
+    agentSessionPayloads,
+    linearAppUserId,
+    linearOauthClientId,
+    linearOrganizationId,
+    linearWebhookSecret,
+    signedLinearInput,
+} from '../../channels-linear/test/fixtures';
+import { ChannelsCloudflare, DeliveryMailboxes } from '../src';
+import { DurableObjectFake, DurableObjectFakeAlarm } from './DurableObjectFake';
+
+const encodeJsonBody = (body: Schema.Json) =>
+    Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(body).pipe(Effect.orDie);
+
+/** What a callback saw. */
+type Seen = { readonly event: unknown; readonly delivery: DeliveryContext };
+
+/** A reaction target by the ID of its comment, or its issue or pull request number. */
+const reactionTargetName = (target: GitHubReactionTarget) =>
+    Match.value(target).pipe(
+        Match.tagsExhaustive({
+            Comment: ({ comment }) => `${comment.id}`,
+            Discussion: ({ discussion }) => `#${discussion.ref.number}`,
+        }),
+    );
+
+/**
+ * One bot with all three providers. The Linear session callback and the GitHub mention callback hand
+ * off. `duringSummary` runs while the fake Linear posts an activity, or the fake GitHub a comment, whose
+ * text is `Summary`, as a remote worker's request can arrive while the mailbox object waits on the
+ * provider.
+ */
+const makeOptions = (input: {
+    readonly seen: Queue.Queue<Seen>;
+    readonly shown: Queue.Queue<string>;
+    readonly duringSummary: Ref.Ref<Effect.Effect<void>>;
+}) => {
+    const slack = SlackBot.make({
+        signingSecret: Config.succeed(Redacted.make('slack-secret')),
+        deliveryMode: QueueDeliveryMode.make({}),
+        handlers: { onNewMention: () => Effect.die('no Slack events in this test') },
+    });
+
+    /** The fake GitHub API. */
+    const gitHubApi = Layer.mock(GitHubApi, {
+        postIssueComment: ({ issue, content }) =>
+            Effect.gen(function* () {
+                if (content.markdown === 'Summary')
+                    yield* Effect.flatten(Ref.getAndSet(input.duringSummary, Effect.void));
+                yield* Queue.offer(input.shown, `comment: ${content.markdown}`);
+
+                return GitHubIssueComment.make({
+                    ref: { discussion: GitHubDiscussionRef.cases.Issue.make({ ref: issue }), id: GitHubId.make(900) },
+                    body: content.markdown,
+                    url: 'https://github.com/alice/project/issues/42#issuecomment-900',
+                    author: null,
+                });
+            }),
+        addReaction: ({ target }) =>
+            Queue.offer(input.shown, `eyes on ${reactionTargetName(target)}`).pipe(Effect.andThen(Effect.void)),
+        removeReaction: ({ target }) =>
+            Queue.offer(input.shown, `eyes off ${reactionTargetName(target)}`).pipe(Effect.andThen(Effect.void)),
+    });
+
+    const github = GitHubBot.make({
+        webhookSecret: Config.succeed(Redacted.make(githubWebhookSecret)),
+        deliveryMode: QueueDeliveryMode.make({}),
+        bot: { mentionNames: ['bot'], botUserId: GitHubId.make(1) },
+        handlers: {
+            onMentioned: (event, delivery) =>
+                Queue.offer(input.seen, { event, delivery }).pipe(Effect.andThen(delivery.handoff())),
+        },
+    });
+
+    /** The fake Linear API. */
+    const linearApi = Layer.mock(LinearApi, {
+        createAgentActivity: (request) =>
+            Effect.gen(function* () {
+                if (request.content.body === 'Summary')
+                    yield* Effect.flatten(Ref.getAndSet(input.duringSummary, Effect.void));
+                const kind = request.ephemeral ? 'thought~' : Str.toLowerCase(request.content._tag);
+                yield* Queue.offer(input.shown, `${kind}: ${request.content.body}`);
+
+                return LinearAgentActivityReceipt.make({
+                    activityId: request.activityId ?? LinearAgentActivityId.make('assigned'),
+                    sessionId: request.sessionId,
+                });
+            }),
+    });
+
+    const linear = LinearBot.make({
+        webhookSecret: Config.succeed(Redacted.make(linearWebhookSecret)),
+        bot: { organizationId: linearOrganizationId, appUserId: linearAppUserId },
+        auth: LinearAuth.clientCredentials({
+            clientId: Config.succeed(linearOauthClientId),
+            clientSecret: Config.succeed(Redacted.make('unused-secret')),
+        }),
+        handlers: {
+            onAgentSessionCreated: (event, delivery) =>
+                Queue.offer(input.seen, { event, delivery }).pipe(Effect.andThen(delivery.handoff())),
+            onAgentSessionPrompted: (event, delivery) =>
+                Queue.offer(input.seen, { event, delivery }).pipe(Effect.andThen(Effect.void)),
+        },
+    });
+
+    return {
+        /** The providers' fake APIs. The Worker supplies them to its routes and to the mailbox's methods. */
+        apis: Layer.mergeAll(Layer.mock(SlackApi, {}), gitHubApi, linearApi),
+        options: {
+            namespace: 'providers-cloudflare-test',
+            basePath: '/api/channels',
+            providers: [slack, github, linear],
+            eventProcessing: { concurrency: 1, leaseMs: 30_000 },
+        } as const,
+    };
+};
+
+const setUp = Effect.gen(function* () {
+    const seen = yield* Queue.unbounded<Seen>();
+    const shown = yield* Queue.unbounded<string>();
+    const duringSummary = yield* Ref.make<Effect.Effect<void>>(Effect.void);
+    const { options, apis } = makeOptions({ seen, shown, duringSummary });
+    const bot = ChannelsCloudflare.make(options);
+    const durableObject = yield* Layer.build(DurableObjectFake);
+
+    /** As in a split Durable Object, which builds its processing in `mailbox()`, not from `layers.mailbox.processing`. */
+    const { deliveryControl, processingBackend, subscriptions, deliveryControlBackend } = bot.layers.mailbox;
+
+    const MailboxBackendsLive = Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend).pipe(
+        Layer.provideMerge(Layer.succeedContext(durableObject)),
+    );
+
+    const MailboxLive = deliveryControl.pipe(Layer.provideMerge(MailboxBackendsLive));
+
+    /**
+     * The mailbox object's services, which Alchemy gives its constructor with the Worker's (here the fake
+     * APIs; Slack's webhook half reads `SlackApi` while it is built). Its methods get only the Worker's.
+     */
+    const mailboxServices = yield* Layer.build(
+        MailboxLive.pipe(Layer.provideMerge(Layer.merge(NodeCrypto.layer, apis))),
+    );
+
+    const handlers = yield* bot
+        .mailbox({ rearmAfterMs: 1_000 })
+        .pipe(Effect.provideContext(mailboxServices), Effect.orDie);
+
+    const mailbox = {
+        ...handlers,
+        alarm: () => handlers.alarm().pipe(Effect.provide(apis)),
+    };
+
+    const alarm = Context.get(durableObject, DurableObjectFakeAlarm);
+    const routedTo = yield* Ref.make<ReadonlyArray<string>>([]);
+
+    const mailboxes = DeliveryMailboxes.of({
+        getByName: (mailboxKey) => ({
+            deliver: (admission: DeliveryAdmission) =>
+                Ref.update(routedTo, (keys) => [...keys, mailboxKey]).pipe(Effect.andThen(mailbox.deliver(admission))),
+            deliveryRequest: mailbox.deliveryRequest,
+        }),
+    });
+
+    const RoutesLive = Layer.merge(bot.routes, bot.deliveryApi).pipe(
+        Layer.provide(Layer.merge(bot.layers.worker.mailboxDelivery, bot.layers.worker.deliveryControl)),
+    );
+
+    const fetch = yield* HttpRouter.toHttpEffect(RoutesLive).pipe(
+        Effect.provideService(HttpRouter.RouterConfig, bot.routerConfig),
+        Effect.provide(Layer.mergeAll(NodeCrypto.layer, apis, Layer.succeed(DeliveryMailboxes, mailboxes))),
+    );
+
+    const request = (path: string, init: RequestInit) =>
+        fetch.pipe(
+            Effect.provideService(
+                HttpServerRequest.HttpServerRequest,
+                HttpServerRequest.fromWeb(new Request(`http://localhost/api/channels${path}`, init)),
+            ),
+            Effect.map((response) => HttpServerResponse.toWeb(response).status),
+            Effect.orDie,
+        );
+
+    const sendLinear = (payload: (typeof agentSessionPayloads)[number], deliveryId: string) => {
+        const signed = signedLinearInput(payload, 'AgentSessionEvent', deliveryId);
+
+        return request('/integrations/linear/webhook', {
+            method: 'POST',
+            headers: signed.headers,
+            body: new TextDecoder().decode(signed.body),
+        });
+    };
+
+    const sendGitHubMention = (commentId: number, webhookId: string) => {
+        const payload = issueCommentPayload();
+
+        const signed = signedGitHubInput(
+            'issue_comment',
+            { ...payload, comment: { ...payload.comment, id: commentId, body: '@bot handoff 30' } },
+            webhookId,
+        );
+
+        return request('/integrations/github/webhook', {
+            method: 'POST',
+            headers: signed.headers,
+            body: new TextDecoder().decode(signed.body),
+        });
+    };
+
+    const callDelivery = (delivery: DeliveryContext, path: string, method: string, body: Schema.Json | undefined) =>
+        Effect.gen(function* () {
+            const headers = {
+                authorization: `Bearer ${Redacted.value(delivery.accessToken)}`,
+                'content-type': 'application/json',
+            };
+
+            const init: RequestInit = { method, headers };
+
+            if (Predicate.isNotUndefined(body)) init.body = yield* encodeJsonBody(body);
+
+            return yield* request(`/deliveries/${delivery.deliveryId}${path}`, init);
+        });
+
+    return {
+        seen,
+        shown,
+        duringSummary,
+        mailbox,
+        alarm,
+        routedTo,
+        request,
+        sendLinear,
+        sendGitHubMention,
+        callDelivery,
+    };
+});
+
+it.effect(
+    'ChannelsCloudflare with Slack, GitHub, and Linear: each webhook route exists, and a Linear session reaches its callback with Linear values',
+    ({ expect }) =>
+        Effect.gen(function* () {
+            const { seen, shown, mailbox, routedTo, request, sendLinear } = yield* setUp;
+            expect(yield* request('/integrations/slack/webhook', { method: 'POST', body: '{}' })).toEqual(401);
+            expect(yield* request('/integrations/github/webhook', { method: 'POST', body: '{}' })).toEqual(401);
+            expect(yield* sendLinear(agentSessionPayloads[0], 'delivery-created')).toEqual(200);
+            const routed = yield* Ref.get(routedTo);
+            expect(routed).toHaveLength(1);
+            expect(routed[0]).toContain(`linear:v1:agent-session:${agentSessionPayloads[0].agentSession.id}`);
+            yield* mailbox.alarm();
+            const created = Option.getOrThrow(yield* Queue.poll(seen));
+            expect(Schema.is(LinearAgentSessionCreated)(created.event)).toBe(true);
+            expect(created.event).toMatchObject({ session: expect.any(LinearAgentSession) });
+            expect(yield* Queue.take(shown)).toEqual('thought~: Working on this…');
+        }),
+);
+
+it.effect(
+    'ChannelsCloudflare Linear session: a result sent while the summary thought is being posted runs in the same alarm, retires the turn, and runs the next prompt',
+    ({ expect }) =>
+        Effect.gen(function* () {
+            const { seen, shown, duringSummary, mailbox, alarm, sendLinear, callDelivery } = yield* setUp;
+            yield* sendLinear(agentSessionPayloads[0], 'delivery-created');
+            yield* mailbox.alarm();
+            const { delivery } = Option.getOrThrow(yield* Queue.poll(seen));
+            expect(yield* Queue.take(shown)).toEqual('thought~: Working on this…');
+
+            const working = { activity: DeliveryActivity.cases.Working.make({ message: 'Running tests' }) };
+            expect(yield* callDelivery(delivery, '/activity', 'PUT', working)).toEqual(202);
+            expect(
+                yield* callDelivery(delivery, '/messages', 'POST', {
+                    messageId: 'summary',
+                    markdown: 'Summary',
+                }),
+            ).toEqual(202);
+            yield* sendLinear(agentSessionPayloads[1], 'delivery-prompted');
+            const statuses = yield* Ref.make<ReadonlyArray<number>>([]);
+            yield* Ref.set(
+                duringSummary,
+                callDelivery(delivery, '/complete', 'POST', { markdown: 'Done.' }).pipe(
+                    Effect.flatMap((status) => Ref.update(statuses, (all) => [...all, status])),
+                    Effect.scoped,
+                ),
+            );
+
+            yield* alarm.clearAsCloudflareDoesBeforeTheHandler;
+            yield* mailbox.alarm();
+            expect(yield* Ref.get(statuses)).toEqual([202]);
+            expect(Array.from(yield* Queue.takeAll(shown))).toEqual([
+                'thought~: Running tests',
+                'thought: Summary',
+                'response: Done.',
+            ]);
+            const next = Option.getOrThrow(yield* Queue.poll(seen));
+            expect(next.delivery.deliveryId === delivery.deliveryId).toBe(false);
+            expect(yield* callDelivery(delivery, '', 'GET', undefined)).toEqual(200);
+        }),
+);
+
+it.effect(
+    'ChannelsCloudflare GitHub issue: activity and a result sent while the summary comment is being posted run in the same alarm, retire the delivery, and run the next mention',
+    ({ expect }) =>
+        Effect.gen(function* () {
+            const { seen, shown, duringSummary, mailbox, alarm, sendGitHubMention, callDelivery } = yield* setUp;
+
+            expect(yield* sendGitHubMention(500, 'github-mention-1')).toEqual(200);
+            yield* mailbox.alarm();
+            const { delivery } = Option.getOrThrow(yield* Queue.poll(seen));
+
+            const working = { activity: DeliveryActivity.cases.Working.make({ message: 'Running tests' }) };
+            expect(yield* callDelivery(delivery, '/activity', 'PUT', working)).toEqual(202);
+            expect(
+                yield* callDelivery(delivery, '/messages', 'POST', {
+                    messageId: 'summary',
+                    markdown: 'Summary',
+                }),
+            ).toEqual(202);
+            expect(yield* sendGitHubMention(501, 'github-mention-2')).toEqual(200);
+            const statuses = yield* Ref.make<ReadonlyArray<number>>([]);
+            const record = (status: number) => Ref.update(statuses, (all) => [...all, status]);
+            yield* Ref.set(
+                duringSummary,
+                Effect.gen(function* () {
+                    yield* record(
+                        yield* callDelivery(delivery, '/activity', 'PUT', {
+                            activity: DeliveryActivity.cases.Idle.make({}),
+                        }),
+                    );
+                    yield* record(yield* callDelivery(delivery, '/complete', 'POST', { markdown: 'Done.' }));
+                }).pipe(Effect.scoped),
+            );
+
+            yield* alarm.clearAsCloudflareDoesBeforeTheHandler;
+            yield* mailbox.alarm();
+            expect(yield* Ref.get(statuses)).toEqual([202, 202]);
+            expect(Array.from(yield* Queue.takeAll(shown))).toEqual([
+                'eyes on 500',
+                'comment: Summary',
+                'eyes off 500',
+                'comment: Done.',
+            ]);
+            const next = Option.getOrThrow(yield* Queue.poll(seen));
+            expect(next.delivery.deliveryId === delivery.deliveryId).toBe(false);
+            expect(yield* callDelivery(delivery, '', 'GET', undefined)).toEqual(200);
+        }),
+);
