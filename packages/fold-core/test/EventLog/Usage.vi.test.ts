@@ -1,0 +1,39 @@
+import { describe, expect, it } from '@effect/vitest';
+import { Effect } from 'effect';
+import type { Response } from 'effect/ai';
+
+import { usageFromResponseUsage } from '../../src/EventLog/Usage';
+
+describe('usageFromResponseUsage', () => {
+    it.effect('omits invalid derived token details while preserving provider totals', () =>
+        Effect.gen(function* () {
+            const usage: Response.Usage = {
+                inputTokens: {
+                    uncached: 10,
+                    total: 10,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                },
+                outputTokens: {
+                    total: 8,
+                    text: -4,
+                    reasoning: 12,
+                },
+            };
+
+            expect(yield* usageFromResponseUsage(usage)).toEqual({
+                inputTokens: {
+                    uncached: 10,
+                    total: 10,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                },
+                outputTokens: {
+                    total: 8,
+                    text: undefined,
+                    reasoning: 12,
+                },
+            });
+        }),
+    );
+});

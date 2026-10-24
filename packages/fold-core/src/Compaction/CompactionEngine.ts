@@ -1,0 +1,351 @@
+import { Array as Arr, Match, Option, Predicate, String as Str, pipe } from 'effect';
+
+/**
+ * This file is the pure auto-compaction engine (D11): the threshold arithmetic over API-reported
+ * usage, the interim per-model context windows (until ModelCatalog owns limits - D15), the
+ * chars/4 token estimate and keep-recent cut-point selection over projected messages (pi's
+ * compaction shape), the transcript serialization the summarizer reads, and the provider-overflow
+ * error classifier for the reactive path. Everything here is data-in/data-out; the Compaction
+ * service and the agent loop orchestrate around it.
+ */
+import {
+    contentPartText,
+    encodedContentParts,
+    isPartOfType,
+    type EncodedContentPart,
+    type EncodedMessageContent,
+    toolCallParamsText,
+    toolResultText,
+} from '../EventLog/MessageContent';
+import type { LogEntry } from '../EventLog/Schemas';
+import { usageInputTotal, usageOutputTotal, type UsageEncoded } from '../EventLog/Usage';
+import type { ProjectedMessage } from '../Projection/Projection';
+
+/** Reserve kept free below the usable budget so compaction fires before requests fail (pi default). */
+export const defaultReserveTokens = 16_384;
+
+/** Recent-message tail kept verbatim out of the summary (pi default). */
+export const defaultKeepRecentTokens = 20_000;
+
+/** Output allowance subtracted from the context window; both pi and opencode cap output near 32k. */
+export const maxOutputTokenBudget = 32_000;
+
+/** Context window assumed for models the interim table does not recognize. */
+export const fallbackContextWindow = 128_000;
+
+/** Tool results are truncated to this many characters in the summarizer's transcript (pi). */
+export const serializedToolResultMaxChars = 2_000;
+
+/** Flat character weight for image/file parts in the token estimate (pi counts images as 4800 chars). */
+const filePartEstimateChars = 4_800;
+
+/**
+ * Interim per-model context windows, pattern-keyed by model id - the same shape as the adaptive
+ * thinking table in ModelRequestSettings. Replaced by ModelCatalog data when it lands (D15). An
+ * agent's `autoCompact.contextWindow` overrides the lookup entirely.
+ */
+export const defaultModelContextWindows: ReadonlyArray<readonly [RegExp, number]> = [
+    [/claude|fable|mythos/, 200_000],
+    [/gpt-6(?:\.\d+)?-(?:astra|sol|luna)/, 272_000],
+    [/gpt-5|codex/, 272_000],
+    [/gpt-4\.1/, 1_000_000],
+];
+
+/** Context window for one model id via the interim table; unknown models get the fallback. */
+export const defaultContextWindowFor = (modelId: string | null): number => {
+    if (modelId === null) return fallbackContextWindow;
+
+    const id = Str.toLowerCase(modelId);
+
+    return pipe(
+        Arr.findFirst(defaultModelContextWindows, ([pattern]) => pattern.test(id)),
+        Option.map(([, contextWindow]) => contextWindow),
+        Option.getOrElse(() => fallbackContextWindow),
+    );
+};
+
+/**
+ * Tokens the conversation may occupy before compaction fires: the context window minus the output
+ * allowance and the reserve (D11's formula). Both subtractions are clamped to fractions of the
+ * window so tiny configured windows (tests, forced-compaction demos) still leave a positive budget.
+ */
+export const compactionUsableTokens = (input: {
+    readonly contextWindow: number;
+    readonly reserveTokens: number;
+}): number => {
+    const outputBudget = Math.min(maxOutputTokenBudget, Math.floor(input.contextWindow / 4));
+    const reserve = Math.min(input.reserveTokens, Math.floor(input.contextWindow / 8));
+
+    return Math.max(1, input.contextWindow - outputBudget - reserve);
+};
+
+/**
+ * Fold one API-reported usage into a context-size estimate: total input (the anthropic and openai
+ * providers both fold cache reads/writes into `inputTokens.total`) plus output. Null when the
+ * provider reported nothing useful - a null estimate never triggers compaction.
+ */
+export const contextTokensFromUsage = (usage: UsageEncoded): number | null => {
+    const input = usageInputTotal(usage);
+    const output = usageOutputTotal(usage);
+    const total = input + output;
+
+    return total > 0 ? total : null;
+};
+
+/**
+ * The last API-reported context size for an agent, from the newest assistant entry recorded AFTER
+ * the latest compaction. Assistant usage recorded before a compaction measured the pre-compaction
+ * context, so it must never re-trigger (pi's stale-usage guard); until a fresh response reports
+ * post-compaction usage there is nothing trustworthy to compare - which is also the progress guard:
+ * one compaction per reported response, never two without a new response in between.
+ */
+export const latestReportedContextTokens = (visibleEntries: ReadonlyArray<LogEntry>): number | null => {
+    const compactionSeq = pipe(
+        Arr.findLast(visibleEntries, (entry) => Predicate.isTagged(entry, 'compaction')),
+        Option.map((entry) => entry.seq),
+        Option.getOrElse(() => -1),
+    );
+
+    for (let index = visibleEntries.length - 1; index >= 0; index -= 1) {
+        const entry = visibleEntries[index];
+
+        if (entry === undefined || !Predicate.isTagged(entry, 'assistant-message') || entry.seq <= compactionSeq)
+            continue;
+
+        if (entry.finish === null) continue;
+
+        return contextTokensFromUsage(entry.finish.usage);
+    }
+
+    return null;
+};
+
+const estimatePartChars = (part: EncodedContentPart): number =>
+    Match.value(part).pipe(
+        Match.discriminatorsExhaustive('type')({
+            text: ({ text }) => text.length,
+            reasoning: ({ text }) => text.length,
+            file: () => filePartEstimateChars,
+            'tool-call': (call) => call.name.length + toolCallParamsText(call).length,
+            'tool-result': (result) => toolResultText(result).length,
+            'tool-approval-request': (approval) => contentPartText(approval).length,
+            'tool-approval-response': (approval) => contentPartText(approval).length,
+        }),
+    );
+
+/** Estimate one projected message's token footprint (chars/4 heuristic; image parts weigh 4800 chars). */
+export const estimateMessageTokens = (message: ProjectedMessage): number => {
+    if (Predicate.isTagged(message, 'compaction-summary')) return Math.max(1, Math.ceil(message.summary.length / 4));
+
+    const chars = Predicate.isTagged(message, 'system-message')
+        ? Arr.reduce(message.messages, 0, (total, systemMessage) => total + systemMessage.content.length)
+        : Arr.reduce(encodedContentParts(message.message.content), 0, (total, part) => total + estimatePartChars(part));
+
+    return Math.max(1, Math.ceil(chars / 4));
+};
+
+/** A message where a compaction cut may land: the first KEPT message must open a coherent exchange. */
+const isValidCutMessage = (message: ProjectedMessage): boolean =>
+    Predicate.isTagged(message, 'user-message') || Predicate.isTagged(message, 'assistant-message');
+
+/** The selected compaction boundary, including split-turn context needed by the summarizer. */
+export type CompactionCut = {
+    /** Index of the first message kept verbatim. */
+    readonly firstKeptIndex: number;
+    /** Index of the user message opening the split turn, or -1 when the cut is between turns. */
+    readonly turnStartIndex: number;
+    /** Whether discarded messages include the prefix of the turn whose suffix is kept. */
+    readonly isSplitTurn: boolean;
+};
+
+const turnStartBefore = (messages: ReadonlyArray<ProjectedMessage>, index: number): number => {
+    for (let candidate = index; candidate >= 0; candidate -= 1) {
+        if (Predicate.isTagged(messages[candidate], 'user-message')) return candidate;
+    }
+
+    return -1;
+};
+
+/**
+ * Choose the compaction cut over an agent's conversation messages: walking back from the newest,
+ * keep roughly `keepRecentTokens` of recent context verbatim and summarize everything older. The
+ * returned index is the first KEPT message; everything before it is summarized. A cut never lands
+ * on a tool-result - a tool result must stay in the same region as the assistant tool call that
+ * produced it - so the cut slides to the nearest user/assistant boundary (preferring to keep more
+ * when none exists at or after the budget boundary). Returns 0 when there is nothing to summarize.
+ */
+export const findCompactionCutPlan = (
+    messages: ReadonlyArray<ProjectedMessage>,
+    keepRecentTokens: number,
+): CompactionCut => {
+    if (Arr.isReadonlyArrayEmpty(messages)) return { firstKeptIndex: 0, turnStartIndex: -1, isSplitTurn: false };
+
+    let accumulated = 0;
+    let boundary = -1;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+
+        if (message === undefined) continue;
+
+        accumulated += estimateMessageTokens(message);
+
+        if (accumulated >= keepRecentTokens) {
+            boundary = index;
+            break;
+        }
+    }
+
+    // The whole conversation fits inside the keep budget: nothing old enough to summarize.
+    if (boundary <= 0) return { firstKeptIndex: 0, turnStartIndex: -1, isSplitTurn: false };
+
+    for (let index = boundary; index < messages.length; index += 1) {
+        const message = messages[index];
+
+        if (message === undefined || !isValidCutMessage(message)) continue;
+
+        const isSplitTurn = !Predicate.isTagged(message, 'user-message');
+        const turnStartIndex = isSplitTurn ? turnStartBefore(messages, index) : -1;
+
+        return {
+            firstKeptIndex: index,
+            turnStartIndex,
+            isSplitTurn: isSplitTurn && turnStartIndex >= 0,
+        };
+    }
+
+    for (let index = boundary - 1; index > 0; index -= 1) {
+        const message = messages[index];
+
+        if (message === undefined || !isValidCutMessage(message)) continue;
+
+        const isSplitTurn = !Predicate.isTagged(message, 'user-message');
+        const turnStartIndex = isSplitTurn ? turnStartBefore(messages, index) : -1;
+
+        return {
+            firstKeptIndex: index,
+            turnStartIndex,
+            isSplitTurn: isSplitTurn && turnStartIndex >= 0,
+        };
+    }
+
+    return { firstKeptIndex: 0, turnStartIndex: -1, isSplitTurn: false };
+};
+
+/** Select only the first kept message index for callers that do not need split-turn metadata. */
+export const findCompactionCut = (messages: ReadonlyArray<ProjectedMessage>, keepRecentTokens: number): number =>
+    findCompactionCutPlan(messages, keepRecentTokens).firstKeptIndex;
+
+const serializeUserContent = (content: EncodedMessageContent): string =>
+    pipe(
+        encodedContentParts(content),
+        Arr.map((part) =>
+            Match.value(part).pipe(
+                Match.discriminators('type')({
+                    text: ({ text }) => text,
+                    file: () => '[attached file]',
+                }),
+                Match.orElse(contentPartText),
+            ),
+        ),
+        Arr.join('\n'),
+    );
+
+const truncateToolResult = (serialized: string): string =>
+    serialized.length <= serializedToolResultMaxChars
+        ? serialized
+        : `${Str.slice(0, serializedToolResultMaxChars)(serialized)}[... ${serialized.length - serializedToolResultMaxChars} more characters truncated]`;
+
+/**
+ * Flatten the messages being replaced into the plain-text transcript the summarizer reads (pi's
+ * `serializeConversation` shape). Text form keeps the summarization request provider-neutral - no
+ * dangling tool-call pairs to violate provider message rules - and tool results are truncated so
+ * one huge output cannot blow the summarizer's own context.
+ */
+export const serializeConversation = (messages: ReadonlyArray<ProjectedMessage>): string => {
+    const lines: Array<string> = [];
+
+    for (const message of messages) {
+        Match.valueTags(message, {
+            'user-message': (entry) => {
+                lines.push(`[User]: ${serializeUserContent(entry.message.content)}`);
+            },
+            'assistant-message': (entry) => {
+                const parts = encodedContentParts(entry.message.content);
+                const reasoning = Arr.filter(parts, isPartOfType('reasoning'));
+                const text = Arr.filter(parts, isPartOfType('text'));
+                const toolCalls = Arr.filter(parts, isPartOfType('tool-call'));
+
+                for (const part of reasoning) {
+                    lines.push(`[Assistant thinking]: ${part.text}`);
+                }
+
+                if (Arr.isArrayNonEmpty(text)) {
+                    lines.push(
+                        `[Assistant]: ${Arr.join(
+                            Arr.map(text, (part) => part.text),
+                            '\n',
+                        )}`,
+                    );
+                }
+
+                if (Arr.isArrayNonEmpty(toolCalls)) {
+                    lines.push(
+                        `[Assistant tool calls]: ${Arr.join(
+                            Arr.map(toolCalls, (part) => `${part.name}(${toolCallParamsText(part)})`),
+                            '; ',
+                        )}`,
+                    );
+                }
+            },
+            'tool-result': (entry) => {
+                for (const part of Arr.filter(
+                    encodedContentParts(entry.message.content),
+                    isPartOfType('tool-result'),
+                )) {
+                    lines.push(`[Tool result]: ${truncateToolResult(toolResultText(part))}`);
+                }
+            },
+            'system-message': (entry) => {
+                // Only inline system notes reach serialization; the leading block set is config, not
+                // conversation, and the caller excludes it.
+                for (const systemMessage of entry.messages) {
+                    lines.push(`[System note]: ${systemMessage.content}`);
+                }
+            },
+            'compaction-summary': () => {
+                // Excluded by the caller: the previous summary travels in <previous-summary> instead.
+            },
+        });
+    }
+
+    return Arr.join(lines, '\n');
+};
+
+/**
+ * Provider messages that mean "this request exceeded the model's context window" (union of the
+ * load-bearing pi and opencode patterns). The reactive path compacts and retries once on these
+ * instead of failing the run.
+ */
+export const contextOverflowPatterns: ReadonlyArray<RegExp> = [
+    /context[_ ]length[_ ]exceeded/i,
+    /model_context_window_exceeded/i,
+    /prompt is too long/i,
+    /input is too long/i,
+    /exceeds the context window/i,
+    /maximum context length/i,
+    /maximum prompt length/i,
+    /context window exceeds/i,
+    /exceeds the available context/i,
+    /reduce the length of the messages/i,
+    /request entity too large/i,
+    /too large for model/i,
+];
+
+/** Messages that must never be treated as overflow even when a broad pattern matches (pi's guard). */
+const nonOverflowPatterns: ReadonlyArray<RegExp> = [/rate.?limit/i, /too many requests/i, /quota/i];
+
+/** True when a provider failure message reads as a context-window overflow. */
+export const isContextOverflowError = (message: string): boolean =>
+    !Arr.some(nonOverflowPatterns, (pattern) => pattern.test(message)) &&
+    Arr.some(contextOverflowPatterns, (pattern) => pattern.test(message));

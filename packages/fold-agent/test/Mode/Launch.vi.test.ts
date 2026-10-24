@@ -1,0 +1,656 @@
+/**
+ * Launch composition tests (D27): `launchSession` wires a resolved model + agentfiles + the mode's tool
+ * roster into a real `Session.open` over a JSONL log (D5 layout), and `resumeLatestSession` adopts the
+ * newest log for the cwd. Uses a scripted `customModel` (no network) and real temp directories for the
+ * workspace and fold home, so the JSONL persistence + agentfile discovery run end to end.
+ */
+import * as NodeServices from '@effect/platform-node/NodeServices';
+import { expect, it } from '@effect/vitest';
+import {
+    customModel,
+    layerLiveIdFactory,
+    OpenAiReasoningDisabled,
+    type ActiveModel,
+    type FoldModel,
+} from '@stegosaurus/fold-core';
+import {
+    Array as Arr,
+    Effect,
+    FileSystem,
+    Layer,
+    Option,
+    Path,
+    Predicate,
+    Schema,
+    Stream,
+    String as Str,
+} from 'effect';
+import { LanguageModel, type Response } from 'effect/ai';
+
+import {
+    DEFAULT_CODING_PROMPT,
+    defaultCodingMode,
+    launchSession as launchSessionRaw,
+    mergeModelSelection,
+    parseFoldConfig,
+    resumeLatestSession,
+    resumeSessionById,
+    RPI_HINT_PROMPT,
+    rlmMode,
+    switchSessionMode,
+} from '../../src/index';
+import { Photon } from '../../src/Tools/Image/Photon';
+import { offlineHttpClient, tempDir } from '../TestHelpers';
+
+/** What a launch needs from its host: the platform, image processing, and an offline HTTP client. */
+const launchTestServices = Layer.mergeAll(NodeServices.layer, offlineHttpClient, Photon.layer);
+
+// The Ids service is provided by the runtime in production (see cli.ts). Tests supply the same live
+// factory so `launchSession` mints real ids; swap in `layerDeterministicIds` where determinism matters.
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+const launchSession = (options: Parameters<typeof launchSessionRaw>[0]) =>
+    launchSessionRaw(options).pipe(Effect.provide(layerLiveIdFactory));
+
+const openAiActiveModel = (modelId: string): ActiveModel => ({
+    providerId: 'test',
+    providerKind: 'openai-compatible',
+    modelId,
+    role: null,
+    requestedReasoningLevel: 'off',
+    reasoning: OpenAiReasoningDisabled.make({}),
+});
+
+const textParts = (text: string): ReadonlyArray<Response.StreamPartEncoded> => [
+    { type: 'text-start', id: 'text-1' },
+    { type: 'text-delta', id: 'text-1', delta: text },
+    { type: 'text-end', id: 'text-1' },
+    {
+        type: 'finish',
+        reason: 'stop',
+        response: undefined,
+        // Concrete numbers (not undefined): the JSONL layer round-trips through JSON.stringify, which
+        // drops undefined-valued keys - and Usage's fields are required keys - so undefined would fail
+        // replay decoding. Real providers report numbers, so this matches production.
+        usage: {
+            inputTokens: { uncached: 10, total: 10, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 5, text: 5, reasoning: 0 },
+        },
+    },
+];
+
+/** A model that always streams `text` and finishes (fresh stream per request, so every send completes). */
+const alwaysTextModel = (text: string): FoldModel =>
+    customModel({
+        activeModel: openAiActiveModel('test-model'),
+        make: LanguageModel.make({
+            generateText: () => Effect.die(new Error('scripted model supports streamText only')),
+            streamText: () => Stream.fromIterable(textParts(text)),
+        }),
+    });
+
+const workspaceAndHome = (root: string) =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const workspace = path.join(root, 'work');
+        const foldHome = path.join(root, 'fold');
+        yield* fs.makeDirectory(workspace, { recursive: true });
+
+        return { workspace, foldHome };
+    });
+
+it.effect('launchSession composes the model, agentfiles, and mode tools over Session.open', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+        yield* fs.writeFileString(path.join(workspace, 'AGENTS.md'), 'MEMORY-MARKER: follow the house rules.');
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({
+                    model: alwaysTextModel('Done.'),
+                    cwd: workspace,
+                    foldHome,
+                    name: 'test-agent',
+                });
+
+                const finished = yield* session.send('hello');
+                expect(finished.outcome).toBe('completed');
+                expect(finished.resultText).toContain('Done.');
+
+                const entries = yield* session.entries;
+
+                const started = Option.getOrUndefined(
+                    Arr.findFirst(entries, (entry) => Predicate.isTagged(entry, 'session_started')),
+                );
+
+                expect(started?._tag).toBe('session_started');
+
+                if (Predicate.isTagged(started, 'session_started')) {
+                    expect(started.cwd).toBe(workspace);
+                    expect(started.meta).toMatchObject({ mode: 'coding', rpi: false, profile: 'default' });
+                }
+
+                // The leading system message carries the mode prompt AND the agentfile project_context.
+                const leading = Option.getOrUndefined(
+                    Arr.findFirst(
+                        entries,
+                        (entry) => Predicate.isTagged(entry, 'system-message') && entry.placement === 'leading',
+                    ),
+                );
+
+                const leadingJson = yield* encodeJson(leading);
+                expect(leadingJson).toContain(DEFAULT_CODING_PROMPT);
+                expect(leadingJson).toContain('Do not use emoticons.');
+                expect(leadingJson).toContain('MEMORY-MARKER');
+                expect(leadingJson).toContain('project_context');
+                // Without rpi, the RPI hint block is absent.
+                expect(leadingJson).not.toContain(RPI_HINT_PROMPT);
+
+                // The mode's tool roster reached the agent (family-neutral + skill are always present).
+                const agentStarted = Option.getOrUndefined(
+                    Arr.findFirst(entries, (entry) => Predicate.isTagged(entry, 'agent_started')),
+                );
+
+                const tools = Predicate.isTagged(agentStarted, 'agent_started') ? agentStarted.tools : [];
+                expect(tools).toContain('read');
+                expect(tools).toContain('bash');
+                expect(tools).toContain('skill');
+                expect(tools).toContain('subagent');
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('launchSession with rpi appends the hint block after the mode prompt', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({
+                    model: alwaysTextModel('Done.'),
+                    cwd: workspace,
+                    foldHome,
+                    rpi: true,
+                });
+
+                const leading = Option.getOrUndefined(
+                    Arr.findFirst(
+                        yield* session.entries,
+                        (entry) => Predicate.isTagged(entry, 'system-message') && entry.placement === 'leading',
+                    ),
+                );
+
+                const leadingJson = yield* encodeJson(leading);
+
+                const started = Option.getOrUndefined(
+                    Arr.findFirst(yield* session.entries, (entry) => Predicate.isTagged(entry, 'session_started')),
+                );
+
+                expect(leadingJson).toContain(DEFAULT_CODING_PROMPT);
+                expect(leadingJson).toContain(RPI_HINT_PROMPT);
+
+                if (Predicate.isTagged(started, 'session_started')) expect(started.meta.rpi).toBe(true);
+                // The hint composes AFTER the mode's own system prompt.
+                expect(Option.getOrElse(Str.indexOf(RPI_HINT_PROMPT)(leadingJson), () => -1)).toBeGreaterThan(
+                    Option.getOrElse(Str.indexOf(DEFAULT_CODING_PROMPT)(leadingJson), () => -1),
+                );
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('switchSessionMode preserves identity and writes one recomposed mode epoch', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({ model: alwaysTextModel('one'), cwd: workspace, foldHome });
+                const sessionId = session.sessionId;
+                yield* session.send('before');
+                yield* switchSessionMode(session, {
+                    mode: rlmMode,
+                    model: alwaysTextModel('two'),
+                    cwd: workspace,
+                    foldHome,
+                    reason: 'select rlm',
+                });
+                yield* session.send('after');
+
+                expect(session.sessionId).toBe(sessionId);
+                const entries = yield* session.entries;
+                expect(Arr.filter(entries, (entry) => Predicate.isTagged(entry, 'session_started'))).toHaveLength(1);
+                expect(
+                    Option.getOrUndefined(Arr.findLast(entries, (entry) => Predicate.isTagged(entry, 'model-change'))),
+                ).toMatchObject({
+                    reason: 'select rlm',
+                });
+
+                const switchedPrompt = Option.getOrUndefined(
+                    Arr.findLast(entries, (entry) => Predicate.isTagged(entry, 'system-message')),
+                );
+
+                expect(yield* encodeJson(switchedPrompt)).toContain(RPI_HINT_PROMPT);
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('resumeLatestSession adopts the newest log for the working directory', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+
+        const first = yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({ model: alwaysTextModel('Done.'), cwd: workspace, foldHome });
+                yield* session.send('first message');
+                const entries = yield* session.entries;
+
+                return { sessionId: session.sessionId, rootAgentId: session.rootAgentId, count: entries.length };
+            }),
+        );
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const resumed = yield* resumeLatestSession({
+                    model: alwaysTextModel('Again.'),
+                    cwd: workspace,
+                    foldHome,
+                });
+
+                // Adopts the same identity - no new session_started/agent_started.
+                expect(resumed.sessionId).toBe(first.sessionId);
+                expect(resumed.rootAgentId).toBe(first.rootAgentId);
+
+                const entries = yield* resumed.entries;
+                expect(entries.length).toBeGreaterThanOrEqual(first.count);
+                // The prior user message was replayed from disk.
+                expect(yield* encodeJson(entries)).toContain('first message');
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('resumeSessionById adopts an exact session id from the current project directory', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+
+        const first = yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({ model: alwaysTextModel('Done.'), cwd: workspace, foldHome });
+                yield* session.send('remember this by id');
+
+                return { sessionId: session.sessionId, rootAgentId: session.rootAgentId };
+            }),
+        );
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const resumed = yield* resumeSessionById(first.sessionId, {
+                    model: alwaysTextModel('Again.'),
+                    cwd: workspace,
+                    foldHome,
+                });
+
+                expect(resumed.sessionId).toBe(first.sessionId);
+                expect(resumed.rootAgentId).toBe(first.rootAgentId);
+                expect(yield* encodeJson(yield* resumed.entries)).toContain('remember this by id');
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('resumeSessionById is scoped to the selected cwd project slug', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const otherWorkspace = path.join(root, 'other-work');
+        yield* fs.makeDirectory(otherWorkspace, { recursive: true });
+
+        const sessionId = yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({ model: alwaysTextModel('Done.'), cwd: workspace, foldHome });
+
+                return session.sessionId;
+            }),
+        );
+
+        const error = yield* resumeSessionById(sessionId, {
+            model: alwaysTextModel('x'),
+            cwd: otherWorkspace,
+            foldHome,
+        }).pipe(Effect.scoped, Effect.flip);
+
+        expect(error._tag).toBe('SessionToResumeNotFoundError');
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('launchSession resolves CLI-style model selection overrides through fold-agent config', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+
+        const config = yield* parseFoldConfig(
+            `{
+			"providers": {
+				"openai": { "kind": "openai-compat", "apiKey": "sk-inline" },
+				"codex": { "kind": "codex" }
+			},
+			"roles": {
+				"smart": { "provider": "openai", "model": "gpt-default" },
+				"fast": { "provider": "codex", "model": "gpt-fast" }
+			}
+		}`,
+            undefined,
+        );
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({
+                    config,
+                    cwd: workspace,
+                    foldHome,
+                    modelSelection: { role: 'fast', model: 'gpt-override', reasoning: 'medium' },
+                });
+
+                const entries = yield* session.entries;
+
+                const agentStarted = Option.getOrUndefined(
+                    Arr.findFirst(entries, (entry) => Predicate.isTagged(entry, 'agent_started')),
+                );
+
+                expect(agentStarted?._tag).toBe('agent_started');
+
+                if (Predicate.isTagged(agentStarted, 'agent_started')) {
+                    expect(agentStarted.model.providerKind).toBe('codex');
+                    expect(agentStarted.model.modelId).toBe('gpt-override');
+                    expect(agentStarted.model.role).toBe('fast');
+                    expect(agentStarted.model.requestedReasoningLevel).toBe('medium');
+                }
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('a direct Codex launch replaces the complete mixed-provider role map', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+
+        const config = yield* parseFoldConfig(
+            `{
+			"providers": {
+				"anthropic": { "kind": "anthropic", "apiKeyEnv": "ANTHROPIC_API_KEY" },
+				"codex": { "kind": "codex" }
+			},
+			"roles": {
+				"smart": { "provider": "anthropic" },
+				"fast": { "provider": "anthropic" },
+				"orchestrator": { "provider": "anthropic" }
+			}
+		}`,
+            undefined,
+        );
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({
+                    config,
+                    cwd: workspace,
+                    foldHome,
+                    catalog: [],
+                    env: () => undefined,
+                    modelSelection: { provider: 'codex', model: 'gpt-5.6-sol' },
+                });
+
+                const started = Option.getOrUndefined(
+                    Arr.findFirst(yield* session.entries, (entry) => Predicate.isTagged(entry, 'agent_started')),
+                );
+
+                expect(started?._tag).toBe('agent_started');
+
+                if (Predicate.isTagged(started, 'agent_started')) {
+                    expect(started.model).toMatchObject({
+                        providerId: 'codex',
+                        modelId: 'gpt-5.6-sol',
+                        role: 'smart',
+                    });
+                }
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('launchSession wires session profiles end to end: role-bound roster starts and setProfile works', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+
+        const config = yield* parseFoldConfig(
+            `{
+			"providers": {
+				"openai": { "kind": "openai-compat", "apiKey": "sk-inline" }
+			},
+			"roles": {
+				"smart": { "provider": "openai", "model": "gpt-smart" },
+				"fast": { "provider": "openai", "model": "gpt-fast" }
+			}
+		}`,
+            undefined,
+        );
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                // The default roster is role-bound ('smart'/'fast'), so the session starting AT ALL proves
+                // launchSession passed a covering profiles map through Session.open's validation.
+                const session = yield* launchSession({ config, cwd: workspace, foldHome });
+
+                const started = Option.getOrUndefined(
+                    Arr.findFirst(yield* session.entries, (entry) => Predicate.isTagged(entry, 'agent_started')),
+                );
+
+                expect(started?._tag).toBe('agent_started');
+
+                // The facade's profile rebinding is reachable and typed on the launched session.
+                yield* session.setProfile('fast', alwaysTextModel('rebound'));
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+const namedProfileConfigText = `{
+	"providers": {
+		"openai": { "kind": "openai-compat", "apiKey": "sk-inline" }
+	},
+	"roles": {
+		"smart": { "provider": "openai", "model": "gpt-default-smart" },
+		"fast": { "provider": "openai", "model": "gpt-default-fast" }
+	},
+	"profiles": {
+		"ultratest": {
+			"mode": "rlm",
+			"orchestrator": { "provider": "openai", "model": "gpt-ultra-orchestrator" },
+			"smart": { "provider": "openai", "model": "gpt-ultra-smart" },
+			"fast": { "provider": "openai", "model": "gpt-ultra-fast" }
+		}
+	}
+}`;
+
+it.effect('--profile substitutes the profile roles and applies its pinned rlm mode', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+        const config = yield* parseFoldConfig(namedProfileConfigText, undefined);
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({
+                    config,
+                    profile: 'ultratest',
+                    cwd: workspace,
+                    foldHome,
+                    catalog: [],
+                });
+
+                const started = Option.getOrUndefined(
+                    Arr.findFirst(yield* session.entries, (entry) => Predicate.isTagged(entry, 'agent_started')),
+                );
+
+                expect(started?._tag).toBe('agent_started');
+
+                if (!Predicate.isTagged(started, 'agent_started')) return;
+                // The rlm mode pinned by the profile runs the primary on the ORCHESTRATOR role, and its
+                // toolset carries no bash - both prove the profile's roles AND mode were applied.
+                expect(started.model.modelId).toBe('gpt-ultra-orchestrator');
+                expect(started.tools).not.toContain('bash');
+                expect(started.tools).toContain('subagent');
+
+                // RLM carries the RPI specialists BY DEFAULT: the hint block lands without any --rpi flag.
+                const entries = yield* session.entries;
+
+                const leading = Option.getOrUndefined(
+                    Arr.findFirst(
+                        entries,
+                        (entry) => Predicate.isTagged(entry, 'system-message') && entry.placement === 'leading',
+                    ),
+                );
+
+                expect(yield* encodeJson(leading)).toContain(RPI_HINT_PROMPT);
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('an explicit mode option beats the profile pinned mode', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+        const config = yield* parseFoldConfig(namedProfileConfigText, undefined);
+
+        yield* Effect.scoped(
+            Effect.gen(function* () {
+                const session = yield* launchSession({
+                    config,
+                    profile: 'ultratest',
+                    mode: defaultCodingMode,
+                    cwd: workspace,
+                    foldHome,
+                    catalog: [],
+                });
+
+                const started = Option.getOrUndefined(
+                    Arr.findFirst(yield* session.entries, (entry) => Predicate.isTagged(entry, 'agent_started')),
+                );
+
+                expect(started?._tag).toBe('agent_started');
+
+                if (!Predicate.isTagged(started, 'agent_started')) return;
+                // Default mode wins: primary on the profile's SMART binding, bash back in the toolset.
+                expect(started.model.modelId).toBe('gpt-ultra-smart');
+                expect(started.tools).toContain('bash');
+            }),
+        );
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('an unknown --profile fails with UnknownProfileError naming what exists', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+        const config = yield* parseFoldConfig(namedProfileConfigText, undefined);
+
+        const error = yield* launchSession({ config, profile: 'nope', cwd: workspace, foldHome, catalog: [] }).pipe(
+            Effect.scoped,
+            Effect.flip,
+        );
+
+        expect(error._tag).toBe('UnknownProfileError');
+
+        if (!Predicate.isTagged(error, 'UnknownProfileError')) return;
+        expect(error.profile).toBe('nope');
+        expect(error.available).toEqual(['ultratest']);
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+it.effect('resumeLatestSession fails with NoSessionToResumeError when none exist for the cwd', () =>
+    Effect.gen(function* () {
+        const root = yield* tempDir;
+        const { workspace, foldHome } = yield* workspaceAndHome(root);
+
+        const error = yield* resumeLatestSession({ model: alwaysTextModel('x'), cwd: workspace, foldHome }).pipe(
+            Effect.scoped,
+            Effect.flip,
+        );
+
+        expect(error._tag).toBe('NoSessionToResumeError');
+    }).pipe(Effect.provide(launchTestServices)),
+);
+
+// --- mergeModelSelection: the CLI --provider/--model/--reasoning merge over a config binding ----------
+
+const mergeConfigText = `{
+	"providers": {
+		"anthropic": { "kind": "anthropic", "apiKeyEnv": "ANTHROPIC_API_KEY" },
+		"codex": { "kind": "codex" },
+		"openai": { "kind": "openai-compat", "apiKey": "sk-inline" },
+		"openai-proxy": { "kind": "openai-compat", "apiKey": "sk-proxy", "baseUrl": "https://proxy.example/v1" }
+	},
+	"roles": {
+		"smart": { "provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "medium" },
+		"fast": { "provider": "openai", "model": "gpt-5.6-luna" }
+	}
+}`;
+
+it.effect('mergeModelSelection drops the stale model when the newly named provider changes KIND', () =>
+    Effect.gen(function* () {
+        const config = yield* parseFoldConfig(mergeConfigText, undefined);
+
+        // `fold --provider codex` alone: the anthropic model id must NOT ride onto codex - the binding
+        // comes back model-less so the codex default (gpt-6.1-sol) applies at resolution.
+        const merged = mergeModelSelection(config, config.roles.smart, { provider: 'codex' });
+        expect(merged).toEqual({ provider: 'codex', reasoning: 'medium' });
+        expect(merged.model).toBeUndefined();
+    }),
+);
+
+it.effect('mergeModelSelection keeps the configured model across a same-kind provider swap', () =>
+    Effect.gen(function* () {
+        const config = yield* parseFoldConfig(mergeConfigText, undefined);
+
+        const merged = mergeModelSelection(config, config.roles.fast, { provider: 'openai-proxy' });
+        expect(merged).toEqual({ provider: 'openai-proxy', model: 'gpt-5.6-luna' });
+    }),
+);
+
+it.effect('mergeModelSelection lets an explicit model selection win regardless of kind changes', () =>
+    Effect.gen(function* () {
+        const config = yield* parseFoldConfig(mergeConfigText, undefined);
+
+        const merged = mergeModelSelection(config, config.roles.smart, { provider: 'codex', model: 'gpt-5.6-sol' });
+        expect(merged).toEqual({ provider: 'codex', model: 'gpt-5.6-sol', reasoning: 'medium' });
+    }),
+);
+
+it.effect('mergeModelSelection with no provider keeps the binding and overlays model/reasoning fields', () =>
+    Effect.gen(function* () {
+        const config = yield* parseFoldConfig(mergeConfigText, undefined);
+
+        expect(mergeModelSelection(config, config.roles.smart, {})).toEqual(config.roles.smart);
+        expect(mergeModelSelection(config, config.roles.smart, { reasoning: 'high' })).toEqual({
+            provider: 'anthropic',
+            model: 'claude-opus-4-8',
+            reasoning: 'high',
+        });
+    }),
+);

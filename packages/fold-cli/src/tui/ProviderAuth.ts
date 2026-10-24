@@ -1,0 +1,51 @@
+import { join } from 'node:path';
+
+import { defaultFoldHome, type ConfigureProviderInput } from '@stegosaurus/fold-agent';
+import type { CodexAuthStoreOptions } from '@stegosaurus/fold-codex';
+import type { OpenCodeAuthStoreOptions } from '@stegosaurus/fold-opencode';
+import type { XaiAuthStoreOptions } from '@stegosaurus/fold-xai';
+
+export type OAuthProviderKind = 'codex' | 'opencode' | 'xai';
+
+export type ProviderAuthAction = 'status' | 'browser' | 'device' | 'logout';
+
+export type ProviderAuthTarget = {
+    readonly name: string;
+    readonly kind: OAuthProviderKind;
+    readonly configuration?: ConfigureProviderInput;
+};
+
+export type ProviderAuthUpdate =
+    | { readonly _tag: 'working'; readonly message: string }
+    | { readonly _tag: 'browser'; readonly url: string; readonly opened: boolean }
+    | { readonly _tag: 'device'; readonly url: string; readonly code: string; readonly opened: boolean }
+    | {
+          readonly _tag: 'success';
+          readonly message: string;
+          readonly authStatus?: 'logged-in' | 'logged-out' | 'expired';
+      }
+    | { readonly _tag: 'failure'; readonly message: string };
+
+export const codexAuthStoreOptions = (providerId: string, foldHome?: string): CodexAuthStoreOptions => ({
+    providerId,
+    path: join(foldHome ?? defaultFoldHome(), 'auth.json'),
+});
+
+export const openCodeAuthStoreOptions = (providerId: string, foldHome?: string): OpenCodeAuthStoreOptions => ({
+    providerId,
+    path: join(foldHome ?? defaultFoldHome(), 'auth.json'),
+});
+
+export const xaiAuthStoreOptions = (providerId: string, foldHome?: string): XaiAuthStoreOptions => ({
+    providerId,
+    path: join(foldHome ?? defaultFoldHome(), 'auth.json'),
+});
+
+export const providerCredentialLabel = (present: boolean | null): string =>
+    present === null ? 'NOT CHECKED' : present ? 'PRESENT' : 'MISSING';
+
+export const oauthProviderLabel = (kind: OAuthProviderKind): string =>
+    kind === 'codex' ? 'Codex OAuth' : kind === 'opencode' ? 'OpenCode OAuth' : 'xAI OAuth';
+
+export const providerAuthActions = (kind: OAuthProviderKind): ReadonlyArray<ProviderAuthAction> =>
+    kind === 'opencode' ? ['status', 'device', 'logout'] : ['status', 'browser', 'device', 'logout'];

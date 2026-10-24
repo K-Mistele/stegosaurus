@@ -1,29 +1,24 @@
-import { Context, type Effect, type Stream } from "effect";
-import type { StreamPath } from "@stegosaurus/durable-streams-protocol/codec";
-import type { StreamNotFoundError } from "@stegosaurus/durable-streams-protocol/errors";
+import { Context, type Effect, type Stream } from 'effect';
+import type { StreamPath } from '@stegosaurus/durable-streams-protocol/codec';
+import type { StreamNotFoundError } from '@stegosaurus/durable-streams-protocol/errors';
+import type { AppendToStreamError, CreateForkError, CreateStreamError, MissingStreamError } from './stream-operations';
 import type {
-  AppendToStreamError,
-  CreateForkError,
-  CreateStreamError,
-  MissingStreamError,
-} from "./stream-operations";
-import type {
-  AppendRequest,
-  AppendResult,
-  CreateForkRequest,
-  CreateStreamRequest,
-  CreateStreamResult,
-  ReadBodyRequest,
-  ReadRange,
-  ReadSseEventsRequest,
-  StartReadRequest,
-  StreamMetadata,
-  WaitForNewMessagesRequest,
-  WaitResult,
-} from "./stream-operation-requests";
+    AppendRequest,
+    AppendResult,
+    CreateForkRequest,
+    CreateStreamRequest,
+    CreateStreamResult,
+    ReadBodyRequest,
+    ReadRange,
+    ReadSseEventsRequest,
+    StartReadRequest,
+    StreamMetadata,
+    WaitForNewMessagesRequest,
+    WaitResult,
+} from './stream-operation-requests';
 
 type StreamTarget = {
-  readonly stream: StreamPath;
+    readonly stream: StreamPath;
 };
 
 /**
@@ -31,33 +26,27 @@ type StreamTarget = {
  * Each host provides the layer that reaches the stream's `StreamOperations`.
  */
 export class Streams extends Context.Service<
-  Streams,
-  {
-    readonly createStream: (
-      request: CreateStreamRequest & StreamTarget,
-    ) => Effect.Effect<CreateStreamResult, CreateStreamError>;
-    /** PUT with `Stream-Forked-From`: copies the source up to the fork point, then answers. */
-    readonly createFork: (
-      request: CreateForkRequest & StreamTarget,
-    ) => Effect.Effect<CreateStreamResult, CreateForkError>;
-    readonly appendToStream: (
-      request: AppendRequest & StreamTarget,
-    ) => Effect.Effect<AppendResult, AppendToStreamError>;
-    readonly getMetadata: (
-      request: StreamTarget,
-    ) => Effect.Effect<StreamMetadata, MissingStreamError>;
-    readonly startRead: (
-      request: StartReadRequest & StreamTarget,
-    ) => Effect.Effect<ReadRange, MissingStreamError>;
-    readonly readBody: (
-      request: ReadBodyRequest & StreamTarget,
-    ) => Stream.Stream<Uint8Array, StreamNotFoundError>;
-    readonly readSseEvents: (
-      request: ReadSseEventsRequest & StreamTarget,
-    ) => Stream.Stream<Uint8Array, StreamNotFoundError>;
-    readonly waitForNewMessages: (
-      request: WaitForNewMessagesRequest & StreamTarget,
-    ) => Effect.Effect<WaitResult, MissingStreamError>;
-    readonly deleteStream: (request: StreamTarget) => Effect.Effect<void, MissingStreamError>;
-  }
->()("@stegosaurus/durable-streams-server/streams") {}
+    Streams,
+    {
+        readonly createStream: (
+            request: CreateStreamRequest & StreamTarget,
+        ) => Effect.Effect<CreateStreamResult, CreateStreamError>;
+        /** PUT with `Stream-Forked-From`: copies the source up to the fork point, then answers. */
+        readonly createFork: (
+            request: CreateForkRequest & StreamTarget,
+        ) => Effect.Effect<CreateStreamResult, CreateForkError>;
+        readonly appendToStream: (
+            request: AppendRequest & StreamTarget,
+        ) => Effect.Effect<AppendResult, AppendToStreamError>;
+        readonly getMetadata: (request: StreamTarget) => Effect.Effect<StreamMetadata, MissingStreamError>;
+        readonly startRead: (request: StartReadRequest & StreamTarget) => Effect.Effect<ReadRange, MissingStreamError>;
+        readonly readBody: (request: ReadBodyRequest & StreamTarget) => Stream.Stream<Uint8Array, StreamNotFoundError>;
+        readonly readSseEvents: (
+            request: ReadSseEventsRequest & StreamTarget,
+        ) => Stream.Stream<Uint8Array, StreamNotFoundError>;
+        readonly waitForNewMessages: (
+            request: WaitForNewMessagesRequest & StreamTarget,
+        ) => Effect.Effect<WaitResult, MissingStreamError>;
+        readonly deleteStream: (request: StreamTarget) => Effect.Effect<void, MissingStreamError>;
+    }
+>()('@stegosaurus/durable-streams-server/streams') {}

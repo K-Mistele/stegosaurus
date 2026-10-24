@@ -1,0 +1,148 @@
+import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
+/**
+ * Engine tests for fresh subagent dispatch (D21) through the public facade: the subagent runs its own
+ * scripted model on the SAME session log, every one of its rows carries the dispatching parent id and
+ * tool call id, its leading prompt is its own (family base + definition blocks), and the dispatcher's
+ * durable tool result renders the agent_id + turns header and the <subagent_result> body.
+ */
+import { expect, it } from '@effect/vitest';
+import { Array as Arr, Predicate, Effect, Option, Schema } from 'effect';
+
+import {
+    defineAgent,
+    defineSubagent,
+    shortAgentId,
+    Session,
+    subagentTool,
+    type AgentStartedLogEntry,
+    type ToolResultLogEntry,
+} from '../../src/index';
+import { claudeActiveModel, gptActiveModel, scriptedModel } from '../Api/ApiTestHelpers';
+import { textTurn, toolCallTurn } from '../TestLayers/ScriptedLanguageModel';
+
+const encodeJsonText = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+const toolResultText = (entry: ToolResultLogEntry) => {
+    const part = entry.message.content[0];
+
+    if (part === undefined || part.type !== 'tool-result') throw new Error('expected a tool-result part');
+
+    return encodeJsonText(part.result);
+};
+
+it.effect('dispatches a fresh subagent on the shared log and renders its result', () =>
+    Effect.gen(function* () {
+        const researcherScripted = yield* scriptedModel(claudeActiveModel, [textTurn('findings: all good', undefined)]);
+
+        const researcher = defineSubagent({
+            name: 'researcher',
+            description: 'Read-only codebase exploration.',
+            systemPrompt: 'You are a researcher.',
+            model: researcherScripted.model,
+        });
+
+        const rootScripted = yield* scriptedModel(gptActiveModel, [
+            toolCallTurn(
+                [
+                    {
+                        id: 'provider-call-1',
+                        name: 'subagent',
+                        params: { description: 'map auth', prompt: 'map the auth module', agent: 'researcher' },
+                    },
+                ],
+                undefined,
+            ),
+            textTurn('synthesized', undefined),
+        ]);
+
+        const session = yield* Session.open({
+            agent: defineAgent({
+                model: rootScripted.model,
+                systemPrompt: 'You are the root agent.',
+                tools: [subagentTool([researcher], undefined)],
+            }),
+        });
+
+        const finished = yield* session.send('go');
+        const entries = yield* session.entries;
+
+        expect(finished.outcome).toBe('completed');
+        expect(finished.resultText).toBe('synthesized');
+
+        // The whole tree lives on one flat log, in causal order.
+        expect(Arr.map(entries, (entry) => entry._tag)).toEqual([
+            'session_started',
+            'agent_started', // root
+            'system-message', // root leading
+            'user-message', // "go"
+            'assistant-message', // root tool call
+            'agent_started', // researcher (fresh dispatch)
+            'system-message', // researcher leading
+            'user-message', // dispatch prompt
+            'assistant-message', // researcher text turn
+            'agent-finished', // researcher completed
+            'tool-result', // rendered subagent result for the root
+            'assistant-message', // root "synthesized"
+            'agent-finished', // root completed
+        ]);
+
+        // The subagent's rows carry the dispatching parent and the dispatching tool call (D2 envelope).
+        const startedEntries = Arr.filter(entries, (entry): entry is AgentStartedLogEntry =>
+            Predicate.isTagged(entry, 'agent_started'),
+        );
+
+        const rootStarted = startedEntries[0];
+        const subagentStarted = startedEntries[1];
+
+        if (rootStarted === undefined || subagentStarted === undefined) throw new Error('expected two agent_started');
+
+        expect(subagentStarted.mode).toBe('fresh');
+        expect(subagentStarted.agentType).toBe('researcher');
+        expect(subagentStarted.parentAgentId).toBe(rootStarted.agentId);
+        expect(subagentStarted.toolCallId).not.toBeNull();
+
+        const subagentRows = Arr.filter(entries, (entry) => entry.agentId === subagentStarted.agentId);
+
+        for (const row of subagentRows) {
+            expect(row.parentAgentId).toBe(rootStarted.agentId);
+            expect(row.toolCallId).toBe(subagentStarted.toolCallId);
+        }
+
+        // The researcher's model saw ITS leading prompt and the dispatch prompt - not the root's history.
+        const researcherPrompts = yield* researcherScripted.scripted.prompts;
+        const firstResearcherPrompt = researcherPrompts[0];
+
+        if (firstResearcherPrompt === undefined) throw new Error('expected a researcher request');
+
+        const systemContents = Arr.join(
+            Arr.map(
+                Arr.filter(firstResearcherPrompt.content, (message) => message.role === 'system'),
+                (message) => message.content,
+            ),
+            '\n',
+        );
+
+        expect(systemContents).toContain('You are a researcher.');
+        expect(systemContents).not.toContain('You are the root agent.');
+        const userContents = Arr.filter(firstResearcherPrompt.content, (message) => message.role === 'user');
+        expect(yield* encodeJsonText(userContents)).toContain('map the auth module');
+        expect(yield* encodeJsonText(userContents)).not.toContain('go');
+
+        // The dispatcher's durable tool result carries the id + turns header and the result body.
+        const toolResult = Option.getOrUndefined(
+            Arr.findFirst(entries, (entry): entry is ToolResultLogEntry => Predicate.isTagged(entry, 'tool-result')),
+        );
+
+        if (toolResult === undefined) throw new Error('expected a tool-result entry');
+        const rendered = yield* toolResultText(toolResult);
+        expect(rendered).toContain(`agent_id: ${shortAgentId(subagentStarted.agentId)}`);
+        expect(rendered).toContain('turns: 1 this run (1 total)');
+        expect(rendered).toContain('<subagent_result>');
+        expect(rendered).toContain('findings: all good');
+        expect(rendered).not.toContain('<system-information>');
+
+        // Both scripts fully consumed: the subagent ran exactly one turn, the root exactly two.
+        expect(yield* researcherScripted.scripted.remainingTurns).toBe(0);
+        expect(yield* rootScripted.scripted.remainingTurns).toBe(0);
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+);

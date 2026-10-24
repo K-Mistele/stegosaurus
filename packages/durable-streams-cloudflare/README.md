@@ -7,19 +7,19 @@ The package ships TypeScript source. Install it from the preview registry, along
 ## Use the ready-made Worker
 
 ```ts
-import * as Alchemy from "alchemy";
-import * as Cloudflare from "alchemy/Cloudflare";
-import * as Effect from "effect/Effect";
-import DurableStreamsWorker from "@stegosaurus/durable-streams-cloudflare/worker";
+import * as Alchemy from 'alchemy';
+import * as Cloudflare from 'alchemy/Cloudflare';
+import * as Effect from 'effect/Effect';
+import DurableStreamsWorker from '@stegosaurus/durable-streams-cloudflare/worker';
 
 export default Alchemy.Stack(
-  "MyApp",
-  { providers: Cloudflare.providers(), state: Cloudflare.state() },
-  Effect.gen(function* () {
-    const streams = yield* DurableStreamsWorker;
+    'MyApp',
+    { providers: Cloudflare.providers(), state: Cloudflare.state() },
+    Effect.gen(function* () {
+        const streams = yield* DurableStreamsWorker;
 
-    return { streamsUrl: streams.url };
-  }),
+        return { streamsUrl: streams.url };
+    }),
 );
 ```
 
@@ -28,24 +28,22 @@ export default Alchemy.Stack(
 `layerDurableObject` provides the `Streams` service and brings `StreamObject` with it: provide it to a Worker and alchemy binds the Durable Object and hosts it there. Put the HTTP API over it, as `src/worker.ts` does:
 
 ```ts
-import * as Cloudflare from "alchemy/Cloudflare";
-import * as Http from "alchemy/Http";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as HttpRouter from "effect/http/HttpRouter";
-import { layerDurableStreamsHttpApi } from "@stegosaurus/durable-streams-server/http-api";
-import { layerDurableObject } from "@stegosaurus/durable-streams-cloudflare/streams-durable-object";
+import * as Cloudflare from 'alchemy/Cloudflare';
+import * as Http from 'alchemy/Http';
+import * as Effect from 'effect/Effect';
+import * as Layer from 'effect/Layer';
+import * as HttpRouter from 'effect/http/HttpRouter';
+import { layerDurableStreamsHttpApi } from '@stegosaurus/durable-streams-server/http-api';
+import { layerDurableObject } from '@stegosaurus/durable-streams-cloudflare/streams-durable-object';
 
-const layerApp = layerDurableStreamsHttpApi.pipe(
-  Layer.provide([layerDurableObject, Http.Platform]),
-);
+const layerApp = layerDurableStreamsHttpApi.pipe(Layer.provide([layerDurableObject, Http.Platform]));
 
 export default class MyWorker extends Cloudflare.Worker<MyWorker>()(
-  "MyWorker",
-  { main: import.meta.url },
-  Effect.gen(function* () {
-    return { fetch: yield* HttpRouter.toHttpEffect(layerApp) };
-  }),
+    'MyWorker',
+    { main: import.meta.url },
+    Effect.gen(function* () {
+        return { fetch: yield* HttpRouter.toHttpEffect(layerApp) };
+    }),
 ) {}
 ```
 

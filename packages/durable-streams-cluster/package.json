@@ -1,24 +1,24 @@
 {
-  "name": "@stegosaurus/durable-streams-cluster",
-  "version": "0.0.0",
-  "description": "Effect Cluster host.",
-  "files": [
-    "src"
-  ],
-  "type": "module",
-  "scripts": {
-    "typecheck": "tsc",
-    "test": "vp test"
-  },
-  "dependencies": {
-    "@stegosaurus/durable-streams-protocol": "workspace:*",
-    "@stegosaurus/durable-streams-server": "workspace:*",
-    "effect": "catalog:"
-  },
-  "devDependencies": {
-    "@effect/sql-pglite": "catalog:",
-    "@effect/sql-sqlite-node": "catalog:",
-    "@effect/vitest": "catalog:",
-    "vite-plus": "catalog:"
-  }
+    "name": "@stegosaurus/durable-streams-cluster",
+    "version": "0.0.0",
+    "description": "Effect Cluster host.",
+    "files": [
+        "src"
+    ],
+    "type": "module",
+    "scripts": {
+        "typecheck": "tsc",
+        "test": "vp test"
+    },
+    "dependencies": {
+        "@stegosaurus/durable-streams-protocol": "workspace:*",
+        "@stegosaurus/durable-streams-server": "workspace:*",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "@effect/sql-pglite": "catalog:",
+        "@effect/sql-sqlite-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "vite-plus": "catalog:"
+    }
 }

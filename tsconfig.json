@@ -1,24 +1,24 @@
 {
-  "compilerOptions": {
-    "target": "esnext",
-    "lib": ["es2023"],
-    "module": "preserve",
-    "moduleResolution": "bundler",
-    "moduleDetection": "force",
-    "types": ["node"],
-    "strict": true,
-    "noUnusedLocals": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "isolatedModules": true,
-    "verbatimModuleSyntax": true,
-    "skipLibCheck": true,
-    "plugins": [
-      {
-        "name": "@effect/language-service",
-        "diagnostics": false
-      }
-    ]
-  },
-  "include": ["alchemy.run.ts", "test", "tooling", "vite.config.ts"]
+    "compilerOptions": {
+        "target": "esnext",
+        "lib": ["es2023"],
+        "module": "preserve",
+        "moduleResolution": "bundler",
+        "moduleDetection": "force",
+        "types": ["node"],
+        "strict": true,
+        "noUnusedLocals": true,
+        "noEmit": true,
+        "esModuleInterop": true,
+        "isolatedModules": true,
+        "verbatimModuleSyntax": true,
+        "skipLibCheck": true,
+        "plugins": [
+            {
+                "name": "@effect/language-service",
+                "diagnostics": false
+            }
+        ]
+    },
+    "include": ["alchemy.run.ts", "test", "tooling", "vite.config.ts"]
 }

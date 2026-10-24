@@ -1,0 +1,42 @@
+{
+    "name": "@stegosaurus/fold-tui-theme",
+    "version": "0.0.0",
+    "private": true,
+    "license": "MIT",
+    "type": "module",
+    "module": "src/main.tsx",
+    "exports": {
+        ".": "./src/main.tsx",
+        "./tactical": "./src/theme/tactical.ts",
+        "./themes": "./src/theme/index.ts",
+        "./theme-types": "./src/theme/types.ts",
+        "./glow": "./src/hud/GlowEffect.ts",
+        "./postfx": "./src/hud/postfx.ts"
+    },
+    "scripts": {
+        "start": "bun run src/main.tsx",
+        "rapture": "bun run src/main.tsx --theme rapture",
+        "tactical": "bun run src/main.tsx --theme tactical",
+        "neuromancer": "bun run src/main.tsx --theme neuromancer",
+        "redalert": "bun run src/main.tsx --theme redalert",
+        "covenant": "bun run src/main.tsx --theme covenant",
+        "wintermute": "bun run src/main.tsx --theme wintermute",
+        "demo": "bun run src/main.tsx --demo",
+        "typecheck": "tsc"
+    },
+    "dependencies": {
+        "@opentui/core": "catalog:",
+        "@opentui/react": "catalog:",
+        "react": "catalog:"
+    },
+    "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "@types/react": "catalog:",
+        "effect": "catalog:",
+        "typescript": "catalog:"
+    },
+    "peerDependencies": {
+        "effect": "catalog:"
+    }
+}

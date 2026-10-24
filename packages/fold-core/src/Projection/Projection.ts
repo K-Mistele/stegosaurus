@@ -1,0 +1,445 @@
+import { Array as Arr, Data, Match, Option, Predicate, Record, type Schema, String as Str, Struct, pipe } from 'effect';
+
+import { encodedContentParts, encodedContentText, isPartOfType } from '../EventLog/MessageContent';
+import type {
+    ActiveModel,
+    AgentFinishedLogEntry,
+    AgentStartedLogEntry,
+    AssistantMessageEncoded,
+    AssistantMessageLogEntry,
+    CompactionLogEntry,
+    LogEntry,
+    ReasoningLevel,
+    SystemMessageLogEntry,
+    ToolMessageEncoded,
+    ToolResultLogEntry,
+    UserMessageLogEntry,
+} from '../EventLog/Schemas';
+import type { AgentId } from '../Ids';
+
+/** Read model for an agent's lifecycle: how it started, whether it has finished, and whether it is runnable. */
+export type AgentLifecycleProjection = {
+    readonly agentId: AgentId;
+    readonly started: AgentStartedLogEntry | null;
+    readonly finished: AgentFinishedLogEntry | null;
+    readonly isRunning: boolean;
+    readonly isFinished: boolean;
+};
+
+/** Read model for the runtime policy an agent should use on its next turn. */
+export type AgentRuntimeProjection = AgentLifecycleProjection & {
+    readonly activeModel: ActiveModel | null;
+    readonly activeTools: ReadonlyArray<string>;
+    readonly reasoningLevel: ReasoningLevel | null;
+    readonly promptCacheKey: string | null;
+};
+
+/** Helper for projected records that keep the durable entry discriminant and selected payload fields. */
+type ProjectedLogEntry<Entry extends LogEntry, Keys extends keyof Entry> = Pick<Entry, '_tag' | Keys> & {
+    readonly sourceSeq: Entry['seq'];
+};
+
+/** Helper for projected records that are derived from a durable entry but have their own projection-only shape. */
+type ProjectedLogEntryFields<Entry extends LogEntry, Keys extends keyof Entry> = Pick<Entry, Keys> & {
+    readonly sourceSeq: Entry['seq'];
+};
+
+/** System instruction block set selected for the model context, retaining its source sequence for traceability. */
+export type ProjectedSystemMessage = ProjectedLogEntry<SystemMessageLogEntry, 'messageId' | 'placement' | 'messages'>;
+
+/** User message that should be visible in the model context, retaining its source sequence for traceability. */
+export type ProjectedUserMessage = ProjectedLogEntry<UserMessageLogEntry, 'messageId' | 'message'>;
+
+/** Assistant message that should be visible in the model context, retaining finish metadata for usage/cost folds. */
+export type ProjectedAssistantMessage = ProjectedLogEntry<AssistantMessageLogEntry, 'messageId' | 'message' | 'finish'>;
+
+/** tool result that is visible in the model context when building the prompt from the durable log*/
+export type ProjectedToolResult = ProjectedLogEntry<ToolResultLogEntry, 'toolCallId' | 'messageId' | 'message'>;
+
+/** Projection-only stand-in for history replaced by a compaction entry. */
+export type ProjectedCompactionSummary = Data.TaggedEnum<{
+    'compaction-summary': ProjectedLogEntryFields<
+        CompactionLogEntry,
+        'compactionId' | 'replacesThroughSeq' | 'summary' | 'tokensBefore' | 'postCompactionInstructions'
+    >;
+}>;
+
+/** Ordered read model of the messages an agent should send to the language model. */
+export type ProjectedMessage =
+    | ProjectedSystemMessage
+    | ProjectedUserMessage
+    | ProjectedAssistantMessage
+    | ProjectedToolResult
+    | ProjectedCompactionSummary;
+
+export const ProjectedMessage = Data.taggedEnum<ProjectedMessage>();
+
+/** Tool-owned key/value state for one agent namespace, built by folding tool_state entries in log order. */
+export type ToolStateProjection = Readonly<Record<string, Schema.Json>>;
+
+const ownEntriesForAgent = (entries: ReadonlyArray<LogEntry>, agentId: AgentId): ReadonlyArray<LogEntry> =>
+    Arr.filter(entries, (entry) => entry.agentId === agentId);
+
+const findAgentStarted = (entries: ReadonlyArray<LogEntry>, agentId: AgentId): AgentStartedLogEntry | null =>
+    Option.getOrNull(
+        Arr.findFirst(
+            entries,
+            (entry): entry is AgentStartedLogEntry =>
+                Predicate.isTagged(entry, 'agent_started') && entry.agentId === agentId,
+        ),
+    );
+
+const findAgentFinished = (entries: ReadonlyArray<LogEntry>, agentId: AgentId): AgentFinishedLogEntry | null =>
+    Option.getOrNull(
+        Arr.findLast(
+            entries,
+            (entry): entry is AgentFinishedLogEntry =>
+                Predicate.isTagged(entry, 'agent-finished') && entry.agentId === agentId,
+        ),
+    );
+
+const compareSeq = (left: LogEntry, right: LogEntry) => left.seq - right.seq;
+
+const isInjectedSkillMessage = (entry: LogEntry): boolean => {
+    if (!Predicate.isTagged(entry, 'user-message')) return false;
+    const content = Str.trim(encodedContentText(entry.message.content));
+
+    return /^<skill(?:\s|>)/.test(content) && Str.endsWith('</skill>')(content);
+};
+
+const isSettledAssistantText = (entry: LogEntry): boolean => {
+    if (!Predicate.isTagged(entry, 'assistant-message')) return false;
+
+    return Match.value(entry.message.content).pipe(
+        Match.when(Match.string, (text) => Str.trim(text).length > 0),
+        Match.orElse((parts) => Arr.isReadonlyArrayNonEmpty(parts) && Arr.every(parts, isPartOfType('text'))),
+    );
+};
+
+const eligibleForkHistory = (
+    entries: ReadonlyArray<LogEntry>,
+    history: 'all' | 'none' | number,
+): ReadonlyArray<LogEntry> => {
+    const leadingSystem = Arr.filter(
+        entries,
+        (entry) => Predicate.isTagged(entry, 'system-message') && entry.placement === 'leading',
+    );
+
+    if (history === 'none') return leadingSystem;
+
+    let invokingTurnStart = entries.length;
+
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index];
+
+        if (Predicate.isTagged(entry, 'user-message') && !isInjectedSkillMessage(entry)) {
+            invokingTurnStart = index;
+            break;
+        }
+    }
+
+    const eligible = Arr.filter(
+        entries.slice(0, invokingTurnStart),
+        (entry) =>
+            (Predicate.isTagged(entry, 'system-message') && entry.placement === 'leading') ||
+            Predicate.isTagged(entry, 'user-message') ||
+            isSettledAssistantText(entry),
+    );
+
+    if (history === 'all') return eligible;
+
+    let userTurns = 0;
+
+    for (let index = eligible.length - 1; index >= 0; index -= 1) {
+        const entry = eligible[index];
+
+        if (!Predicate.isTagged(entry, 'user-message') || isInjectedSkillMessage(entry)) continue;
+        userTurns += 1;
+
+        if (userTurns === history)
+            return [
+                ...leadingSystem,
+                ...Arr.filter(eligible.slice(index), (item) => !Predicate.isTagged(item, 'system-message')),
+            ];
+    }
+
+    return eligible;
+};
+
+const entriesForAgentInternal = (
+    entries: ReadonlyArray<LogEntry>,
+    agentId: AgentId,
+    seen: ReadonlySet<AgentId>,
+): ReadonlyArray<LogEntry> => {
+    if (seen.has(agentId)) return ownEntriesForAgent(entries, agentId);
+
+    const started = findAgentStarted(entries, agentId);
+    const ownEntries = ownEntriesForAgent(entries, agentId);
+
+    if (started === null || started.mode !== 'fork' || started.fork === null) return ownEntries;
+
+    const fork = started.fork;
+
+    const parentEntries = Arr.filter(
+        entriesForAgentInternal(entries, fork.fromAgentId, new Set([...seen, agentId])),
+        (entry) => entry.seq <= fork.atSeq,
+    );
+
+    const inheritedEntries = eligibleForkHistory(parentEntries, fork.history ?? 'all');
+
+    return [...inheritedEntries, ...ownEntries].sort(compareSeq);
+};
+
+/**
+ * Build the log slice an agent can see.
+ *
+ * Fresh agents see only their own entries. Forked agents see their parent's visible entries through the fork
+ * sequence, followed by their own entries. This is the read model that makes fork-by-reference work without
+ * copying parent history into the log.
+ */
+export const entriesForAgent = (entries: ReadonlyArray<LogEntry>, agentId: AgentId): ReadonlyArray<LogEntry> =>
+    entriesForAgentInternal(entries, agentId, new Set());
+
+/** Build an agent lifecycle read model from its agent_started and agent-finished entries. */
+export const lifecycleForAgent = (entries: ReadonlyArray<LogEntry>, agentId: AgentId): AgentLifecycleProjection => {
+    const started = findAgentStarted(entries, agentId);
+    const finished = findAgentFinished(entries, agentId);
+
+    return {
+        agentId,
+        started,
+        finished,
+        isRunning: started !== null && finished === null,
+        isFinished: finished !== null,
+    };
+};
+
+/** Build the active runtime policy for an agent from agent_started plus model/tool/reasoning change entries. */
+export const runtimeForAgent = (entries: ReadonlyArray<LogEntry>, agentId: AgentId): AgentRuntimeProjection => {
+    const visibleEntries = entriesForAgent(entries, agentId);
+    let activeModel: ActiveModel | null = null;
+    let activeTools: ReadonlyArray<string> = [];
+    let reasoningLevel: ReasoningLevel | null = null;
+    let promptCacheKey: string | null = null;
+
+    for (const entry of visibleEntries) {
+        Match.value(entry).pipe(
+            Match.tags({
+                agent_started: (started) => {
+                    activeModel = started.model;
+                    activeTools = started.tools;
+                    reasoningLevel = started.model.requestedReasoningLevel;
+                    promptCacheKey = started.promptCacheKey ?? null;
+                },
+                'model-change': (change) => {
+                    activeModel = change.model;
+                    reasoningLevel = change.model.requestedReasoningLevel;
+                },
+                'thinking-change': (change) => {
+                    reasoningLevel = change.reasoningLevel;
+                },
+                'tools-change': (change) => {
+                    activeTools = change.tools;
+                },
+            }),
+            Match.orElse(() => undefined),
+        );
+    }
+
+    return {
+        ...lifecycleForAgent(entries, agentId),
+        activeModel,
+        activeTools,
+        reasoningLevel,
+        promptCacheKey,
+    };
+};
+
+/** Build tool KV state for an agent namespace by applying tool_state set/delete entries in log order. */
+export const toolStateForAgent = (
+    entries: ReadonlyArray<LogEntry>,
+    agentId: AgentId,
+    namespace: string,
+): ToolStateProjection => {
+    const state = new Map<string, Schema.Json>();
+
+    for (const entry of ownEntriesForAgent(entries, agentId)) {
+        if (!Predicate.isTagged(entry, 'tool_state') || entry.namespace !== namespace) continue;
+
+        if (entry.value === null) {
+            state.delete(entry.key);
+        } else {
+            state.set(entry.key, entry.value);
+        }
+    }
+
+    return Record.fromEntries(state);
+};
+
+const latestLeadingSystemMessage = (entries: ReadonlyArray<LogEntry>): SystemMessageLogEntry | null =>
+    Option.getOrNull(
+        Arr.findLast(
+            entries,
+            (entry): entry is SystemMessageLogEntry =>
+                Predicate.isTagged(entry, 'system-message') && entry.placement === 'leading',
+        ),
+    );
+
+const latestCompaction = (entries: ReadonlyArray<LogEntry>): CompactionLogEntry | null =>
+    Option.getOrNull(
+        Arr.findLast(entries, (entry): entry is CompactionLogEntry => Predicate.isTagged(entry, 'compaction')),
+    );
+
+const toolCallIdsForAssistantMessage = (message: AssistantMessageEncoded): ReadonlyArray<string> =>
+    pipe(
+        encodedContentParts(message.content),
+        Arr.filter(isPartOfType('tool-call')),
+        Arr.map((part) => part.id),
+    );
+
+const toolResultIds = (message: ToolMessageEncoded): ReadonlyArray<string> =>
+    pipe(
+        message.content,
+        Arr.filter(isPartOfType('tool-result')),
+        Arr.map((part) => part.id),
+    );
+
+/** Put completed tool results back into the assistant's tool-call order before building the next prompt. */
+const orderProjectedToolResults = (messages: ReadonlyArray<ProjectedMessage>): ReadonlyArray<ProjectedMessage> => {
+    const ordered: Array<ProjectedMessage> = [];
+    let index = 0;
+
+    while (index < messages.length) {
+        const message = messages[index];
+
+        if (message === undefined) break;
+
+        ordered.push(message);
+        index += 1;
+
+        if (!Predicate.isTagged(message, 'assistant-message')) continue;
+
+        const toolCallIds = toolCallIdsForAssistantMessage(message.message);
+
+        if (Arr.isReadonlyArrayEmpty(toolCallIds)) continue;
+
+        const toolResults: Array<ProjectedToolResult> = [];
+
+        while (true) {
+            const toolResult = messages[index];
+
+            if (!Predicate.isTagged(toolResult, 'tool-result')) break;
+
+            toolResults.push(toolResult);
+            index += 1;
+        }
+
+        const resultOrder = new Map(Arr.map(toolCallIds, (toolCallId, order) => [toolCallId, order]));
+        ordered.push(
+            ...toolResults.sort((left, right) => {
+                const leftOrder = Math.min(
+                    ...Arr.map(toolResultIds(left.message), (id) => resultOrder.get(id) ?? Number.MAX_SAFE_INTEGER),
+                );
+
+                const rightOrder = Math.min(
+                    ...Arr.map(toolResultIds(right.message), (id) => resultOrder.get(id) ?? Number.MAX_SAFE_INTEGER),
+                );
+
+                return leftOrder === rightOrder ? left.sourceSeq - right.sourceSeq : leftOrder - rightOrder;
+            }),
+        );
+    }
+
+    return ordered;
+};
+
+/** Translate one durable message entry into the projection shape used by prompt construction. */
+const projectMessageEntry = (entry: LogEntry): ProjectedMessage | null =>
+    Match.value(entry).pipe(
+        Match.tags({
+            'system-message': (message) =>
+                ProjectedMessage['system-message']({
+                    sourceSeq: message.seq,
+                    messageId: message.messageId,
+                    placement: message.placement,
+                    messages: message.messages,
+                }),
+            'user-message': (message) =>
+                ProjectedMessage['user-message']({
+                    sourceSeq: message.seq,
+                    messageId: message.messageId,
+                    message: message.message,
+                }),
+            'assistant-message': (message) =>
+                ProjectedMessage['assistant-message']({
+                    sourceSeq: message.seq,
+                    messageId: message.messageId,
+                    message: message.message,
+                    finish: message.finish,
+                }),
+            'tool-result': (message) =>
+                ProjectedMessage['tool-result']({
+                    sourceSeq: message.seq,
+                    toolCallId: message.toolCallId,
+                    messageId: message.messageId,
+                    message: message.message,
+                }),
+        }),
+        Match.orElse(() => null),
+    );
+
+/**
+ * Build the conversation read model for an agent.
+ *
+ * This is the prompt-building source of truth: it starts from the agent's visible log slice, keeps only the latest
+ * leading system message, inserts the latest compaction summary as a projection-only message, drops entries replaced
+ * by compaction, and orders tool results the way the model expects to see them.
+ */
+export const messagesForAgent = (
+    entries: ReadonlyArray<LogEntry>,
+    agentId: AgentId,
+): ReadonlyArray<ProjectedMessage> => {
+    const visibleEntries = entriesForAgent(entries, agentId);
+    const leading = latestLeadingSystemMessage(visibleEntries);
+    const compaction = latestCompaction(visibleEntries);
+    const cutSeq = compaction?.replacesThroughSeq ?? -1;
+    const projected: Array<ProjectedMessage> = [];
+
+    if (leading !== null) {
+        projected.push(
+            ProjectedMessage['system-message']({
+                sourceSeq: leading.seq,
+                messageId: leading.messageId,
+                placement: leading.placement,
+                messages: leading.messages,
+            }),
+        );
+    }
+
+    if (compaction !== null) {
+        projected.push(
+            ProjectedMessage['compaction-summary']({
+                sourceSeq: compaction.seq,
+                ...Struct.pick(compaction, [
+                    'compactionId',
+                    'replacesThroughSeq',
+                    'summary',
+                    'tokensBefore',
+                    'postCompactionInstructions',
+                ]),
+            }),
+        );
+    }
+
+    for (const entry of visibleEntries) {
+        if (entry.seq <= cutSeq) continue;
+
+        if (Predicate.isTagged(entry, 'system-message') && entry.placement === 'leading') continue;
+
+        const message = projectMessageEntry(entry);
+
+        if (message !== null) projected.push(message);
+    }
+
+    return orderProjectedToolResults(projected);
+};

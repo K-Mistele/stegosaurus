@@ -1,0 +1,84 @@
+import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
+/**
+ * Facade tests for session profiles: `Session.open({ profiles })` seeds the session-wide role->model
+ * map and `FoldSession.setProfile` rebinds one role mid-session - children provision per dispatch, so
+ * the swap binds the very NEXT dispatch of a role-bound type with no epoch machinery, while completed
+ * runs keep their durable rows on the model that actually served them.
+ */
+import { expect, it } from '@effect/vitest';
+import { Array as Arr, Effect } from 'effect';
+
+import { defineSubagent } from '../../src/index';
+import { makeDriveSession, subagentStartedEntries } from '../Subagents/DriveHarness';
+import { textTurn } from '../TestLayers/ScriptedLanguageModel';
+import { claudeActiveModel, echoTool, gptActiveModel, scriptedModel } from './ApiTestHelpers';
+
+it.effect('setProfile rebinds a role for the very next dispatch of the same type', () =>
+    Effect.gen(function* () {
+        const fastA = yield* scriptedModel({ ...claudeActiveModel, modelId: 'fast-a' }, [
+            textTurn('served by a', undefined),
+        ]);
+
+        const fastB = yield* scriptedModel({ ...gptActiveModel, modelId: 'fast-b' }, [
+            textTurn('served by b', undefined),
+        ]);
+
+        const researcher = defineSubagent({ name: 'researcher', description: 'explores', model: 'fast' });
+
+        const { session, drive } = yield* makeDriveSession({
+            definitions: [researcher],
+            rootTurns: 2,
+            profiles: { fast: fastA.model },
+        });
+
+        yield* drive({ op: 'dispatch', agent: 'researcher', prompt: 'first task' });
+        yield* session.setProfile('fast', fastB.model);
+        yield* drive({ op: 'dispatch', agent: 'researcher', prompt: 'second task' });
+
+        // Two fresh children of ONE type, each provisioned on the binding current at its dispatch.
+        const entries = yield* session.entries;
+        const started = subagentStartedEntries(entries);
+        expect(Arr.map(started, (entry) => entry.agentType)).toEqual(['researcher', 'researcher']);
+        expect(Arr.map(started, (entry) => entry.model.modelId)).toEqual(['fast-a', 'fast-b']);
+        expect(new Set(Arr.map(started, (entry) => entry.agentId)).size).toBe(2);
+
+        // Each scripted provider served exactly its own dispatch.
+        expect(yield* fastA.scripted.remainingTurns).toBe(0);
+        expect(yield* fastB.scripted.remainingTurns).toBe(0);
+        expect(yield* fastA.scripted.requests).toHaveLength(1);
+        expect(yield* fastB.scripted.requests).toHaveLength(1);
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+);
+
+it.effect('a failed atomic model switch leaves the complete profiles map unchanged', () =>
+    Effect.gen(function* () {
+        const fastA = yield* scriptedModel({ ...claudeActiveModel, modelId: 'fast-before' }, [
+            textTurn('served by original profile', undefined),
+        ]);
+
+        const fastB = yield* scriptedModel({ ...gptActiveModel, modelId: 'fast-candidate' }, []);
+        const replacementRoot = yield* scriptedModel(claudeActiveModel, []);
+        const researcher = defineSubagent({ name: 'researcher', description: 'explores', model: 'fast' });
+
+        const { session, drive } = yield* makeDriveSession({
+            definitions: [researcher],
+            rootTurns: 1,
+            profiles: { fast: fastA.model },
+        });
+
+        const failed = yield* session
+            .switchModel(replacementRoot.model, {
+                tools: [echoTool, echoTool],
+                profiles: { fast: fastB.model },
+            })
+            .pipe(Effect.exit);
+
+        expect(failed._tag).toBe('Failure');
+
+        yield* drive({ op: 'dispatch', agent: 'researcher', prompt: 'use preserved profile' });
+        const started = subagentStartedEntries(yield* session.entries);
+        expect(started.at(-1)?.model.modelId).toBe('fast-before');
+        expect(yield* fastA.scripted.requests).toHaveLength(1);
+        expect(yield* fastB.scripted.requests).toHaveLength(0);
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+);

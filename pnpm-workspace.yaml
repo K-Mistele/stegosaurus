@@ -1,69 +1,85 @@
 packages:
-  - apps/*
-  - packages/*
-  - tools/*
+    - apps/*
+    - packages/*
+    - tools/*
 
 catalogMode: prefer
 
 catalog:
-  "@alchemy.run/pkg": 2.0.0-beta.83
-  "@durable-streams/cli": 0.2.7
-  "@durable-streams/server-conformance-tests": 0.3.7
-  "@effect/platform-bun": 4.0.6
-  "@effect/platform-node": 4.0.6
-  "@effect/sql-pglite": 4.0.6
-  "@effect/sql-sqlite-do": 4.0.6
-  "@effect/sql-sqlite-node": 4.0.6
-  "@effect/tsgo": 0.56.0
-  "@effect/vitest": 4.0.6
-  "@opentui/core": 0.6.8
-  "@oxlint/plugins": 1.89.0
-  "@types/bun": 1.4.4
-  "@types/node": ^24
-  alchemy: 2.0.0-beta.83
-  effect: 4.0.6
-  eslint-plugin-better-tailwindcss: 4.10.0
-  fast-glob: 3.3.3
-  oxlint: 1.89.0
-  oxlint-tsgolint: 7.0.2004
-  tailwindcss: 4.3.3
-  typescript: ^7.0.2
-  typescript-api: npm:typescript@5.9.3
-  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
-  vite-plus: 1.4.0
-  vitest: 5.0.5
+    '@alchemy.run/pkg': 2.0.0-beta.83
+    '@durable-streams/cli': 0.2.7
+    '@durable-streams/server-conformance-tests': 0.3.7
+    '@effect/platform-bun': 4.0.6
+    '@effect/platform-node': 4.0.6
+    '@effect/sql-pglite': 4.0.6
+    '@effect/sql-sqlite-do': 4.0.6
+    '@effect/sql-sqlite-node': 4.0.6
+    '@effect/tsgo': 0.56.0
+    '@effect/vitest': 4.0.6
+    '@kitlangton/terminal-control': 0.3.1
+    '@opentui/core': 0.6.8
+    '@opentui/keymap': 0.6.8
+    '@opentui/react': 0.6.8
+    '@opentui/solid': 0.6.8
+    '@oxlint/plugins': 1.89.0
+    '@paralleldrive/cuid2': 3.3.0
+    '@silvia-odwyer/photon-node': 0.3.4
+    '@types/bun': 1.4.4
+    '@types/node': ^24
+    '@types/react': 19.2.2
+    '@types/turndown': 5.0.6
+    alchemy: 2.0.0-beta.83
+    effect: 4.0.6
+    eslint-plugin-better-tailwindcss: 4.10.0
+    fast-glob: 3.3.3
+    oxlint: 1.89.0
+    oxlint-tsgolint: 7.0.2004
+    react: 19.2.0
+    solid-js: 1.9.12
+    tailwindcss: 4.3.3
+    turndown: 7.2.4
+    typescript: ^7.0.2
+    typescript-api: npm:typescript@5.9.3
+    vite: npm:@voidzero-dev/vite-plus-core@1.4.0
+    vite-plus: 1.4.0
+    vitest: 5.0.5
+    yaml: 2.9.1
+
 overrides:
-  vite: "catalog:"
-  vitest: "catalog:"
+    vite: 'catalog:'
+    vitest: 'catalog:'
 peerDependencyRules:
-  allowAny:
-    - vite
-  allowedVersions:
-    vite: "*"
-    capnp-es>typescript: "*"
-    bun-ffi-structs>typescript: "*"
+    allowAny:
+        - vite
+    allowedVersions:
+        vite: '*'
+        capnp-es>typescript: '*'
+        bun-ffi-structs>typescript: '*'
 allowBuilds:
-  workerd: true
+    workerd: true
 minimumReleaseAgeExclude:
-  - "@voidzero-dev/vite-plus-core@1.4.0"
-  - "@voidzero-dev/vite-plus-darwin-arm64@1.4.0"
-  - "@voidzero-dev/vite-plus-darwin-x64@1.4.0"
-  - "@voidzero-dev/vite-plus-linux-arm64-gnu@1.4.0"
-  - "@voidzero-dev/vite-plus-linux-arm64-musl@1.4.0"
-  - "@voidzero-dev/vite-plus-linux-x64-gnu@1.4.0"
-  - "@voidzero-dev/vite-plus-linux-x64-musl@1.4.0"
-  - "@voidzero-dev/vite-plus-win32-arm64-msvc@1.4.0"
-  - "@voidzero-dev/vite-plus-win32-x64-msvc@1.4.0"
-  - vite-plus@1.4.0
-  - "@opentui/core-darwin-arm64@0.6.8"
-  - "@opentui/core-darwin-x64@0.6.8"
-  - "@opentui/core-linux-arm64-musl@0.6.8"
-  - "@opentui/core-linux-arm64@0.6.8"
-  - "@opentui/core-linux-x64-musl@0.6.8"
-  - "@opentui/core-linux-x64@0.6.8"
-  - "@opentui/core-win32-arm64@0.6.8"
-  - "@opentui/core-win32-x64@0.6.8"
-  - "@opentui/core@0.6.8"
-  - "@types/bun@1.4.4"
+    - '@voidzero-dev/vite-plus-core@1.4.0'
+    - '@voidzero-dev/vite-plus-darwin-arm64@1.4.0'
+    - '@voidzero-dev/vite-plus-darwin-x64@1.4.0'
+    - '@voidzero-dev/vite-plus-linux-arm64-gnu@1.4.0'
+    - '@voidzero-dev/vite-plus-linux-arm64-musl@1.4.0'
+    - '@voidzero-dev/vite-plus-linux-x64-gnu@1.4.0'
+    - '@voidzero-dev/vite-plus-linux-x64-musl@1.4.0'
+    - '@voidzero-dev/vite-plus-win32-arm64-msvc@1.4.0'
+    - '@voidzero-dev/vite-plus-win32-x64-msvc@1.4.0'
+    - vite-plus@1.4.0
+    - '@opentui/core-darwin-arm64@0.6.8'
+    - '@opentui/core-darwin-x64@0.6.8'
+    - '@opentui/core-linux-arm64-musl@0.6.8'
+    - '@opentui/core-linux-arm64@0.6.8'
+    - '@opentui/core-linux-x64-musl@0.6.8'
+    - '@opentui/core-linux-x64@0.6.8'
+    - '@opentui/core-win32-arm64@0.6.8'
+    - '@opentui/core-win32-x64@0.6.8'
+    - '@opentui/core@0.6.8'
+    - '@types/bun@1.4.4'
+    - '@opentui/keymap@0.6.8'
+    - '@opentui/react@0.6.8'
+    - '@opentui/solid@0.6.8'
 patchedDependencies:
-  "@durable-streams/server-conformance-tests@0.3.7": patches/@durable-streams__server-conformance-tests@0.3.7.patch
+    '@durable-streams/server-conformance-tests@0.3.7': patches/@durable-streams__server-conformance-tests@0.3.7.patch

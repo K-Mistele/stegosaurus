@@ -1,0 +1,116 @@
+/**
+ * This file defines the SkillSource service (D20) - the isomorphic seam skills load through: `list`
+ * returns the metadata roster, `load` returns full content (progressive disclosure). Core ships the
+ * from-data implementation for hosts that pass skills in (browser/workers/presets); fold-agent ships the
+ * disk loader. Public configuration goes through descriptors ({@link skillsFromData} /
+ * {@link skillSource}) so no service or layer appears in caller signatures.
+ */
+import { Array as Arr, Context, Effect, Schema } from 'effect';
+
+import { skillDescriptionProblem, skillNameProblem, type Skill, type SkillMeta } from './Schemas';
+
+/** The requested skill is not in the source. Carries the roster so the model can self-correct. */
+export class SkillNotFoundError extends Schema.TaggedError<SkillNotFoundError, { readonly brand: unique symbol }>()(
+    'SkillNotFoundError',
+    {
+        skillName: Schema.String,
+        availableSkills: Schema.Array(Schema.String),
+    },
+) {}
+
+/** The skill source itself failed (disk unreadable, malformed data, ...). */
+export class SkillSourceError extends Schema.TaggedError<SkillSourceError, { readonly brand: unique symbol }>()(
+    'SkillSourceError',
+    {
+        message: Schema.String,
+        cause: Schema.optional(Schema.Defect()),
+    },
+) {}
+
+/** Skill discovery and loading. `list` is re-run by the skill tool's refresh path. */
+export type SkillSourceService = {
+    readonly list: Effect.Effect<ReadonlyArray<SkillMeta>, SkillSourceError>;
+    readonly load: (name: string) => Effect.Effect<Skill, SkillNotFoundError | SkillSourceError>;
+};
+
+/** SkillSource service tag for advanced/low-level composition. */
+export class SkillSource extends Context.Service<SkillSource, SkillSourceService>()(
+    '@stegosaurus/fold-core/Skills/SkillSource',
+) {}
+
+/** Input for one data-backed skill. `baseDir` is for hosts mirroring on-disk skills. */
+export type SkillData = {
+    readonly name: string;
+    readonly description: string;
+    readonly content: string;
+    readonly baseDir?: string;
+};
+
+/**
+ * Build a SkillSource from in-memory data. Invalid names/descriptions are defects: data-backed skills
+ * are host code, not user content, so a spec violation is a programming error.
+ */
+export const skillSourceFromData = (skills: ReadonlyArray<SkillData>): Effect.Effect<SkillSourceService> =>
+    Effect.gen(function* () {
+        const byName = new Map<string, Skill>();
+
+        for (const skill of skills) {
+            const problem = skillNameProblem(skill.name) ?? skillDescriptionProblem(skill.description);
+
+            if (problem !== null) {
+                return yield* Effect.die(new Error(`invalid skill "${skill.name}": ${problem}`));
+            }
+
+            if (byName.has(skill.name)) {
+                return yield* Effect.die(new Error(`duplicate skill name: ${skill.name}`));
+            }
+
+            byName.set(skill.name, {
+                name: skill.name,
+                description: skill.description,
+                content: skill.content,
+                baseDir: skill.baseDir ?? null,
+            });
+        }
+
+        const metas: ReadonlyArray<SkillMeta> = Arr.map([...byName.values()], ({ name, description }) => ({
+            name,
+            description,
+        }));
+
+        return {
+            list: Effect.succeed(metas),
+            load: (name: string) => {
+                const skill = byName.get(name);
+
+                return skill === undefined
+                    ? Effect.fail(
+                          SkillNotFoundError.make({
+                              skillName: name,
+                              availableSkills: Arr.map(metas, (meta) => meta.name),
+                          }),
+                      )
+                    : Effect.succeed(skill);
+            },
+        };
+    });
+
+/**
+ * Skills configuration descriptor for `skillTool`: how to build the skill source once per session. `R`
+ * is the host services that takes (a filesystem for disk skills); the session requires them.
+ */
+export type FoldSkills<R = never> = {
+    readonly make: Effect.Effect<SkillSourceService, never, R>;
+};
+
+/** Configure an agent's skills from in-memory data (isomorphic; browser/worker hosts). */
+export const skillsFromData = (skills: ReadonlyArray<SkillData>): FoldSkills => ({ make: skillSourceFromData(skills) });
+
+/**
+ * Configure an agent's skills from a custom source implementation: fold-agent exposes its disk
+ * loader through this. A construction failure is an
+ * infrastructure defect.
+ */
+export const skillSource = <E, R>(make: Effect.Effect<SkillSourceService, E, R>): FoldSkills<R> => ({
+    make: Effect.orDie(make),
+});

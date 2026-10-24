@@ -1,0 +1,699 @@
+/**
+ * This file implements the pure apply_patch engine (D18): parsing and hunk computation with no file
+ * IO, so platform handlers read/write around it and browser hosts can reuse it. Input rules follow
+ * opencode/agentlayer (verified materially identical): the V4A envelope with required Begin/End
+ * markers, Add/Update/Delete/Move headers, @@ context, *** End of File anchoring, and the shared
+ * 4-pass line matcher (exact, rstrip, trim, unicode-fold) - plus clanka's strict superset of accepting
+ * raw git/unified diffs. Failures are typed tagged errors, not defects (contrast clanka's orDie).
+ */
+import { Array as Arr, Data, Effect, Match, Option, pipe, Schema, String as Str } from 'effect';
+
+/** The patch text could not be parsed into file operations. */
+export class PatchParseError extends Schema.TaggedError<PatchParseError, { readonly brand: unique symbol }>()(
+    'PatchParseError',
+    {
+        message: Schema.String,
+    },
+) {}
+
+/** A hunk's context or expected lines were not found in the target file. */
+export class HunkNotFoundError extends Schema.TaggedError<HunkNotFoundError, { readonly brand: unique symbol }>()(
+    'HunkNotFoundError',
+    {
+        message: Schema.String,
+        path: Schema.String,
+    },
+) {}
+
+/** An update/delete referenced a file the caller could not supply. */
+export class PatchFileNotFoundError extends Schema.TaggedError<
+    PatchFileNotFoundError,
+    { readonly brand: unique symbol }
+>()('PatchFileNotFoundError', {
+    message: Schema.String,
+    path: Schema.String,
+}) {}
+
+/** Everything patch application can fail with after parsing. */
+export type PatchApplyError = HunkNotFoundError | PatchFileNotFoundError;
+
+/** One @@ hunk: optional locating context, expected old lines, replacement new lines. */
+export type PatchChunk = {
+    readonly context: string;
+    readonly oldLines: ReadonlyArray<string>;
+    readonly newLines: ReadonlyArray<string>;
+    readonly isEndOfFile: boolean;
+};
+
+/** One parsed file operation. Move is an update carrying `movePath` (opencode/clanka shape). */
+export type PatchOp = Data.TaggedEnum<{
+    add: { readonly path: string; readonly content: string };
+    delete: { readonly path: string };
+    update: {
+        readonly path: string;
+        readonly movePath: string | null;
+        readonly chunks: ReadonlyArray<PatchChunk>;
+    };
+}>;
+
+const PatchOp = Data.taggedEnum<PatchOp>();
+
+const beginMarker = '*** Begin Patch';
+
+const endMarker = '*** End Patch';
+
+const addMarker = '*** Add File:';
+
+const deleteMarker = '*** Delete File:';
+
+const updateMarker = '*** Update File:';
+
+const moveMarker = '*** Move to:';
+
+const eofMarker = '*** End of File';
+
+/** Unwrap `cat <<'EOF' ... EOF` heredoc wrappers models sometimes emit around the patch. */
+const stripHeredoc = (text: string): string => {
+    const lines = Str.split(text, '\n');
+    const first = lines[0];
+    const heredoc = Str.match(/<<-?\s*['"]?(\w+)['"]?\s*$/)(first);
+
+    if (Option.isNone(heredoc)) return text;
+
+    const delimiter = heredoc.value[1] ?? '';
+    let end = lines.length - 1;
+
+    while (end > 0 && Str.trim(lines[end] ?? '') === '') end -= 1;
+
+    if (Str.trim(lines[end] ?? '') !== delimiter) return text;
+
+    return Arr.join(lines.slice(1, end), '\n');
+};
+
+/** Fold the unicode punctuation opencode/agentlayer/clanka all fold before comparing lines. */
+const normalizeUnicode = (text: string): string =>
+    pipe(
+        text,
+        Str.replace(/[‘’‚‛]/g, "'"),
+        Str.replace(/[“”„‟]/g, '"'),
+        Str.replace(/[‐‑‒–—―]/g, '-'),
+        Str.replace(/…/g, '...'),
+        Str.replace(/ /g, ' '),
+    );
+
+type LineComparator = (a: string, b: string) => boolean;
+
+/** The shared 4-pass comparator ladder: exact, rstrip, trim, unicode-fold (first pass to match wins). */
+const matchPasses: ReadonlyArray<LineComparator> = [
+    (a, b) => a === b,
+    (a, b) => Str.trimEnd(a) === Str.trimEnd(b),
+    (a, b) => Str.trim(a) === Str.trim(b),
+    (a, b) => normalizeUnicode(Str.trim(a)) === normalizeUnicode(Str.trim(b)),
+];
+
+const sequenceMatchesAt = (
+    lines: ReadonlyArray<string>,
+    pattern: ReadonlyArray<string>,
+    position: number,
+    compare: LineComparator,
+): boolean => {
+    if (position < 0 || position + pattern.length > lines.length) return false;
+
+    for (let index = 0; index < pattern.length; index += 1) {
+        if (!compare(lines[position + index] ?? '', pattern[index] ?? '')) return false;
+    }
+
+    return true;
+};
+
+/**
+ * Find `pattern` inside `lines` at or after `startIndex` with the 4-pass ladder; when `eof` is set the
+ * end-anchored position is tried first (all three reference implementations agree). Returns -1 when no
+ * pass matches anywhere.
+ */
+export const seekSequence = (
+    lines: ReadonlyArray<string>,
+    pattern: ReadonlyArray<string>,
+    startIndex: number,
+    eof: boolean,
+): number => {
+    if (Arr.isReadonlyArrayEmpty(pattern)) return -1;
+
+    for (const compare of matchPasses) {
+        if (eof) {
+            const anchored = lines.length - pattern.length;
+
+            if (anchored >= startIndex && sequenceMatchesAt(lines, pattern, anchored, compare)) return anchored;
+        }
+
+        for (let position = startIndex; position <= lines.length - pattern.length; position += 1) {
+            if (sequenceMatchesAt(lines, pattern, position, compare)) return position;
+        }
+    }
+
+    return -1;
+};
+
+// --- V4A parsing --------------------------------------------------------------------------------------
+
+type ChunkParseState = {
+    readonly chunks: Array<PatchChunk>;
+    current: {
+        context: string;
+        oldLines: Array<string>;
+        newLines: Array<string>;
+        isEndOfFile: boolean;
+        touched: boolean;
+    };
+};
+
+const emptyChunk = () => ({ context: '', oldLines: [], newLines: [], isEndOfFile: false, touched: false });
+
+const flushChunk = (state: ChunkParseState): void => {
+    if (state.current.touched) {
+        state.chunks.push({
+            context: state.current.context,
+            oldLines: state.current.oldLines,
+            newLines: state.current.newLines,
+            isEndOfFile: state.current.isEndOfFile,
+        });
+    }
+
+    state.current = emptyChunk();
+};
+
+/** Feed one hunk-body line into the chunk state. Unprefixed lines are dropped (all three references). */
+const feedChunkLine = (state: ChunkParseState, line: string): void => {
+    if (Str.startsWith('+')(line)) {
+        state.current.newLines.push(Str.slice(1)(line));
+        state.current.touched = true;
+    } else if (Str.startsWith('-')(line)) {
+        state.current.oldLines.push(Str.slice(1)(line));
+        state.current.touched = true;
+    } else if (Str.startsWith(' ')(line)) {
+        state.current.oldLines.push(Str.slice(1)(line));
+        state.current.newLines.push(Str.slice(1)(line));
+        state.current.touched = true;
+    }
+};
+
+type ParsedV4AOp = { readonly op: PatchOp; readonly nextIndex: number };
+
+/** Parse an `*** Add File` section starting at `start`; only `+` lines contribute content. */
+const parseV4AAdd = (lines: ReadonlyArray<string>, start: number, endIndex: number): ParsedV4AOp => {
+    const path = Str.trim(Str.slice(addMarker.length)(lines[start] ?? ''));
+    const content: Array<string> = [];
+    let index = start + 1;
+
+    while (index < endIndex && !Str.startsWith('***')(lines[index] ?? '')) {
+        const contentLine = lines[index] ?? '';
+
+        if (Str.startsWith('+')(contentLine)) content.push(Str.slice(1)(contentLine));
+        index += 1;
+    }
+
+    return { op: PatchOp.add({ path, content: Arr.join(content, '\n') }), nextIndex: index };
+};
+
+/** Parse an `*** Update File` section starting at `start`, including an optional move and its hunks. */
+const parseV4AUpdate = (lines: ReadonlyArray<string>, start: number, endIndex: number): ParsedV4AOp => {
+    const path = Str.trim(Str.slice(updateMarker.length)(lines[start] ?? ''));
+    let index = start + 1;
+
+    let movePath: string | null = null;
+
+    if (index < endIndex && Str.startsWith(moveMarker)(lines[index] ?? '')) {
+        movePath = Str.trim(Str.slice(moveMarker.length)(lines[index] ?? ''));
+        index += 1;
+    }
+
+    const state: ChunkParseState = { chunks: [], current: emptyChunk() };
+
+    while (index < endIndex) {
+        const bodyLine = lines[index] ?? '';
+
+        if (Str.trim(bodyLine) === eofMarker) {
+            state.current.isEndOfFile = true;
+            state.current.touched = true;
+            index += 1;
+            continue;
+        }
+
+        if (Str.startsWith('***')(bodyLine)) break;
+
+        if (Str.startsWith('@@')(bodyLine)) {
+            flushChunk(state);
+            state.current.context = Str.trim(Str.slice(2)(bodyLine));
+            state.current.touched = true;
+            index += 1;
+            continue;
+        }
+
+        feedChunkLine(state, bodyLine);
+        index += 1;
+    }
+
+    flushChunk(state);
+
+    return { op: PatchOp.update({ path, movePath, chunks: state.chunks }), nextIndex: index };
+};
+
+const parseV4A = (lines: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<PatchOp>, PatchParseError> =>
+    Effect.gen(function* () {
+        const beginMatch = Arr.findFirstIndex(lines, (line) => Str.trim(line) === beginMarker);
+        const endMatch = Arr.findFirstIndex(lines, (line) => Str.trim(line) === endMarker);
+
+        if (Option.isNone(beginMatch) || Option.isNone(endMatch) || beginMatch.value >= endMatch.value) {
+            return yield* PatchParseError.make({ message: 'Invalid patch format: missing Begin/End markers' });
+        }
+
+        const beginIndex = beginMatch.value;
+        const endIndex = endMatch.value;
+
+        const ops: Array<PatchOp> = [];
+        let index = beginIndex + 1;
+
+        while (index < endIndex) {
+            const line = lines[index] ?? '';
+
+            if (Str.startsWith(addMarker)(line)) {
+                const parsed = parseV4AAdd(lines, index, endIndex);
+                ops.push(parsed.op);
+                index = parsed.nextIndex;
+                continue;
+            }
+
+            if (Str.startsWith(deleteMarker)(line)) {
+                ops.push(PatchOp.delete({ path: Str.trim(Str.slice(deleteMarker.length)(line)) }));
+                index += 1;
+                continue;
+            }
+
+            if (Str.startsWith(updateMarker)(line)) {
+                const parsed = parseV4AUpdate(lines, index, endIndex);
+                ops.push(parsed.op);
+                index = parsed.nextIndex;
+                continue;
+            }
+
+            // Unknown or blank line between operations: skip (opencode/agentlayer behavior).
+            index += 1;
+        }
+
+        return ops;
+    });
+
+// --- git / unified diff parsing -------------------------------------------------------------------------
+
+const hasDiffHeaders = (lines: ReadonlyArray<string>): boolean =>
+    Arr.some(
+        lines,
+        (line) =>
+            Str.startsWith('diff --git ')(line) ||
+            Str.startsWith('--- ')(line) ||
+            Str.startsWith('rename from ')(line) ||
+            Str.startsWith('rename to ')(line),
+    );
+
+/** Strip `a/` / `b/` prefixes and trailing tab metadata from a diff header path; null for /dev/null. */
+const diffHeaderPath = (raw: string): string | null => {
+    const withoutTab = Arr.headNonEmpty(Str.split(raw, '\t'));
+    const trimmed = Str.trim(withoutTab);
+
+    if (trimmed === '/dev/null') return null;
+
+    if (Str.startsWith('a/')(trimmed) || Str.startsWith('b/')(trimmed)) return Str.slice(2)(trimmed);
+
+    return trimmed;
+};
+
+const unifiedHunkHeader = /^@@\s*(?:-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s*)?@@\s*(.*)$/;
+
+const skippableGitMetadata = [
+    'index ',
+    'similarity index ',
+    'dissimilarity index ',
+    'new file mode ',
+    'deleted file mode ',
+    'old mode ',
+    'new mode ',
+    'Binary files ',
+    'GIT binary patch',
+];
+
+type GitFileState = {
+    fromPath: string | null;
+    toPath: string | null;
+    renameFrom: string | null;
+    renameTo: string | null;
+    sawHeader: boolean;
+    chunks: ChunkParseState;
+};
+
+const gitFileFromHeader = (line: string): Effect.Effect<GitFileState, PatchParseError> => {
+    const headerMatch = Str.match(/^a\/(\S+)\s+b\/(\S+)\s*$/)(Str.slice('diff --git '.length)(line));
+
+    if (Option.isNone(headerMatch)) {
+        return Effect.fail(PatchParseError.make({ message: `invalid git diff header: ${line}` }));
+    }
+
+    const header = headerMatch.value;
+
+    return Effect.succeed({
+        fromPath: header[1] ?? null,
+        toPath: header[2] ?? null,
+        renameFrom: null,
+        renameTo: null,
+        sawHeader: false,
+        chunks: { chunks: [], current: emptyChunk() },
+    });
+};
+
+/** Apply a `--- ` header, opening a new file when no `diff --git` line preceded it. */
+const withOldFileHeader = (file: GitFileState | null, path: string | null): GitFileState => {
+    if (file === null) {
+        return {
+            fromPath: path,
+            toPath: null,
+            renameFrom: null,
+            renameTo: null,
+            sawHeader: true,
+            chunks: { chunks: [], current: emptyChunk() },
+        };
+    }
+
+    file.fromPath = path;
+    file.sawHeader = true;
+
+    return file;
+};
+
+const startGitHunk = (state: ChunkParseState, hunk: RegExpMatchArray): void => {
+    flushChunk(state);
+    state.current.context = Str.trim(hunk[1] ?? '');
+    state.current.touched = true;
+};
+
+const parseGitDiff = (lines: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<PatchOp>, PatchParseError> =>
+    Effect.gen(function* () {
+        const ops: Array<PatchOp> = [];
+        let file: GitFileState | null = null;
+
+        const finishFile = (state: GitFileState | null): Effect.Effect<void, PatchParseError> =>
+            Effect.gen(function* () {
+                if (state === null) return;
+                flushChunk(state.chunks);
+
+                const fromPath = state.renameFrom ?? state.fromPath;
+                const toPath = state.renameTo ?? state.toPath;
+
+                if (fromPath === null && toPath === null) {
+                    return yield* PatchParseError.make({ message: 'invalid diff: both file paths are /dev/null' });
+                }
+
+                // --- /dev/null → add; +++ /dev/null → delete; rename → update with movePath.
+                if (fromPath === null && toPath !== null) {
+                    // Zero hunks means an empty file (clanka, the git-diff authority).
+                    const content = Arr.flatMap(state.chunks.chunks, (chunk) => chunk.newLines);
+                    ops.push(PatchOp.add({ path: toPath, content: Arr.join(content, '\n') }));
+
+                    return;
+                }
+
+                if (toPath === null && fromPath !== null) {
+                    ops.push(PatchOp.delete({ path: fromPath }));
+
+                    return;
+                }
+
+                if (fromPath === null || toPath === null) return;
+
+                const movePath = fromPath === toPath ? null : toPath;
+
+                if (Arr.isReadonlyArrayEmpty(state.chunks.chunks) && movePath === null) {
+                    return yield* PatchParseError.make({ message: `no hunks found for ${fromPath}` });
+                }
+
+                ops.push(PatchOp.update({ path: fromPath, movePath, chunks: state.chunks.chunks }));
+            });
+
+        for (const line of lines) {
+            if (Str.startsWith('diff --git ')(line)) {
+                yield* finishFile(file);
+                file = yield* gitFileFromHeader(line);
+                continue;
+            }
+
+            if (Str.startsWith('rename from ')(line)) {
+                if (file !== null) file.renameFrom = Str.trim(Str.slice('rename from '.length)(line));
+                continue;
+            }
+
+            if (Str.startsWith('rename to ')(line)) {
+                if (file !== null) file.renameTo = Str.trim(Str.slice('rename to '.length)(line));
+                continue;
+            }
+
+            if (Str.startsWith('--- ')(line)) {
+                file = withOldFileHeader(file, diffHeaderPath(Str.slice(4)(line)));
+                continue;
+            }
+
+            if (Str.startsWith('+++ ')(line)) {
+                if (file === null || !file.sawHeader) {
+                    return yield* PatchParseError.make({ message: 'missing new file header' });
+                }
+
+                file.toPath = diffHeaderPath(Str.slice(4)(line));
+                continue;
+            }
+
+            const hunk = Str.match(unifiedHunkHeader)(line);
+
+            if (Option.isSome(hunk) && file !== null) {
+                startGitHunk(file.chunks, hunk.value);
+                continue;
+            }
+
+            if (line === String.raw`\ No newline at end of file`) continue;
+
+            if (Arr.some(skippableGitMetadata, (prefix) => Str.startsWith(prefix)(line))) continue;
+
+            if (file !== null && file.chunks.current.touched) {
+                feedChunkLine(file.chunks, line);
+            }
+        }
+
+        yield* finishFile(file);
+
+        if (Arr.isArrayEmpty(ops)) return yield* PatchParseError.make({ message: 'no hunks found' });
+
+        return ops;
+    });
+
+// --- entry points ---------------------------------------------------------------------------------------
+
+/**
+ * Parse patch text into file operations. Accepts the V4A envelope (Begin/End required, opencode and
+ * agentlayer rules) and raw git/unified diffs (clanka's superset). CRLF is normalized before parsing.
+ */
+export const parsePatch = (patchText: string): Effect.Effect<ReadonlyArray<PatchOp>, PatchParseError> =>
+    Effect.gen(function* () {
+        const normalized = stripHeredoc(
+            pipe(patchText, Str.replace(/\r\n/g, '\n'), Str.replace(/\r/g, '\n'), Str.trim),
+        );
+
+        if (normalized.length === 0) {
+            return yield* PatchParseError.make({ message: 'patch_text is required' });
+        }
+
+        const lines = Str.split(normalized, '\n');
+
+        if (Arr.some(lines, (line) => Str.trim(line) === beginMarker)) {
+            const ops = yield* parseV4A(lines);
+
+            if (Arr.isReadonlyArrayEmpty(ops))
+                return yield* PatchParseError.make({ message: 'patch rejected: empty patch' });
+
+            return ops;
+        }
+
+        if (hasDiffHeaders(lines)) return yield* parseGitDiff(lines);
+
+        return yield* PatchParseError.make({
+            message: 'Invalid patch format: expected *** Begin Patch or a git/unified diff',
+        });
+    });
+
+/** Apply one update op's chunks to file content (pure; CRLF detected, applied in LF, restored). */
+export const applyChunks = (input: {
+    readonly content: string;
+    readonly chunks: ReadonlyArray<PatchChunk>;
+    readonly path: string;
+}): Effect.Effect<string, HunkNotFoundError> =>
+    Effect.gen(function* () {
+        const { chunks, path } = input;
+        const usesCrlf = Str.includes('\r\n')(input.content);
+        const normalized = Str.replace(/\r\n/g, '\n')(input.content);
+        const lines: Array<string> = Str.split(normalized, '\n');
+
+        // A trailing newline parses as a trailing empty line; drop it for matching (references), and the
+        // exactly-one-trailing-newline rule below restores it.
+        if (Arr.isArrayNonEmpty(lines) && lines[lines.length - 1] === '') lines.pop();
+
+        type Replacement = {
+            readonly index: number;
+            readonly deleteCount: number;
+            readonly newLines: ReadonlyArray<string>;
+        };
+
+        const replacements: Array<Replacement> = [];
+        let lineIndex = 0;
+
+        for (const chunk of chunks) {
+            if (chunk.context !== '') {
+                const contextIndex = seekSequence(lines, [chunk.context], lineIndex, false);
+
+                if (contextIndex === -1) {
+                    return yield* HunkNotFoundError.make({
+                        message: `Failed to find context '${chunk.context}' in ${path}`,
+                        path,
+                    });
+                }
+
+                lineIndex = contextIndex + 1;
+            }
+
+            if (Arr.isReadonlyArrayEmpty(chunk.oldLines)) {
+                // Pure insertion: anchored at end of file (all three reference implementations).
+                replacements.push({ index: lines.length, deleteCount: 0, newLines: chunk.newLines });
+                continue;
+            }
+
+            let oldLines = chunk.oldLines;
+            let newLines = chunk.newLines;
+            let matchIndex = seekSequence(lines, oldLines, lineIndex, chunk.isEndOfFile);
+
+            // Retry once dropping one trailing empty line from the pattern (opencode/agentlayer/clanka).
+            if (matchIndex === -1 && oldLines[oldLines.length - 1] === '') {
+                oldLines = oldLines.slice(0, -1);
+
+                if (newLines[newLines.length - 1] === '') newLines = newLines.slice(0, -1);
+
+                if (Arr.isReadonlyArrayNonEmpty(oldLines))
+                    matchIndex = seekSequence(lines, oldLines, lineIndex, chunk.isEndOfFile);
+            }
+
+            if (matchIndex === -1) {
+                return yield* HunkNotFoundError.make({
+                    message: `Failed to find expected lines in ${path}:\n${Arr.join(chunk.oldLines, '\n')}`,
+                    path,
+                });
+            }
+
+            replacements.push({ index: matchIndex, deleteCount: oldLines.length, newLines });
+            lineIndex = matchIndex + oldLines.length;
+        }
+
+        for (const replacement of [...replacements].sort((a, b) => b.index - a.index)) {
+            lines.splice(replacement.index, replacement.deleteCount, ...replacement.newLines);
+        }
+
+        // Exactly one trailing newline, reference semantics: append an empty segment only when the last
+        // line is non-empty (a surviving empty last line already yields the newline on join).
+        if (lines[lines.length - 1] !== '') lines.push('');
+        const result = Arr.join(lines, '\n');
+
+        return usesCrlf ? Str.replace(/\n/g, '\r\n')(result) : result;
+    });
+
+/** One concrete filesystem step the handler performs after a successful dry run. */
+export type PatchStep = Data.TaggedEnum<{
+    write: { readonly path: string; readonly content: string };
+    delete: { readonly path: string };
+    move: { readonly fromPath: string; readonly toPath: string; readonly content: string };
+}>;
+
+const PatchStep = Data.taggedEnum<PatchStep>();
+
+/** Result of computing a whole patch: the steps to perform and a human summary per op. */
+export type ComputedPatch = {
+    readonly steps: ReadonlyArray<PatchStep>;
+    readonly summary: ReadonlyArray<string>;
+};
+
+/**
+ * Dry-run a parsed patch against in-memory file contents (validate-then-write atomicity: callers read
+ * every referenced file first, run this, and only then perform the returned steps). Cross-op state is
+ * tracked in memory, so a file added earlier in the patch can be updated later, and referencing a file
+ * deleted earlier fails.
+ */
+export const computePatch = (input: {
+    readonly ops: ReadonlyArray<PatchOp>;
+    /** Current content for every referenced path; null when the file does not exist. */
+    readonly files: ReadonlyMap<string, string | null>;
+}): Effect.Effect<ComputedPatch, PatchApplyError> =>
+    Effect.gen(function* () {
+        const state = new Map<string, string | null>(input.files);
+        const steps: Array<PatchStep> = [];
+        const summary: Array<string> = [];
+
+        const readFor = (path: string, action: 'update' | 'delete'): Effect.Effect<string, PatchFileNotFoundError> => {
+            const content = state.get(path);
+
+            if (content === undefined || content === null) {
+                return Effect.fail(
+                    PatchFileNotFoundError.make({ message: `Failed to read file to ${action}: ${path}`, path }),
+                );
+            }
+
+            return Effect.succeed(content);
+        };
+
+        for (const op of input.ops) {
+            yield* Match.valueTags(op, {
+                add: (addition) =>
+                    Effect.sync(() => {
+                        // Ensure exactly one trailing newline; content ending in a bare `+` line already has one.
+                        const content =
+                            addition.content.length === 0 || Str.endsWith('\n')(addition.content)
+                                ? addition.content
+                                : `${addition.content}\n`;
+
+                        state.set(addition.path, content);
+                        steps.push(PatchStep.write({ path: addition.path, content }));
+                        summary.push(`Added: ${addition.path}`);
+                    }),
+                delete: (deletion) =>
+                    readFor(deletion.path, 'delete').pipe(
+                        Effect.tap(() =>
+                            Effect.sync(() => {
+                                state.set(deletion.path, null);
+                                steps.push(PatchStep.delete({ path: deletion.path }));
+                                summary.push(`Deleted: ${deletion.path}`);
+                            }),
+                        ),
+                    ),
+                update: (update) =>
+                    Effect.gen(function* () {
+                        const current = yield* readFor(update.path, 'update');
+                        const next = yield* applyChunks({ content: current, chunks: update.chunks, path: update.path });
+
+                        if (update.movePath === null) {
+                            state.set(update.path, next);
+                            steps.push(PatchStep.write({ path: update.path, content: next }));
+                            summary.push(`Updated: ${update.path}`);
+                        } else {
+                            state.set(update.path, null);
+                            state.set(update.movePath, next);
+                            steps.push(
+                                PatchStep.move({ fromPath: update.path, toPath: update.movePath, content: next }),
+                            );
+                            summary.push(`Updated: ${update.path} (moved to ${update.movePath})`);
+                        }
+                    }),
+            });
+        }
+
+        return { steps, summary };
+    });

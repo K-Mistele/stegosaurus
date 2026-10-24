@@ -10,6 +10,15 @@ const isTagProperty = (
 	(property.key.type === "Identifier" && property.key.name === "_tag") ||
 	(property.key.type === "Literal" && property.key.value === "_tag");
 
+// `_tag: Schema.tag("X")` / `Schema.tagDefaultOmit("X")` declares a tag field in a schema; it does not build a value.
+const isSchemaTagField = (property: ESTree.ObjectProperty): boolean =>
+	property.value.type === "CallExpression" &&
+	property.value.callee.type === "MemberExpression" &&
+	property.value.callee.object.type === "Identifier" &&
+	property.value.callee.object.name === "Schema" &&
+	property.value.callee.property.type === "Identifier" &&
+	property.value.callee.property.name.startsWith("tag");
+
 export const noManualTaggedConstructionRule = defineRule({
 	meta: {
 		type: "problem",
@@ -32,7 +41,7 @@ export const noManualTaggedConstructionRule = defineRule({
 						property.type === "Property" &&
 						propertyName(property) === "_tag",
 				);
-				if (tag !== undefined) {
+				if (tag !== undefined && !(tag.type === "Property" && isSchemaTagField(tag))) {
 					context.report({ node: tag, messageId: "manualConstruction" });
 				}
 			},
