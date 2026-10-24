@@ -3,7 +3,7 @@ import {
     type MailboxSubscriptionResult,
     MailboxSubscriptions,
 } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
-import { Effect, Schema, Stream } from 'effect';
+import { Array as Arr, Effect, Schema, Stream } from 'effect';
 
 import type { SlackApiError, SlackFileUploadError } from './SlackApi';
 import { SlackApi } from './SlackApi';
@@ -22,10 +22,10 @@ import {
 } from './SlackModels';
 import type { SlackStreamChunk } from './SlackStreamChunk';
 
-export class SlackChannelHistoryUnavailable extends Schema.TaggedError<SlackChannelHistoryUnavailable>()(
-    'SlackChannelHistoryUnavailable',
-    { thread: SlackThreadRef },
-) {}
+export class SlackChannelHistoryUnavailable extends Schema.TaggedError<
+    SlackChannelHistoryUnavailable,
+    { readonly brand: unique symbol }
+>()('SlackChannelHistoryUnavailable', { thread: SlackThreadRef }) {}
 
 const spanAttributes = (thread: SlackThreadRef) => ({
     'slack.team_id': thread.teamId,
@@ -34,7 +34,7 @@ const spanAttributes = (thread: SlackThreadRef) => ({
     'slack.is_dm': thread.isDm,
 });
 
-export class SlackThread extends Schema.TaggedClass<SlackThread>()('SlackThread', {
+export class SlackThread extends Schema.TaggedClass<SlackThread, { readonly brand: unique symbol }>()('SlackThread', {
     ref: SlackThreadRef,
     mailboxKey: Schema.NonEmptyString,
 }) {
@@ -56,7 +56,7 @@ export class SlackThread extends Schema.TaggedClass<SlackThread>()('SlackThread'
 
     listMessages(): Effect.Effect<SlackMessages, SlackApiError, SlackApi> {
         return Effect.flatMap(SlackApi, (api) => api.listThreadMessages({ thread: this.ref })).pipe(
-            Effect.map((records) => records.map((record) => SlackMessage.fromRecord(record))),
+            Effect.map((records) => Arr.map(records, (record) => SlackMessage.fromRecord(record))),
             Effect.withSpan('slack.thread.list_messages', { attributes: spanAttributes(this.ref) }),
         );
     }
@@ -65,7 +65,7 @@ export class SlackThread extends Schema.TaggedClass<SlackThread>()('SlackThread'
         count: SlackMessageCount,
     ): Effect.Effect<SlackMessages, SlackApiError | SlackChannelHistoryUnavailable, SlackApi> {
         if (this.ref.isDm) {
-            return Effect.fail(new SlackChannelHistoryUnavailable({ thread: this.ref })).pipe(
+            return Effect.fail(SlackChannelHistoryUnavailable.make({ thread: this.ref })).pipe(
                 Effect.withSpan('slack.thread.list_channel_messages_before_thread', {
                     attributes: spanAttributes(this.ref),
                 }),
@@ -73,7 +73,7 @@ export class SlackThread extends Schema.TaggedClass<SlackThread>()('SlackThread'
         }
 
         return Effect.flatMap(SlackApi, (api) => api.listChannelMessagesBeforeThread({ thread: this.ref, count })).pipe(
-            Effect.map((records) => records.map((record) => SlackMessage.fromRecord(record))),
+            Effect.map((records) => Arr.map(records, (record) => SlackMessage.fromRecord(record))),
             Effect.withSpan('slack.thread.list_channel_messages_before_thread', {
                 attributes: spanAttributes(this.ref),
             }),

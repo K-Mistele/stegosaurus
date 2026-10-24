@@ -20,14 +20,17 @@ import {
     SlackThread,
     SlackThreadRef,
     SlackUserId,
-    makeSlackCallbacks,
+    wrapSlackCallbacks,
 } from '../src';
 
 class CallbackDependency extends Context.Service<CallbackDependency, { readonly value: string }>()(
-    '@stegosaurus/channels-slack/test/CallbackDependency',
+    '@stegosaurus/channels-slack/test/slack-callbacks.vi.test/CallbackDependency',
 ) {}
 
-class ApplicationFailure extends Schema.TaggedError<ApplicationFailure>()('ApplicationFailure', {}) {}
+class ApplicationFailure extends Schema.TaggedError<ApplicationFailure, { readonly brand: unique symbol }>()(
+    'ApplicationFailure',
+    {},
+) {}
 
 const dependencyLayer = Layer.succeed(CallbackDependency, CallbackDependency.of({ value: 'captured' }));
 
@@ -80,12 +83,12 @@ const requireNewMention = <R>(callbacks: SlackCallbackOperations<R>) =>
 const requireSubscribed = <R>(callbacks: SlackCallbackOperations<R>) =>
     withDelivery(callbacks.onSubscribedThreadEvents, 'onSubscribedThreadEvents');
 
-describe('makeSlackCallbacks', () => {
+describe('wrapSlackCallbacks', () => {
     it.effect('reads the application services where the callback runs', ({ expect }) =>
         Effect.gen(function* () {
             let captured: string | undefined;
 
-            const callbacks = makeSlackCallbacks({
+            const callbacks = wrapSlackCallbacks({
                 onNewMention: () =>
                     Effect.flatMap(CallbackDependency, ({ value }) =>
                         Effect.sync(() => {
@@ -101,7 +104,7 @@ describe('makeSlackCallbacks', () => {
 
     it.effect('turns typed failures into retryable callback errors', ({ expect }) =>
         Effect.gen(function* () {
-            const callbacks = makeSlackCallbacks({
+            const callbacks = wrapSlackCallbacks({
                 onNewMention: () => Effect.fail(ApplicationFailure.make({})),
             });
 
@@ -114,7 +117,7 @@ describe('makeSlackCallbacks', () => {
 
     it.effect('honors retryability metadata and boolean flags', ({ expect }) =>
         Effect.gen(function* () {
-            const metadataCallbacks = makeSlackCallbacks({
+            const metadataCallbacks = wrapSlackCallbacks({
                 onNewMention: () => Effect.fail({ retryability: 'non_retryable' as const }),
             });
 
@@ -124,7 +127,7 @@ describe('makeSlackCallbacks', () => {
                 SlackCallbackError.make({ callback: 'onNewMention', reason: 'failed', retryable: false }),
             );
 
-            const flagCallbacks = makeSlackCallbacks({
+            const flagCallbacks = wrapSlackCallbacks({
                 onSubscribedThreadEvents: () => Effect.fail({ retryable: false }),
             });
 
@@ -142,7 +145,7 @@ describe('makeSlackCallbacks', () => {
 
     it.effect('classifies defects as unexpected retryable callback errors', ({ expect }) =>
         Effect.gen(function* () {
-            const callbacks = makeSlackCallbacks({
+            const callbacks = wrapSlackCallbacks({
                 onNewMention: () => Effect.die(new Error('callback defect')),
             });
 
@@ -159,7 +162,7 @@ describe('makeSlackCallbacks', () => {
 
     it.effect('preserves interruption instead of converting it to a callback error', ({ expect }) =>
         Effect.gen(function* () {
-            const callbacks = makeSlackCallbacks({ onNewMention: () => Effect.interrupt });
+            const callbacks = wrapSlackCallbacks({ onNewMention: () => Effect.interrupt });
             const exit = yield* requireNewMention(callbacks)(newMention).pipe(Effect.exit);
             expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
         }),
@@ -169,7 +172,7 @@ describe('makeSlackCallbacks', () => {
         Effect.gen(function* () {
             const { execution, handoffs } = yield* makeTestDeliveryExecution();
 
-            const callbacks = makeSlackCallbacks({
+            const callbacks = wrapSlackCallbacks({
                 onNewMention: (_event, delivery) => delivery.handoff(),
             });
 

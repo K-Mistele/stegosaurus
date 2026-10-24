@@ -97,7 +97,7 @@ const makeApi = (
     setThreadStatus: () => unexpected('setThreadStatus'),
     clearThreadStatus: () => unexpected('clearThreadStatus'),
     deleteMessage: () => unexpected('deleteMessage'),
-    startTyping: (request) => Queue.offer(calls, { operation: 'startTyping', request }).pipe(Effect.asVoid),
+    startTyping: (request) => Queue.offer(calls, { operation: 'startTyping', request }).pipe(Effect.as(undefined)),
     stream: (requestedThread, chunks) =>
         Stream.runCollect(chunks).pipe(
             Effect.flatMap((collected) =>
@@ -111,8 +111,9 @@ const makeApi = (
         ),
     postPlanToThread: () => unexpected('postPlanToThread'),
     updatePlan: () => unexpected('updatePlan'),
-    addReaction: (request) => Queue.offer(calls, { operation: 'addReaction', request }).pipe(Effect.asVoid),
-    removeReaction: (request) => Queue.offer(calls, { operation: 'removeReaction', request }).pipe(Effect.asVoid),
+    addReaction: (request) => Queue.offer(calls, { operation: 'addReaction', request }).pipe(Effect.as(undefined)),
+    removeReaction: (request) =>
+        Queue.offer(calls, { operation: 'removeReaction', request }).pipe(Effect.as(undefined)),
     resolveParticipant: () => unexpected('resolveParticipant'),
     getMessage: () => unexpected('getMessage'),
     resolveReactionThread: () => unexpected('resolveReactionThread'),
@@ -196,7 +197,7 @@ describe('SlackThread context API', () => {
                 .listChannelMessagesBeforeThread(count)
                 .pipe(Effect.provideService(SlackApi, api), Effect.flip);
 
-            expect(error).toEqual(new SlackChannelHistoryUnavailable({ thread: dmRef }));
+            expect(error).toEqual(SlackChannelHistoryUnavailable.make({ thread: dmRef }));
             expect(yield* Queue.poll(calls)).toEqual(Option.none());
         }),
     );

@@ -2,14 +2,14 @@ import { describe, it } from '@effect/vitest';
 import { ProviderEventHandled } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import { MailboxSubscriptionsMemory } from '@stegosaurus/channels-delivery/MailboxSubscriptionsMemory';
 import { DeliveryReceipt, type DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
-import { Effect, Layer, Predicate } from 'effect';
+import { Array as Arr, Effect, Layer, Predicate } from 'effect';
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 import { vi } from 'vite-plus/test';
 
 import { SlackApi } from '../src/SlackApi';
 import { SlackPostMessageRequest, SlackPostMessageResponse } from '../src/SlackApiLive';
 import type { SlackNewMention } from '../src/SlackCallbackEvents';
-import { makeSlackEventProcessor } from '../src/SlackEventProcessor';
+import { slackEventProcessor } from '../src/SlackEventProcessor';
 import { SlackChannelId, SlackMessageTs, SlackTeamId } from '../src/SlackIdentity';
 import { SlackParticipant, SlackUserId } from '../src/SlackModels';
 import { SlackAppMentionEvent } from '../src/SlackWebhookEventSchemas';
@@ -37,7 +37,7 @@ describe('Slack webhook routing', () => {
                 MailboxSubscriptionsMemory,
             );
 
-            const processor = makeSlackEventProcessor({
+            const processor = slackEventProcessor({
                 namespace: 'slack-emulator-test',
                 handlers: { onNewMention },
             });
@@ -322,7 +322,7 @@ describe('Slack webhook routing', () => {
                 ),
             );
 
-            expect(admissions.map((admission) => admission.eventId)).toEqual([
+            expect(Arr.map(admissions, (admission) => admission.eventId)).toEqual([
                 'Ev-message-channel',
                 'Ev-message-im',
                 'Ev-message-mpim',
@@ -331,7 +331,7 @@ describe('Slack webhook routing', () => {
                 'Ev-reaction_removed',
                 'Ev-agent-session-stopped',
             ]);
-            expect(slack.webhooks.getDeliveries().every((delivery) => delivery.status_code === 200)).toBe(true);
+            expect(Arr.every(slack.webhooks.getDeliveries(), (delivery) => delivery.status_code === 200)).toBe(true);
             expect(admissions[3]?.resourceId).toBe(`slack:v1:${slack.teamId}:${slack.channelId}:1700000000.000001`);
         }),
     );

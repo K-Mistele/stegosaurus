@@ -7,11 +7,11 @@ import { type ChannelsProvider } from '@stegosaurus/channels-delivery/ChannelsPr
 import { Effect } from 'effect';
 import type { Config, Redacted } from 'effect';
 
-import { SlackApi } from './SlackApi';
+import type { SlackApi } from './SlackApi';
 import { type SlackCallbackHandlers } from './SlackCallbacks';
-import { makeSlackOutputProcessor } from './SlackDeliveryOutput';
-import { makeSlackEventProcessor } from './SlackEventProcessor';
-import { makeSlackWebhookProvider } from './SlackWebhookProvider';
+import { slackOutputProcessor } from './SlackDeliveryOutput';
+import { slackEventProcessor } from './SlackEventProcessor';
+import { slackWebhookProvider } from './SlackWebhookProvider';
 
 /**
  * @property signingSecret - read when the bot is built, so the bot itself can be declared at the top of a module
@@ -37,17 +37,16 @@ export const make = <E, R>(
     /** The webhook half calls Slack while it checks a webhook, so it keeps the `SlackApi` it was built with. */
     webhookProvider: Effect.fn('slack.bot.build_webhook_provider')(function* ({ namespace }) {
         const signingSecret = yield* options.signingSecret;
-        const slackApi = yield* SlackApi;
-        const webhookProvider = makeSlackWebhookProvider({ namespace, signingSecret });
+        const buildServices = yield* Effect.context<SlackApi>();
+        const webhookProvider = slackWebhookProvider({ namespace, signingSecret });
 
         return {
             providerName: webhookProvider.providerName,
             handle: (input: RawWebhookInput) =>
-                webhookProvider.handle(input).pipe(Effect.provideService(SlackApi, slackApi)),
+                webhookProvider.handle(input).pipe(Effect.provideContext(buildServices)),
         };
     }),
-    eventProcessor: ({ namespace }) =>
-        Effect.succeed(makeSlackEventProcessor({ namespace, handlers: options.handlers })),
+    eventProcessor: ({ namespace }) => Effect.succeed(slackEventProcessor({ namespace, handlers: options.handlers })),
     /** Sends a handed-off delivery's output: posts, edits, reactions, and the thread's status line. */
-    outputProcessor: ({ namespace }) => makeSlackOutputProcessor({ namespace }),
+    outputProcessor: ({ namespace }) => slackOutputProcessor({ namespace }),
 });

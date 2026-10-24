@@ -8,16 +8,16 @@ import {
     WebhookPayloadInvalidError,
 } from '@stegosaurus/channels-delivery/ProviderWebhooks';
 import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
-import { Effect, Layer, Redacted } from 'effect';
+import { Effect, Layer, Redacted, String as Str } from 'effect';
 import { Headers } from 'effect/http';
 
 import { SlackApi } from '../src/SlackApi';
-import { makeSlackWebhookProvider } from '../src/SlackWebhookProvider';
+import { slackWebhookProvider } from '../src/SlackWebhookProvider';
 import { signedSlackBody, signedSlackInput } from './fixtures';
 
 const signingSecret = 'webhook-test-secret';
 
-const provider = makeSlackWebhookProvider({
+const provider = slackWebhookProvider({
     namespace: 'webhook-test',
     signingSecret: Redacted.make(signingSecret),
 });
@@ -69,7 +69,7 @@ describe('Slack webhook handling', () => {
             const error = yield* Effect.flip(
                 handle({
                     ...input,
-                    headers: Headers.set(input.headers, 'x-slack-signature', `v0=${'0'.repeat(64)}`),
+                    headers: Headers.set(input.headers, 'x-slack-signature', `v0=${Str.repeat(64)('0')}`),
                 }),
             );
 

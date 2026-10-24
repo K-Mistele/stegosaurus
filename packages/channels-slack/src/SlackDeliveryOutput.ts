@@ -114,7 +114,7 @@ export const slackPortableReactions = {
 } satisfies Record<PortableReaction, SlackReaction>;
 
 const failed = (safeCode: string, retryable: boolean) =>
-    new DeliveryOutputFailed({ provider: 'slack', retryable, safeCode });
+    DeliveryOutputFailed.make({ provider: 'slack', retryable, safeCode });
 
 /** The message a result posts: its Markdown, then any options as a list. */
 const outcomeMarkdown = (outcome: DeliveryOutcome, markdown: string) =>
@@ -122,14 +122,18 @@ const outcomeMarkdown = (outcome: DeliveryOutcome, markdown: string) =>
         Match.tag('AwaitingInput', ({ options }) =>
             Arr.match(options ?? [], {
                 onEmpty: () => markdown,
-                onNonEmpty: (listed) => `${markdown}\n\n${listed.map((option) => `• ${option}`).join('\n')}`,
+                onNonEmpty: (listed) =>
+                    `${markdown}\n\n${Arr.join(
+                        Arr.map(listed, (option) => `• ${option}`),
+                        '\n',
+                    )}`,
             }),
         ),
         Match.orElse(() => markdown),
     );
 
 /** Build Slack's output half. Each attempt reads `SlackApi` from its caller, so the host supplies it. */
-export const makeSlackOutputProcessor = (input: { readonly namespace: string }) =>
+export const slackOutputProcessor = (input: { readonly namespace: string }) =>
     Effect.sync(() => {
         const process = Effect.fn('slack.process_delivery_output')(function* (attempt: ProviderOutputAttempt) {
             const slackApi = yield* SlackApi;
@@ -138,7 +142,7 @@ export const makeSlackOutputProcessor = (input: { readonly namespace: string }) 
                 return yield* failed('unsupported_presentation_version', false);
             }
 
-            const destination = yield* Schema.decodeUnknownEffect(SlackDeliveryDestinationJson)(
+            const destination = yield* Schema.decodeEffect(SlackDeliveryDestinationJson)(
                 attempt.prepared.destination,
             ).pipe(Effect.mapError(() => failed('destination_invalid', false)));
 
@@ -186,7 +190,7 @@ export const makeSlackOutputProcessor = (input: { readonly namespace: string }) 
 
             /** The posted message a reference names. */
             const postedMessage = (reference: Schema.Json) =>
-                Schema.decodeUnknownEffect(SlackOutputReceiptJson)(reference).pipe(
+                Schema.decodeEffect(SlackOutputReceiptJson)(reference).pipe(
                     Effect.map(({ message }) => message),
                     Effect.mapError(() => failed('message_reference_invalid', false)),
                 );
@@ -208,7 +212,7 @@ export const makeSlackOutputProcessor = (input: { readonly namespace: string }) 
                         Effect.fromOption(Option.fromUndefinedOr(attempt.prepared.activationTarget)).pipe(
                             Effect.mapError(() => failed('activation_target_missing', false)),
                             Effect.flatMap((encoded) =>
-                                Schema.decodeUnknownEffect(SlackActivationTargetJson)(encoded).pipe(
+                                Schema.decodeEffect(SlackActivationTargetJson)(encoded).pipe(
                                     Effect.tapError((error) =>
                                         Effect.logWarning(
                                             'Slack output activation target could not be read',
@@ -260,7 +264,7 @@ export const makeSlackOutputProcessor = (input: { readonly namespace: string }) 
             const planMessage = (presentation: Schema.Json | undefined) =>
                 Predicate.isUndefined(presentation)
                     ? Effect.succeedNone
-                    : Schema.decodeUnknownEffect(SlackPlanPresentationJson)(presentation).pipe(
+                    : Schema.decodeEffect(SlackPlanPresentationJson)(presentation).pipe(
                           Effect.map(({ message }) => Option.some(message)),
                           Effect.catchTag('SchemaError', (error) =>
                               Effect.logWarning(

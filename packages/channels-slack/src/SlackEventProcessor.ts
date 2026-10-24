@@ -16,7 +16,7 @@ import {
     PreparedDeliveryInvocation,
     type ProviderDeliveryExecution,
 } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Array as Arr, Data, Effect, Match, Option, Predicate, Schema, Struct } from 'effect';
+import { Array as Arr, Data, Effect, Match, Option, Predicate, Schema, String as Str, Struct } from 'effect';
 
 import { SlackApi, SlackApiError, isSlackTokenRejected } from './SlackApi';
 import {
@@ -37,7 +37,7 @@ import {
     type SlackCallbackHandlers,
     SlackCallbackName,
     type SlackCallbackOperations,
-    makeSlackCallbacks,
+    wrapSlackCallbacks,
 } from './SlackCallbacks';
 import {
     SlackActivationTarget,
@@ -165,7 +165,7 @@ const decodeEnvelope = (admission: DeliveryAdmission) =>
 
 const parseResourceAddress = (resourceId: string) =>
     Effect.gen(function* () {
-        const parts = resourceId.split(':');
+        const parts = Str.split(resourceId, ':');
 
         if (parts.length !== 5 || parts[0] !== 'slack' || parts[1] !== 'v1') return yield* identityMismatch();
         const encodedTeam = parts[2];
@@ -269,7 +269,7 @@ const makeMessage = (input: {
             thread: input.thread,
             author,
             content: SlackMarkdownContent.make({ markdown: input.snapshot.text ?? '' }),
-            files: (input.snapshot.files ?? []).map((file) => slackFileFromMetadata(input.teamId, file)),
+            files: Arr.map(input.snapshot.files ?? [], (file) => slackFileFromMetadata(input.teamId, file)),
             metadata: { eventId: input.eventId, eventTime: input.eventTime },
             ...Struct.renameKeys(Struct.pick(input.snapshot, ['user_team']), {
                 user_team: 'authorTeamId',
@@ -466,7 +466,7 @@ const normalizeEnvelope = (envelope: SlackEnvelope, thread: SlackThreadRef) =>
                             event: SlackConversationStopped.make({
                                 eventId,
                                 actor,
-                                streamingMessages: event.streaming_message_ts.map((messageTs) =>
+                                streamingMessages: Arr.map(event.streaming_message_ts, (messageTs) =>
                                     SlackMessageRef.make({
                                         teamId: envelope.team_id,
                                         channelId: event.channel,
@@ -525,8 +525,11 @@ const invocationCallbackName = SlackInvocation.$match({
 
 /** A new mention starts at the first activating message; relevant events before it are dropped. */
 const buildNewMention = (thread: SlackThread, normalized: ReadonlyArray<NormalizedEvent>) => {
-    const activationIndex = normalized.findIndex(({ activation }) => Option.isSome(activation));
-    const activating = normalized[activationIndex];
+    const activationIndex = Arr.findFirstIndex(normalized, ({ activation }) => Option.isSome(activation));
+
+    if (Option.isNone(activationIndex)) return Option.none<SlackInvocation>();
+
+    const activating = normalized[activationIndex.value];
 
     if (activating === undefined || Option.isNone(activating.activation)) return Option.none<SlackInvocation>();
 
@@ -535,7 +538,7 @@ const buildNewMention = (thread: SlackThread, normalized: ReadonlyArray<Normaliz
             event: SlackNewMention.make({
                 thread,
                 trigger: activating.activation.value,
-                events: normalized.slice(activationIndex + 1).map(({ event }) => event),
+                events: Arr.map(normalized.slice(activationIndex.value + 1), ({ event }) => event),
             }),
         }),
     );
@@ -546,7 +549,7 @@ const buildSubscribedThreadEvents = (thread: SlackThread, normalized: ReadonlyAr
 
     if (first === undefined) return Option.none<SlackInvocation>();
 
-    const events = SlackNonEmptyThreadEvents.make([first.event, ...normalized.slice(1).map(({ event }) => event)]);
+    const events = SlackNonEmptyThreadEvents.make([first.event, ...Arr.map(normalized.slice(1), ({ event }) => event)]);
 
     return Option.some(
         SlackInvocation.SubscribedThreadEvents({
@@ -765,7 +768,10 @@ const processSlackBatch = <R>(options: SlackEventProcessorOptions, callbacks: Sl
             if (!belongsToBatch(options, first, address, admission, envelope)) return yield* identityMismatch();
         }
 
-        const isDm = address.channelId.startsWith('D') || envelopes.some(isDirectMessageEnvelope);
+        const isDm =
+            Str.startsWith('D')(address.channelId) ||
+            Arr.some(envelopes, (envelope) => isDirectMessageEnvelope(envelope));
+
         const threadRef = SlackThreadRef.make({ ...address, isDm });
         const mailboxKey = deliveryMailboxKey(first);
         const thread = SlackThread.make({ ref: threadRef, mailboxKey });
@@ -784,7 +790,7 @@ const processSlackBatch = <R>(options: SlackEventProcessorOptions, callbacks: Sl
             }),
         );
 
-        const normalized = normalizedOptions.flatMap(Option.toArray);
+        const normalized = Arr.getSomes(normalizedOptions);
 
         if (Option.isSome(execution.prepared)) {
             const spec = execution.prepared.value.callbacks[execution.callbackIndex];
@@ -823,10 +829,10 @@ const processSlackBatch = <R>(options: SlackEventProcessorOptions, callbacks: Sl
  * Slack's callback half: runs the application's handlers for each batch. What the handlers need, with
  * `SlackApi` and `MailboxSubscriptions`, stays in its requirements, for the host to supply.
  */
-export const makeSlackEventProcessor = <E, R>(
+export const slackEventProcessor = <E, R>(
     options: SlackEventProcessorOptions & { readonly handlers: SlackCallbackHandlers<E, R> },
 ): ProviderEventProcessor<SlackApi | MailboxSubscriptions | R> => ({
     namespace: options.namespace,
     providerName: 'slack',
-    process: processSlackBatch(options, makeSlackCallbacks(options.handlers)),
+    process: processSlackBatch(options, wrapSlackCallbacks(options.handlers)),
 });

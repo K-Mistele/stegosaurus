@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect';
+import { Array as Arr, Effect, Schema } from 'effect';
 
 import { SlackApi } from './SlackApi';
 import type { SlackApiError } from './SlackApiContract';
@@ -12,15 +12,18 @@ const spanAttributes = (ref: SlackMessageRef) => ({
 });
 
 /** A Slack message you can react to. `SlackApi` returns its fields as a `SlackMessageRecord`. */
-export class SlackMessage extends Schema.TaggedClass<SlackMessage>()('SlackMessage', {
-    ...SlackMessageRecord.fields,
-    files: Schema.Array(SlackFile),
-}) {
+export class SlackMessage extends Schema.TaggedClass<SlackMessage, { readonly brand: unique symbol }>()(
+    'SlackMessage',
+    {
+        ...SlackMessageRecord.fields,
+        files: Schema.Array(SlackFile),
+    },
+) {
     /** Wraps a message record from `SlackApi`, and each of its files. */
     static fromRecord(record: SlackMessageRecord): SlackMessage {
         return SlackMessage.make({
             ...record,
-            files: record.files.map((file) => SlackFile.make(file)),
+            files: Arr.map(record.files, (file) => SlackFile.make(file)),
         });
     }
 

@@ -1,4 +1,4 @@
-import { ConfigProvider, Effect, Layer, Queue } from 'effect';
+import { ConfigProvider, Effect, Layer, Queue, Record as Rec, String as Str } from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 
 import { SlackApiLiveBase } from '../src/SlackApiLive';
@@ -105,7 +105,9 @@ export const slackApiLayer = (http: HttpClient.HttpClient) =>
     );
 
 export const formParams = (request: RecordedSlackRequest) =>
-    Object.fromEntries(new URLSearchParams(new TextDecoder().decode(request.body)));
+    Rec.fromEntries(new URLSearchParams(new TextDecoder().decode(request.body)));
+
+const slackApiPrefix = 'https://slack.com/api/';
 
 export const slackMethod = (request: RecordedSlackRequest) =>
-    request.url.startsWith('https://slack.com/api/') ? request.url.slice('https://slack.com/api/'.length) : null;
+    Str.startsWith(slackApiPrefix)(request.url) ? Str.slice(slackApiPrefix.length)(request.url) : null;

@@ -5,7 +5,7 @@ import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDeliver
 import { Effect, Layer, Predicate, Redacted, Schema } from 'effect';
 
 import { SlackApi } from '../src/SlackApi';
-import { makeSlackWebhookProvider } from '../src/SlackWebhookProvider';
+import { slackWebhookProvider } from '../src/SlackWebhookProvider';
 import { signedSlackInput } from './fixtures';
 
 const signingSecret = 'mention-test-secret';
@@ -18,7 +18,7 @@ const rootMentionEvent = {
     channel: 'C_TEST',
 };
 
-const appMention = (threadTs?: string) => ({
+const appMention = (threadTs: string | undefined) => ({
     type: 'event_callback',
     team_id: 'T_TEST',
     event_id: 'Ev_MENTION',
@@ -26,7 +26,7 @@ const appMention = (threadTs?: string) => ({
     event: Predicate.isUndefined(threadTs) ? rootMentionEvent : { ...rootMentionEvent, thread_ts: threadTs },
 });
 
-const provider = makeSlackWebhookProvider({
+const provider = slackWebhookProvider({
     namespace: 'mention-test',
     signingSecret: Redacted.make(signingSecret),
 });
@@ -48,7 +48,7 @@ const handleMention = (payload: Schema.Json) =>
 describe('Slack app mention admission', () => {
     it.effect('uses the message timestamp for a root mention', ({ expect }) =>
         Effect.gen(function* () {
-            const outcome = yield* handleMention(appMention());
+            const outcome = yield* handleMention(appMention(undefined));
 
             expect(outcome).toEqual(
                 ProviderWebhookEvent.make({
@@ -58,7 +58,7 @@ describe('Slack app mention admission', () => {
                         installationId: 'T_TEST',
                         resourceId: 'slack:v1:T_TEST:C_TEST:1700000001.000001',
                         eventId: 'Ev_MENTION',
-                        payload: appMention(),
+                        payload: appMention(undefined),
                     }),
                 }),
             );

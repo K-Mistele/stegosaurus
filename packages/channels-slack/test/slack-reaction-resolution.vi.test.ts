@@ -6,7 +6,7 @@ import { Effect, Layer, Redacted } from 'effect';
 
 import { SlackApi, SlackApiError } from '../src/SlackApi';
 import { SlackMessageTs } from '../src/SlackIdentity';
-import { makeSlackWebhookProvider } from '../src/SlackWebhookProvider';
+import { slackWebhookProvider } from '../src/SlackWebhookProvider';
 import { signedSlackInput } from './fixtures';
 
 const signingSecret = 'reaction-test-secret';
@@ -25,7 +25,7 @@ const reaction = {
     },
 };
 
-const provider = makeSlackWebhookProvider({
+const provider = slackWebhookProvider({
     namespace: 'reaction-test',
     signingSecret: Redacted.make(signingSecret),
 });

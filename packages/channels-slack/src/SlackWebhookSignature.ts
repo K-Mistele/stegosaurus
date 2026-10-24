@@ -1,5 +1,5 @@
 import { WebhookAuthenticationError } from '@stegosaurus/channels-delivery/ProviderWebhooks';
-import { Clock, Crypto, Effect, Redacted, Schema } from 'effect';
+import { Clock, Crypto, Effect, Redacted, Schema, String as Str } from 'effect';
 import { Hex } from 'effect/encoding';
 
 const SlackHmacInput = Schema.Struct({
@@ -75,11 +75,11 @@ const constantTimeEqual = (left: Uint8Array, right: Uint8Array) => {
 };
 
 const decodeSignature = (signature: string) => {
-    if (!signature.startsWith('v0=')) {
+    if (!Str.startsWith('v0=')(signature)) {
         return undefined;
     }
 
-    const value = signature.slice(3);
+    const value = Str.slice(3)(signature);
 
     if (value.length !== 64 || !hexadecimal.test(value)) {
         return undefined;
@@ -88,7 +88,7 @@ const decodeSignature = (signature: string) => {
     const bytes = new Uint8Array(value.length / 2);
 
     for (let index = 0; index < bytes.length; index += 1) {
-        bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+        bytes[index] = Number.parseInt(Str.slice(index * 2, index * 2 + 2)(value), 16);
     }
 
     return bytes;

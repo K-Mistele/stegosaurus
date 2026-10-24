@@ -1,4 +1,4 @@
-import { Schema } from 'effect';
+import { Array as Arr, Schema } from 'effect';
 
 export const SlackTeamId = Schema.NonEmptyString.pipe(Schema.brand('SlackTeamId'));
 
@@ -23,10 +23,13 @@ export const slackThreadResourceId = (input: {
     readonly channelId: SlackChannelId;
     readonly threadTs: SlackMessageTs;
 }) =>
-    [
-        'slack',
-        'v1',
-        encodeURIComponent(input.teamId),
-        encodeURIComponent(input.channelId),
-        encodeURIComponent(input.threadTs),
-    ].join(':');
+    Arr.join(
+        [
+            'slack',
+            'v1',
+            encodeURIComponent(input.teamId),
+            encodeURIComponent(input.channelId),
+            encodeURIComponent(input.threadTs),
+        ],
+        ':',
+    );

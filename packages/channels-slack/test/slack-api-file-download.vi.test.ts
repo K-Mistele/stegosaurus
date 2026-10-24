@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Effect, Queue, Stream } from 'effect';
+import { Array as Arr, Effect, Queue, Stream } from 'effect';
 
 import { SlackApiError, SlackFileAuthorizationError, SlackFileSizeLimitExceeded } from '../src/SlackApi';
 import { SlackFile, slackFileFromMetadata } from '../src/SlackFile';
@@ -51,7 +51,7 @@ const collect = (target: SlackFile, respond: SlackHttpResponder) =>
     withRequests((requests) =>
         target.download().pipe(
             Effect.flatMap(Stream.runCollect),
-            Effect.map((chunks) => new Uint8Array(Array.from(chunks).flatMap((chunk) => Array.from(chunk)))),
+            Effect.map((chunks) => new Uint8Array(Arr.flatMap(Array.from(chunks), (chunk) => Array.from(chunk)))),
             Effect.provide(slackApiLayer(makeRecordingSlackHttp(requests, respond))),
             Effect.flatMap((downloaded) =>
                 Effect.map(Queue.clear(requests), (recorded) => ({
@@ -82,7 +82,7 @@ describe('Slack file download', () => {
             const result = yield* collect(file, () => new Response(chunked([bytes.slice(0, 5), bytes.slice(5)])));
 
             expect(result.downloaded).toEqual(bytes);
-            expect(result.requests.map(({ url, authorization }) => ({ url, authorization }))).toEqual([
+            expect(Arr.map(result.requests, ({ url, authorization }) => ({ url, authorization }))).toEqual([
                 { url: privateDownloadUrl, authorization: `Bearer ${botToken}` },
             ]);
         }),
@@ -109,7 +109,7 @@ describe('Slack file download', () => {
 
             expect(buffered).toEqual(bytes);
             const recorded = Array.from(yield* Queue.clear(requests));
-            expect(recorded.map(({ url, authorization }) => ({ url, authorization }))).toEqual([
+            expect(Arr.map(recorded, ({ url, authorization }) => ({ url, authorization }))).toEqual([
                 { url: privateDownloadUrl, authorization: `Bearer ${botToken}` },
                 { url: hop, authorization: `Bearer ${botToken}` },
             ]);
@@ -222,7 +222,7 @@ describe('Slack file download', () => {
                     message: 'Slack file redirect target is not an approved Slack file origin',
                 }),
             );
-            expect(offOrigin.requests.map(({ url }) => url)).toEqual([privateDownloadUrl]);
+            expect(Arr.map(offOrigin.requests, ({ url }) => url)).toEqual([privateDownloadUrl]);
 
             const loop = yield* downloadFails(file, redirect(privateDownloadUrl));
             expect(loop.error).toEqual(

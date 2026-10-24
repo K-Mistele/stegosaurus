@@ -11,12 +11,12 @@ import {
     DeliveryReceipt,
     MailboxDelivery,
 } from '@stegosaurus/channels-delivery/MailboxDelivery';
-import { Clock, Context, Effect, Layer, Match, Queue, Redacted, Schema } from 'effect';
+import { Array as Arr, Clock, Context, Effect, Layer, Match, Queue, Redacted, Schema } from 'effect';
 import { Headers, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from 'effect/http';
 
-import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution';
+import * as DeliveryExecutionFixture from '../../channels-delivery/test/delivery-execution';
 import { SlackApi } from '../src/SlackApi';
-import { makeSlackWebhookProvider } from '../src/SlackWebhookProvider';
+import { slackWebhookProvider } from '../src/SlackWebhookProvider';
 import { signSlackBody } from '../src/SlackWebhookSignature';
 
 export const slackEmulatorSigningSecret = 'slack-emulator-signing-secret';
@@ -33,9 +33,13 @@ export type SlackEmulatorFixtureOptions = {
 };
 
 const inMemoryMailboxKey = (admission: DeliveryAdmission) =>
-    [admission.namespace, admission.provider, admission.installationId, admission.resourceId]
-        .map((segment) => `${segment.length}:${segment}`)
-        .join('|');
+    Arr.join(
+        Arr.map(
+            [admission.namespace, admission.provider, admission.installationId, admission.resourceId],
+            (segment) => `${segment.length}:${segment}`,
+        ),
+        '|',
+    );
 
 /** Test-only keyed mailbox that stores admissions until the test explicitly processes one. */
 export const makeInMemoryMailboxFixture = <R>(processors: ReadonlyArray<ProviderEventProcessor<R>>) =>
@@ -62,7 +66,7 @@ export const makeInMemoryMailboxFixture = <R>(processors: ReadonlyArray<Provider
         return {
             mailboxDelivery,
             mailboxKeys: Effect.sync(() => Array.from(mailboxes.keys())),
-            processBatch: (mailboxKey: string, count?: number) => {
+            processBatch: (mailboxKey: string, count: number | undefined) => {
                 const mailbox = mailboxes.get(mailboxKey);
 
                 if (mailbox === undefined) return Effect.die(new Error(`In-memory mailbox not found: ${mailboxKey}`));
@@ -79,7 +83,7 @@ export const makeInMemoryMailboxFixture = <R>(processors: ReadonlyArray<Provider
                         Queue.take(mailbox),
                     );
 
-                    const { execution } = yield* makeTestDeliveryExecution(mailboxKey);
+                    const { execution } = yield* DeliveryExecutionFixture.makeTestDeliveryExecution(mailboxKey);
 
                     return yield* processProviderEvent(processors)([first, ...rest], execution);
                 });
@@ -91,8 +95,9 @@ export const makeInMemoryMailboxFixture = <R>(processors: ReadonlyArray<Provider
                     ? Effect.die(new Error(`In-memory mailbox not found: ${mailboxKey}`))
                     : Queue.take(mailbox).pipe(
                           Effect.flatMap((admission) =>
-                              Effect.flatMap(makeTestDeliveryExecution(mailboxKey), ({ execution }) =>
-                                  processProviderEvent(processors)([admission], execution),
+                              Effect.flatMap(
+                                  DeliveryExecutionFixture.makeTestDeliveryExecution(mailboxKey),
+                                  ({ execution }) => processProviderEvent(processors)([admission], execution),
                               ),
                           ),
                       );
@@ -121,10 +126,10 @@ export const signedSlackInput = (signingSecret: string, payload: Schema.Json, ti
         Effect.flatMap((bodyText) => signedSlackBody(signingSecret, textEncoder.encode(bodyText), timestamp)),
     );
 
-export class SlackEmulatorFixtureError extends Schema.TaggedError<SlackEmulatorFixtureError>()(
-    'SlackEmulatorFixtureError',
-    { reason: Schema.Literals(['non_tcp_address', 'incomplete_seed']) },
-) {}
+export class SlackEmulatorFixtureError extends Schema.TaggedError<
+    SlackEmulatorFixtureError,
+    { readonly brand: unique symbol }
+>()('SlackEmulatorFixtureError', { reason: Schema.Literals(['non_tcp_address', 'incomplete_seed']) }) {}
 
 const slackSeed = {
     team: {
@@ -214,7 +219,7 @@ export const makeSlackEmulatorFixture = (options: SlackEmulatorFixtureOptions) =
         const clock = yield* Clock.Clock;
         const webhookTimestamp = String(Math.floor((yield* Clock.currentTimeMillis) / 1000));
 
-        const provider = makeSlackWebhookProvider({
+        const provider = slackWebhookProvider({
             namespace: 'slack-emulator-test',
             signingSecret: Redacted.make(slackEmulatorSigningSecret),
         });

@@ -1,4 +1,4 @@
-import { Effect, Predicate, Schema } from 'effect';
+import { Array as Arr, Effect, Option, Predicate, Schema } from 'effect';
 
 import { SlackApiError } from '../SlackApiContract';
 import type { SlackMessageTs } from '../SlackIdentity';
@@ -63,13 +63,13 @@ export const completeSlackFileUpload = Effect.fn('slack.api.complete_file_upload
         response: CompleteUploadResponse,
     });
 
-    const file = response.files.find((candidate) => candidate.id === upload.target.fileId);
+    const file = Arr.findFirst(response.files, (candidate) => candidate.id === upload.target.fileId);
 
-    if (file === undefined)
+    if (Option.isNone(file))
         return yield* SlackApiError.make({
             operation: 'complete_file_upload',
             message: 'Slack did not return the uploaded file',
         });
 
-    return file;
+    return file.value;
 });

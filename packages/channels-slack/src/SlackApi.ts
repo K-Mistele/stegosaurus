@@ -72,7 +72,8 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
     /** Reads the optional `SLACK_BOT_USER_ID`; without it the first call that needs the bot's user ID asks `auth.test`. */
     make: Effect.gen(function* () {
         const client = yield* SlackHttpClient;
-        const http = yield* HttpClient.HttpClient;
+        /** The file helpers in `api/` read these from context; the operations themselves require nothing. */
+        const apiServices = yield* Effect.context<SlackHttpClient | HttpClient.HttpClient>();
         const configuredBotUserId = yield* Config.option(Config.String('SLACK_BOT_USER_ID'));
 
         const narrowMissingScope = <A>(effect: Effect.Effect<A, SlackWebApiError>): Effect.Effect<A, SlackApiError> =>
@@ -99,6 +100,14 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
         ): Effect.Effect<A, SlackApiError> =>
             narrowMissingScope(client.get({ operation, method, params: query, response: schema }));
 
+        /** Calls a Web API method whose response carries nothing beyond `ok`. */
+        const callSlackAction = (
+            operation: SlackApiOperation,
+            method: string,
+            body: Schema.Json,
+        ): Effect.Effect<void, SlackApiError> =>
+            callSlack(operation, method, body, SlackResponse).pipe(Effect.as(undefined));
+
         const authUserId = yield* Effect.cached(
             Option.match(configuredBotUserId, {
                 onNone: () =>
@@ -123,12 +132,11 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
             thread: SlackThreadRef,
             status: 'active' | 'processing',
         ): Effect.Effect<void, SlackApiError> =>
-            callSlack(
-                operation,
-                'agents.sessions.setStatus',
-                { channel_id: thread.channelId, thread_ts: thread.threadTs, status },
-                SlackResponse,
-            ).pipe(Effect.asVoid);
+            callSlackAction(operation, 'agents.sessions.setStatus', {
+                channel_id: thread.channelId,
+                thread_ts: thread.threadTs,
+                status,
+            });
 
         const participantFromUser = (user: typeof SlackUser.Type, ownUserId: string) => {
             const fields: SlackParticipantFields = {
@@ -266,7 +274,7 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
                         ),
                     ),
                 ),
-                Effect.provideService(SlackHttpClient, client),
+                Effect.provideContext(apiServices),
             );
 
         const uploadFile = Effect.fn('slack.api.upload_file')(function* (
@@ -274,9 +282,7 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
             input: SlackUploadFileInput,
         ) {
             const target = yield* requireFilesWrite(getSlackFileUploadUrl(input));
-            yield* uploadSlackFileBytes({ target, bytes: input.bytes }).pipe(
-                Effect.provideService(HttpClient.HttpClient, http),
-            );
+            yield* uploadSlackFileBytes({ target, bytes: input.bytes }).pipe(Effect.provideContext(apiServices));
 
             const metadata = yield* requireFilesWrite(completeSlackFileUpload({ target, destination, input }));
 
@@ -302,11 +308,11 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
         });
 
         const openDownload = (request: SlackDownloadFileRequest) =>
-            downloadSlackFile(request).pipe(Effect.provideService(SlackHttpClient, client));
+            downloadSlackFile(request).pipe(Effect.provideContext(apiServices));
 
         const listThreadMessagesPage = Effect.fn('slack.api.list_thread_messages_page')(function* (
             thread: SlackThreadRef,
-            cursor?: string,
+            cursor: string | undefined,
         ) {
             const body: SlackRepliesBody = {
                 channel: thread.channelId,
@@ -443,8 +449,8 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
                     }),
                 ),
             listThreadMessages: ({ thread }) => listThreadMessages(thread),
-            listChannelMessagesBeforeThread: ({ thread, count }) => {
-                return Stream.paginate(Option.none<string>(), (cursor) => {
+            listChannelMessagesBeforeThread: ({ thread, count }) =>
+                Stream.paginate(Option.none<string>(), (cursor) => {
                     const body: SlackHistoryBody = {
                         channel: thread.channelId,
                         latest: thread.threadTs,
@@ -485,8 +491,7 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
                     Stream.take(count),
                     Stream.runCollect,
                     Effect.map((messages) => chronological(Array.from(messages))),
-                );
-            },
+                ),
             postToThread: ({ thread, content }) =>
                 postMessage({
                     operation: 'post',
@@ -500,36 +505,28 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
                 }),
             postToChannel: ({ channel, content }) => postMessage({ operation: 'post_to_channel', channel, content }),
             updateMessage: ({ message, content }) =>
-                callSlack(
-                    'update_message',
-                    'chat.update',
-                    { channel: message.channelId, ts: message.messageTs, text: contentText(content) },
-                    SlackResponse,
-                ).pipe(Effect.asVoid, Effect.withSpan('slack.api.update_message')),
+                callSlackAction('update_message', 'chat.update', {
+                    channel: message.channelId,
+                    ts: message.messageTs,
+                    text: contentText(content),
+                }).pipe(Effect.withSpan('slack.api.update_message')),
             deleteMessage: ({ message }) =>
-                callSlack(
-                    'delete_message',
-                    'chat.delete',
-                    { channel: message.channelId, ts: message.messageTs },
-                    SlackResponse,
-                ).pipe(Effect.asVoid, Effect.withSpan('slack.api.delete_message')),
+                callSlackAction('delete_message', 'chat.delete', {
+                    channel: message.channelId,
+                    ts: message.messageTs,
+                }).pipe(Effect.withSpan('slack.api.delete_message')),
             startTyping: ({ thread }) => setSessionStatus('start_typing', thread, 'processing'),
             /**
              * Status text goes through the Assistants API, whose bridge shows it in the agent-session
              * loading line; `agents.sessions.setStatus` only knows lifecycle states.
              */
             setThreadStatus: ({ thread, status }) =>
-                callSlack(
-                    'set_thread_status',
-                    'assistant.threads.setStatus',
-                    {
-                        channel_id: thread.channelId,
-                        thread_ts: thread.threadTs,
-                        status,
-                        loading_messages: [status],
-                    },
-                    SlackResponse,
-                ).pipe(Effect.asVoid, Effect.withSpan('slack.api.set_thread_status')),
+                callSlackAction('set_thread_status', 'assistant.threads.setStatus', {
+                    channel_id: thread.channelId,
+                    thread_ts: thread.threadTs,
+                    status,
+                    loading_messages: [status],
+                }).pipe(Effect.withSpan('slack.api.set_thread_status')),
             /** The agent-session lifecycle has no "clear"; `active` ends the loading state. */
             clearThreadStatus: ({ thread }) =>
                 setSessionStatus('clear_thread_status', thread, 'active').pipe(
@@ -679,31 +676,24 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
                     Effect.withSpan('slack.api.post_plan'),
                 ),
             updatePlan: ({ message, plan }) =>
-                callSlack(
-                    'update_plan',
-                    'chat.update',
-                    {
-                        channel: message.channelId,
-                        ts: message.messageTs,
-                        text: planFallbackText(plan),
-                        blocks: planBlocks(plan),
-                    },
-                    SlackResponse,
-                ).pipe(Effect.asVoid, Effect.withSpan('slack.api.update_plan')),
+                callSlackAction('update_plan', 'chat.update', {
+                    channel: message.channelId,
+                    ts: message.messageTs,
+                    text: planFallbackText(plan),
+                    blocks: planBlocks(plan),
+                }).pipe(Effect.withSpan('slack.api.update_plan')),
             addReaction: ({ message, reaction }) =>
-                callSlack(
-                    'add_reaction',
-                    'reactions.add',
-                    { channel: message.channelId, timestamp: message.messageTs, name: reaction },
-                    SlackResponse,
-                ).pipe(Effect.asVoid),
+                callSlackAction('add_reaction', 'reactions.add', {
+                    channel: message.channelId,
+                    timestamp: message.messageTs,
+                    name: reaction,
+                }),
             removeReaction: ({ message, reaction }) =>
-                callSlack(
-                    'remove_reaction',
-                    'reactions.remove',
-                    { channel: message.channelId, timestamp: message.messageTs, name: reaction },
-                    SlackResponse,
-                ).pipe(Effect.asVoid),
+                callSlackAction('remove_reaction', 'reactions.remove', {
+                    channel: message.channelId,
+                    timestamp: message.messageTs,
+                    name: reaction,
+                }),
             resolveParticipant,
             getMessage,
             resolveReactionThread: ({ message }) =>
@@ -727,7 +717,7 @@ export class SlackApi extends Context.Service<SlackApi, SlackApiOperations>()('@
                     }),
                 ),
             getThreadInfo: ({ thread }) =>
-                listThreadMessagesPage(thread).pipe(
+                listThreadMessagesPage(thread, undefined).pipe(
                     Effect.map(([messages]) => {
                         const root = messages.find((message) => message.ref.messageTs === thread.threadTs);
 

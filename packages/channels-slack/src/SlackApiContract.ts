@@ -175,10 +175,13 @@ export const SlackApiOperation = Schema.Literals([
 
 export type SlackApiOperation = typeof SlackApiOperation.Type;
 
-export class SlackApiError extends Schema.TaggedError<SlackApiError>()('SlackApiError', {
-    operation: SlackApiOperation,
-    message: Schema.String,
-}) {}
+export class SlackApiError extends Schema.TaggedError<SlackApiError, { readonly brand: unique symbol }>()(
+    'SlackApiError',
+    {
+        operation: SlackApiOperation,
+        message: Schema.String,
+    },
+) {}
 
 /** Slack's answers when it refuses the bot token itself, not one request. */
 const rejectedTokenErrors: ReadonlySet<string> = new Set([
@@ -197,23 +200,23 @@ export const SlackFileScope = Schema.Literals(['files:read', 'files:write']);
 export type SlackFileScope = typeof SlackFileScope.Type;
 
 /** Slack refused a file operation because the bot token lacks the named scope. Reinstall the app after adding it. */
-export class SlackFileAuthorizationError extends Schema.TaggedError<SlackFileAuthorizationError>()(
-    'SlackFileAuthorizationError',
-    {
-        operation: SlackApiOperation,
-        requiredScope: SlackFileScope,
-        retryable: Schema.Boolean,
-    },
-) {}
+export class SlackFileAuthorizationError extends Schema.TaggedError<
+    SlackFileAuthorizationError,
+    { readonly brand: unique symbol }
+>()('SlackFileAuthorizationError', {
+    operation: SlackApiOperation,
+    requiredScope: SlackFileScope,
+    retryable: Schema.Boolean,
+}) {}
 
-export class SlackFileSizeLimitExceeded extends Schema.TaggedError<SlackFileSizeLimitExceeded>()(
-    'SlackFileSizeLimitExceeded',
-    {
-        maxBytes: Schema.Int,
-        observedBytes: Schema.Natural,
-        source: Schema.Literals(['declared_size', 'content_length', 'received_bytes']),
-    },
-) {}
+export class SlackFileSizeLimitExceeded extends Schema.TaggedError<
+    SlackFileSizeLimitExceeded,
+    { readonly brand: unique symbol }
+>()('SlackFileSizeLimitExceeded', {
+    maxBytes: Schema.Int,
+    observedBytes: Schema.Natural,
+    source: Schema.Literals(['declared_size', 'content_length', 'received_bytes']),
+}) {}
 
 export const SlackFileUploadError = Schema.Union([SlackApiError, SlackFileAuthorizationError]);
 

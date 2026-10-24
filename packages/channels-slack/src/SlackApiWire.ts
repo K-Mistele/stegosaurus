@@ -2,11 +2,18 @@
  * This file holds what `SlackApi` sends to and reads from Slack's Web API: response schemas, request bodies, and the
  * plain helpers that convert between them and the package's models. None of it needs a service.
  */
-import { Effect, Match, Option, Predicate, Schema } from 'effect';
+import { Array as Arr, Effect, Match, Option, Predicate, Schema, String as Str } from 'effect';
 
 import { isSlackTokenRejected, type SlackApiError } from './SlackApiContract';
 import { SlackMessageTs, SlackTeamId } from './SlackIdentity';
-import type { SlackChannelRef, SlackContent, SlackMessageRecords, SlackPlan, SlackUserId } from './SlackModels';
+import type {
+    SlackChannelRef,
+    SlackContent,
+    SlackMessageRecord,
+    SlackMessageRecords,
+    SlackPlan,
+    SlackUserId,
+} from './SlackModels';
 import type { SlackStreamChunk } from './SlackStreamChunk';
 import { SlackFileMetadata } from './SlackWebhookEventSchemas';
 
@@ -212,7 +219,7 @@ export const planBlocks = (plan: SlackPlan): ReadonlyArray<Schema.Json> => [
     {
         type: 'plan',
         title: plan.title,
-        tasks: plan.tasks.map((task) => {
+        tasks: Arr.map(plan.tasks, (task) => {
             const card: SlackTaskCardJson = {
                 type: 'task_card',
                 task_id: task.id,
@@ -231,7 +238,7 @@ export const planBlocks = (plan: SlackPlan): ReadonlyArray<Schema.Json> => [
 
 /** The text Slack shows where it cannot show blocks, such as a notification. */
 export const planFallbackText = (plan: SlackPlan) =>
-    [plan.title, ...plan.tasks.map((task) => `- (${task.status}) ${task.title}`)].join('\n');
+    Arr.join([plan.title, ...Arr.map(plan.tasks, (task) => `- (${task.status}) ${task.title}`)], '\n');
 
 /** Log a refused bot token as a configuration error that names the setting to check. */
 export const reportRejectedToken = <A>(effect: Effect.Effect<A, SlackApiError>) =>
@@ -257,4 +264,6 @@ export const nextCursor = (metadata: typeof SlackResponseMetadata.Type | undefin
 };
 
 export const chronological = (messages: SlackMessageRecords): SlackMessageRecords =>
-    Array.from(messages).sort((left, right) => left.ref.messageTs.localeCompare(right.ref.messageTs));
+    Arr.sort(messages, (left: SlackMessageRecord, right: SlackMessageRecord) =>
+        Str.localeCompare(right.ref.messageTs)(left.ref.messageTs),
+    );

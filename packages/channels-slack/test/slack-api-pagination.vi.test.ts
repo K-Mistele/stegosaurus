@@ -1,5 +1,16 @@
 import { describe, it } from '@effect/vitest';
-import { Array as Arr, ConfigProvider, Effect, Layer, Match, Predicate, Queue, Schema } from 'effect';
+import {
+    Array as Arr,
+    ConfigProvider,
+    Effect,
+    Layer,
+    Match,
+    Predicate,
+    Queue,
+    Record as Rec,
+    Schema,
+    String as Str,
+} from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 
 import { SlackApi } from '../src/SlackApi';
@@ -129,7 +140,7 @@ const makeHarness = Effect.fn('test.makeSlackApiHarness')(function* () {
     const calls = yield* Queue.unbounded<unknown>();
 
     const participants = new Map<string, SlackParticipant>(
-        [alice, bob, bot, me].map((participant) => [participant.userId, participant]),
+        Arr.map([alice, bob, bot, me], (participant) => [participant.userId, participant] as const),
     );
 
     const pageResponse = (request: HttpClientRequest.HttpClientRequest, page: SlackMessagePage) =>
@@ -137,7 +148,7 @@ const makeHarness = Effect.fn('test.makeSlackApiHarness')(function* () {
             request,
             Response.json({
                 ok: true,
-                messages: page.messages.map((item) => ({
+                messages: Arr.map(page.messages, (item) => ({
                     type: 'message',
                     user: item.author.userId,
                     text: Match.value(item.content).pipe(
@@ -161,13 +172,13 @@ const makeHarness = Effect.fn('test.makeSlackApiHarness')(function* () {
 
             const body = yield* (
                 webRequest.method === 'GET'
-                    ? Schema.decodeEffect(RequestBody)(Object.fromEntries(url.searchParams))
+                    ? Schema.decodeEffect(RequestBody)(Rec.fromEntries(url.searchParams))
                     : Schema.decodeEffect(Schema.fromJsonString(RequestBody))(
                           yield* Effect.promise(() => webRequest.text()),
                       )
             ).pipe(Effect.orDie);
 
-            const method = url.pathname.split('/').at(-1);
+            const method = Str.split(url.pathname, '/').at(-1);
 
             if (method === 'users.info') {
                 const participant = participants.get(body.user ?? '');

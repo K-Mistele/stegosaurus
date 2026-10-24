@@ -12,9 +12,12 @@ const spanAttributes = (channel: SlackChannelRef) => ({
     'slack.is_dm': channel.isDm,
 });
 
-export class SlackChannel extends Schema.TaggedClass<SlackChannel>()('SlackChannel', {
-    ref: SlackChannelRef,
-}) {
+export class SlackChannel extends Schema.TaggedClass<SlackChannel, { readonly brand: unique symbol }>()(
+    'SlackChannel',
+    {
+        ref: SlackChannelRef,
+    },
+) {
     post(content: SlackContent): Effect.Effect<SlackSentMessage, SlackApiError, SlackApi> {
         return Effect.flatMap(SlackApi, (api) => api.postToChannel({ channel: this.ref, content })).pipe(
             Effect.map(slackSentMessageFromRecord),

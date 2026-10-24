@@ -5,12 +5,12 @@ import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDeliver
 import { Effect, Layer, Predicate, Redacted, Schema } from 'effect';
 
 import { SlackApi } from '../src/SlackApi';
-import { makeSlackWebhookProvider } from '../src/SlackWebhookProvider';
+import { slackWebhookProvider } from '../src/SlackWebhookProvider';
 import { signedSlackInput } from './fixtures';
 
 const signingSecret = 'message-test-secret';
 
-const message = (channel: string, channelType: 'channel' | 'im' | 'mpim', threadTs?: string) => {
+const message = (channel: string, channelType: 'channel' | 'im' | 'mpim', threadTs: string | undefined) => {
     const event = {
         type: 'message',
         user: 'U_TEST',
@@ -29,7 +29,7 @@ const message = (channel: string, channelType: 'channel' | 'im' | 'mpim', thread
     };
 };
 
-const provider = makeSlackWebhookProvider({
+const provider = slackWebhookProvider({
     namespace: 'message-test',
     signingSecret: Redacted.make(signingSecret),
 });
@@ -62,21 +62,21 @@ const expectedEvent = (payload: ReturnType<typeof message>, resourceTs: string) 
 describe('Slack message admission', () => {
     it.effect('admits an ordinary channel message', ({ expect }) =>
         Effect.gen(function* () {
-            const payload = message('C_PUBLIC', 'channel');
+            const payload = message('C_PUBLIC', 'channel', undefined);
             expect(yield* handleMessage(payload)).toEqual(expectedEvent(payload, payload.event.ts));
         }),
     );
 
     it.effect('admits a direct message', ({ expect }) =>
         Effect.gen(function* () {
-            const payload = message('D_DIRECT', 'im');
+            const payload = message('D_DIRECT', 'im', undefined);
             expect(yield* handleMessage(payload)).toEqual(expectedEvent(payload, payload.event.ts));
         }),
     );
 
     it.effect('admits a multi-person direct message', ({ expect }) =>
         Effect.gen(function* () {
-            const payload = message('G_GROUP', 'mpim');
+            const payload = message('G_GROUP', 'mpim', undefined);
             expect(yield* handleMessage(payload)).toEqual(expectedEvent(payload, payload.event.ts));
         }),
     );
@@ -91,7 +91,7 @@ describe('Slack message admission', () => {
 
     it.effect('admits edited and deleted messages using their thread roots', ({ expect }) =>
         Effect.gen(function* () {
-            const ordinary = message('C_PUBLIC', 'channel');
+            const ordinary = message('C_PUBLIC', 'channel', undefined);
 
             const updated = {
                 ...ordinary,
@@ -131,7 +131,7 @@ describe('Slack message admission', () => {
 
     it.effect('ignores unsupported message subtypes', ({ expect }) =>
         Effect.gen(function* () {
-            const ordinary = message('C_PUBLIC', 'channel');
+            const ordinary = message('C_PUBLIC', 'channel', undefined);
             const payload = { ...ordinary, event: { ...ordinary.event, subtype: 'bot_message' } };
             expect(yield* handleMessage(payload)).toEqual(ProviderWebhookIgnored.make({}));
         }),

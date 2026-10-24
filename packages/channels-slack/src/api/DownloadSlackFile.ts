@@ -1,4 +1,4 @@
-import { Duration, Effect, Stream } from 'effect';
+import { Array as Arr, Duration, Effect, Predicate, Stream, String as Str } from 'effect';
 import type { HttpClientResponse } from 'effect/http/HttpClientResponse';
 
 import {
@@ -31,7 +31,7 @@ const missingFilesRead = () =>
 const isRedirect = (response: HttpClientResponse) => response.status >= 300 && response.status < 400;
 
 const isSlackSignInHost = (hostname: string) =>
-    ['slack.com', 'slack-gov.com'].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+    Arr.some(['slack.com', 'slack-gov.com'], (domain) => hostname === domain || Str.endsWith(`.${domain}`)(hostname));
 
 /**
  * Accepts redirects only within the approved Slack file origins. Slack answers an unauthorized file request by
@@ -51,7 +51,8 @@ const redirectTarget = (response: HttpClientResponse, current: string) => {
     return Effect.fail(downloadFailure('Slack file redirect target is not an approved Slack file origin'));
 };
 
-const isHtml = (value: string | null | undefined) => value?.toLowerCase().startsWith('text/html') === true;
+const isHtml = (value: string | null | undefined) =>
+    Predicate.isString(value) && Str.startsWith('text/html')(Str.toLowerCase(value));
 
 /**
  * Classifies a non-redirect file response. Slack serves its HTML sign-in page with status 200 when the token cannot

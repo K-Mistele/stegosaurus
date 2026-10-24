@@ -1,5 +1,17 @@
 import { NodeCrypto, NodeRuntime } from '@effect/platform-node';
-import { Array as Arr, Clock, Config, Crypto, Data, Effect, Layer, Option, Schema, Stream } from 'effect';
+import {
+    Array as Arr,
+    Clock,
+    Config,
+    Crypto,
+    Effect,
+    Layer,
+    ManagedRuntime,
+    Option,
+    Schema,
+    Stream,
+    String as Str,
+} from 'effect';
 import { Hex } from 'effect/encoding';
 
 import { SlackApi } from '../src/SlackApi';
@@ -17,9 +29,10 @@ import {
 import { MarkdownTextChunk, PlanUpdateChunk, TaskUpdateChunk } from '../src/SlackStreamChunk';
 import { SlackThread } from '../src/SlackThread';
 
-class SlackLiveSmokeError extends Data.TaggedError('SlackLiveSmokeError')<{
-    readonly message: string;
-}> {}
+class SlackLiveSmokeError extends Schema.TaggedError<SlackLiveSmokeError, { readonly brand: unique symbol }>()(
+    'SlackLiveSmokeError',
+    { message: Schema.String },
+) {}
 
 const SmokeConfig = Config.all({
     confirmation: Config.schema(Schema.Literal('confirmed'), 'SLACK_SMOKE_CONFIRM'),
@@ -37,7 +50,7 @@ const sha256 = Effect.fn('slack.api.live_smoke.sha256')(function* (bytes: Uint8A
 });
 
 const concatenate = (chunks: ReadonlyArray<Uint8Array>) => {
-    const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0));
+    const bytes = new Uint8Array(Arr.reduce(chunks, 0, (size, chunk) => size + chunk.byteLength));
     let offset = 0;
 
     for (const chunk of chunks) {
@@ -54,7 +67,7 @@ const downloadedSha256 = Effect.fn('slack.api.live_smoke.downloaded_sha256')(fun
     const streamedHash = yield* sha256(streamed);
 
     if ((yield* sha256(buffered)) !== streamedHash) {
-        return yield* new SlackLiveSmokeError({
+        return yield* SlackLiveSmokeError.make({
             message: `Stream and buffered bytes differ for ${file.ref.fileId}`,
         });
     }
@@ -70,7 +83,7 @@ const verifyUploadedFile = Effect.fn('slack.api.live_smoke.verify_uploaded_file'
     const downloaded = yield* downloadedSha256(file);
 
     if (downloaded.sha256 !== expected) {
-        return yield* new SlackLiveSmokeError({
+        return yield* SlackLiveSmokeError.make({
             message: `Downloaded bytes differ for ${file.ref.fileId}`,
         });
     }
@@ -121,18 +134,18 @@ const verifyKnownThreadFile = Effect.fn('slack.api.live_smoke.verify_known_threa
     expectedSha256: string,
 ) {
     const messages = yield* Effect.flatMap(SlackApi, (api) => api.listThreadMessages({ thread }));
-    const known = messages.flatMap((message) => message.files)[0];
+    const known = Arr.flatMap(messages, (message) => message.files)[0];
 
     if (known === undefined) {
-        return yield* new SlackLiveSmokeError({
+        return yield* SlackLiveSmokeError.make({
             message: 'The smoke-test thread does not contain a file',
         });
     }
 
     const downloaded = yield* downloadedSha256(SlackFile.make(known));
 
-    if (downloaded.sha256 !== expectedSha256.toLowerCase()) {
-        return yield* new SlackLiveSmokeError({
+    if (downloaded.sha256 !== Str.toLowerCase(expectedSha256)) {
+        return yield* SlackLiveSmokeError.make({
             message: `Known file ${known.ref.fileId} has a different SHA-256`,
         });
     }
@@ -170,7 +183,7 @@ const program = Effect.gen(function* () {
     const participants = yield* api.listParticipants({ thread });
 
     if (Arr.isReadonlyArrayEmpty(participants)) {
-        return yield* new SlackLiveSmokeError({
+        return yield* SlackLiveSmokeError.make({
             message: 'The smoke-test thread must contain at least one message written by a human Slack user.',
         });
     }
@@ -247,10 +260,12 @@ const program = Effect.gen(function* () {
             messages_after: messagesAfter.length,
         }),
     );
-}).pipe(
-    Effect.withSpan('slack.api.live_smoke'),
-    Effect.provide(Layer.merge(SlackApiLive, NodeCrypto.layer)),
-    Effect.timeout('90 seconds'),
-);
+}).pipe(Effect.withSpan('slack.api.live_smoke'), Effect.timeout('90 seconds'));
 
-NodeRuntime.runMain(program);
+const runtime = ManagedRuntime.make(Layer.merge(SlackApiLive, NodeCrypto.layer));
+
+NodeRuntime.runMain(
+    Effect.flatMap(runtime.contextEffect, (context) => Effect.provideContext(program, context)).pipe(
+        Effect.ensuring(runtime.disposeEffect),
+    ),
+);

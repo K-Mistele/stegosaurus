@@ -7,7 +7,7 @@ import { type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryCon
 import { DeliveryActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
 import * as Channels from '@stegosaurus/channels-delivery/Channels';
 import * as ChannelsMemory from '@stegosaurus/channels-delivery/ChannelsMemory';
-import { Clock, Config, Deferred, Effect, Layer, Queue, Redacted, Ref, Schedule } from 'effect';
+import { Array as Arr, Clock, Config, Deferred, Effect, Layer, Queue, Redacted, Ref, Schedule } from 'effect';
 import { FetchHttpClient, HttpRouter, HttpServerRequest } from 'effect/http';
 import { TestClock } from 'effect/testing';
 
@@ -17,6 +17,8 @@ import {
     SlackAppMentionEvent,
     SlackBot,
     SlackChannelId,
+    type SlackContent,
+    SlackMarkdownContent,
     SlackMessage,
     SlackMessageRef,
     SlackMessageTs,
@@ -260,10 +262,7 @@ describe('SlackBot.make remote delivery', () => {
 
                 for (const post of [first, second]) {
                     expect(post.thread.threadTs).toBe('1700000001.000001');
-                    expect(post.content).toEqual({
-                        _tag: 'SlackMarkdownContent',
-                        markdown: 'The fix is ready.',
-                    });
+                    expect(post.content).toEqual(SlackMarkdownContent.make({ markdown: 'The fix is ready.' }));
                 }
 
                 const retired = yield* awaitRetired;
@@ -282,7 +281,7 @@ describe('SlackBot.make remote delivery', () => {
 
     it.live('posts, edits, and removes a progress message in the thread, then posts the result', ({ expect }) =>
         Effect.gen(function* () {
-            const calls = yield* Queue.unbounded<string>();
+            const calls = yield* Queue.unbounded<ReadonlyArray<string | SlackContent>>();
             const posted = yield* Ref.make(0);
 
             const { client, target, awaitRetired } = yield* handOffMention(
@@ -291,16 +290,14 @@ describe('SlackBot.make remote delivery', () => {
                     postToThread: (request) =>
                         Effect.gen(function* () {
                             const count = yield* Ref.updateAndGet(posted, (n) => n + 1);
-                            yield* Queue.offer(calls, `post ${JSON.stringify(request.content)}`);
+                            yield* Queue.offer(calls, ['post', request.content]);
 
                             return postedMessage(request, `1700000009.00000${count}`);
                         }),
                     updateMessage: ({ message, content }) =>
-                        Queue.offer(calls, `update ${message.messageTs} ${JSON.stringify(content)}`).pipe(
-                            Effect.asVoid,
-                        ),
+                        Queue.offer(calls, ['update', message.messageTs, content]).pipe(Effect.as(undefined)),
                     deleteMessage: ({ message }) =>
-                        Queue.offer(calls, `delete ${message.messageTs}`).pipe(Effect.asVoid),
+                        Queue.offer(calls, ['delete', message.messageTs]).pipe(Effect.as(undefined)),
                 }),
             );
 
@@ -317,7 +314,7 @@ describe('SlackBot.make remote delivery', () => {
             yield* client.messages.delete({ ...target, messageId });
             yield* client.complete({ ...target, payload: { markdown: 'Done.' } });
             const retired = yield* awaitRetired;
-            expect(retired.output.map(({ kind, state }) => `${kind}:${state}`)).toEqual([
+            expect(Arr.map(retired.output, ({ kind, state }) => `${kind}:${state}`)).toEqual([
                 'CreateMessage:Delivered',
                 'UpdateMessage:Delivered',
                 'DeleteMessage:Delivered',
@@ -325,10 +322,10 @@ describe('SlackBot.make remote delivery', () => {
             ]);
             const seen = yield* Queue.takeAll(calls);
             expect(Array.from(seen)).toEqual([
-                'post {"_tag":"SlackMarkdownContent","markdown":"Running tests…"}',
-                'update 1700000009.000001 {"_tag":"SlackMarkdownContent","markdown":"Tests passed."}',
-                'delete 1700000009.000001',
-                'post {"_tag":"SlackMarkdownContent","markdown":"Done."}',
+                ['post', SlackMarkdownContent.make({ markdown: 'Running tests…' })],
+                ['update', '1700000009.000001', SlackMarkdownContent.make({ markdown: 'Tests passed.' })],
+                ['delete', '1700000009.000001'],
+                ['post', SlackMarkdownContent.make({ markdown: 'Done.' })],
             ]);
         }),
     );
@@ -340,8 +337,8 @@ describe('SlackBot.make remote delivery', () => {
             const { client, target, awaitRetired } = yield* handOffMention(
                 Layer.mock(SlackApi, {
                     resolveParticipant: () => Effect.succeed(participant),
-                    setThreadStatus: ({ status }) => Queue.offer(calls, `status ${status}`).pipe(Effect.asVoid),
-                    clearThreadStatus: () => Queue.offer(calls, 'clear').pipe(Effect.asVoid),
+                    setThreadStatus: ({ status }) => Queue.offer(calls, `status ${status}`).pipe(Effect.as(undefined)),
+                    clearThreadStatus: () => Queue.offer(calls, 'clear').pipe(Effect.as(undefined)),
                 }),
             );
 
@@ -353,7 +350,7 @@ describe('SlackBot.make remote delivery', () => {
             yield* client.complete(target);
             const retired = yield* awaitRetired;
             expect(retired.activity).toBeUndefined();
-            expect(retired.output.map(({ kind, state }) => `${kind}:${state}`)).toEqual([
+            expect(Arr.map(retired.output, ({ kind, state }) => `${kind}:${state}`)).toEqual([
                 'SetActivity:Delivered',
                 'PresentOutcome:Delivered',
             ]);

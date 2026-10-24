@@ -19,7 +19,7 @@ import {
     PreparedDeliveryInvocation,
     ProviderDeliveryExecution,
 } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Cause, Effect, Exit, Layer, Option, Redacted, Ref, Schema } from 'effect';
+import { Array as Arr, Cause, Effect, Exit, Layer, Option, Redacted, Ref, Schema } from 'effect';
 import { vi } from 'vite-plus/test';
 
 import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution';
@@ -35,11 +35,24 @@ import {
     type SlackSubscribedThreadEvents,
 } from '../src/SlackCallbackEvents';
 import { type SlackCallbackHandler, type SlackCallbackHandlers } from '../src/SlackCallbacks';
-import { makeSlackEventProcessor } from '../src/SlackEventProcessor';
+import { slackEventProcessor } from '../src/SlackEventProcessor';
 import { slackFileFromMetadata } from '../src/SlackFile';
 import { SlackChannelId, SlackMessageTs, SlackTeamId, slackThreadResourceId } from '../src/SlackIdentity';
-import { SlackMarkdownContent, SlackMessageRecord, SlackParticipant, SlackUserId } from '../src/SlackModels';
-import { makeSlackWebhookProvider } from '../src/SlackWebhookProvider';
+import {
+    SlackActivationTarget,
+    SlackActivationTargetJson,
+    SlackDeliveryDestination,
+    SlackDeliveryDestinationJson,
+} from '../src/SlackDeliveryDestination';
+import {
+    SlackMarkdownContent,
+    SlackMessageRecord,
+    SlackMessageRef,
+    SlackParticipant,
+    SlackThreadRef,
+    SlackUserId,
+} from '../src/SlackModels';
+import { slackWebhookProvider } from '../src/SlackWebhookProvider';
 import {
     SlackAgentSessionStoppedEnvelope,
     SlackAppMentionEnvelope,
@@ -57,6 +70,21 @@ const teamId = SlackTeamId.make('T_TEST');
 const channelId = SlackChannelId.make('C_TEST');
 
 const rootTs = SlackMessageTs.make('1700000000.000001');
+
+/** A copy of `execution` with `changes` applied. */
+const reviseExecution = (
+    execution: ProviderDeliveryExecution,
+    changes: Partial<ConstructorParameters<typeof ProviderDeliveryExecution>[0]>,
+) =>
+    new ProviderDeliveryExecution({
+        deliveryId: execution.deliveryId,
+        callbackIndex: execution.callbackIndex,
+        idempotencyKey: execution.idempotencyKey,
+        prepared: execution.prepared,
+        prepare: execution.prepare,
+        context: execution.context,
+        ...changes,
+    });
 
 const resourceId = slackThreadResourceId({ teamId, channelId, threadTs: rootTs });
 
@@ -161,7 +189,7 @@ const subscribedRuntimeLayer = Layer.merge(
 
 const process = <E, R>(handlers: SlackCallbackHandlers<E, R>, batch: DeliveryAdmissionBatch, layer = runtimeLayer) =>
     Effect.flatMap(makeTestDeliveryExecution(), ({ execution }) =>
-        processProviderEvent([makeSlackEventProcessor({ namespace: 'mention-test', handlers })])(batch, execution),
+        processProviderEvent([slackEventProcessor({ namespace: 'mention-test', handlers })])(batch, execution),
     ).pipe(Effect.provide(layer));
 
 describe('Slack event batch processing', () => {
@@ -189,11 +217,11 @@ describe('Slack event batch processing', () => {
             );
             const event = Option.getOrThrow(yield* Ref.get(received));
             expect(event.trigger.authorTeamId).toBe('T_OTHER');
-            expect(event.events.map((threadEvent) => threadEvent._tag)).toEqual([
+            expect(Arr.map(event.events, (threadEvent) => threadEvent._tag)).toEqual([
                 'SlackMessageReceived',
                 'SlackMessageReceived',
             ]);
-            const [plain, connect] = event.events.filter(Schema.is(SlackMessageReceived));
+            const [plain, connect] = Arr.filter(event.events, Schema.is(SlackMessageReceived));
             expect(plain?.message).not.toHaveProperty('authorTeamId');
             expect(connect?.message.authorTeamId).toBe('T_TEST');
         }),
@@ -209,7 +237,7 @@ describe('Slack event batch processing', () => {
                 admission('Ev_REACTION', reaction()),
             ]);
 
-            const processor = makeSlackEventProcessor({
+            const processor = slackEventProcessor({
                 namespace: 'mention-test',
                 handlers: { onNewMention },
             });
@@ -221,7 +249,7 @@ describe('Slack event batch processing', () => {
 
             if (mailboxKey === undefined) return yield* Effect.die(new Error('Expected one in-memory mailbox'));
 
-            expect(yield* mailbox.processBatch(mailboxKey).pipe(Effect.provide(runtimeLayer))).toEqual(
+            expect(yield* mailbox.processBatch(mailboxKey, undefined).pipe(Effect.provide(runtimeLayer))).toEqual(
                 ProviderEventHandled.make({}),
             );
             expect(onNewMention).toHaveBeenCalledOnce();
@@ -416,7 +444,10 @@ describe('Slack event batch processing', () => {
             }
 
             expect(onNewMention).toHaveBeenCalledTimes(2);
-            expect(onNewMention.mock.calls.map(([event]) => event.thread.ref.threadTs)).toEqual([firstTs, secondTs]);
+            expect(Arr.map(onNewMention.mock.calls, ([event]) => event.thread.ref.threadTs)).toEqual([
+                firstTs,
+                secondTs,
+            ]);
         }),
     );
 
@@ -560,7 +591,7 @@ describe('Slack event batch processing', () => {
                 },
             };
 
-            const provider = makeSlackWebhookProvider({
+            const provider = slackWebhookProvider({
                 namespace: 'mention-test',
                 signingSecret: Redacted.make('file-share-secret'),
             });
@@ -593,7 +624,7 @@ describe('Slack event batch processing', () => {
 });
 
 const processorFor = <E, R>(handlers: SlackCallbackHandlers<E, R>) =>
-    makeSlackEventProcessor({ namespace: 'mention-test', handlers });
+    slackEventProcessor({ namespace: 'mention-test', handlers });
 
 const mentionBatch = () => DeliveryAdmissionBatch.make([admission('Ev_MENTION', mention())]);
 
@@ -632,15 +663,11 @@ describe('Slack delivery preparation', () => {
                 const multiple = PreparedDeliveryInvocation.make({ callbacks: [spec, spec] });
 
                 const executions = [
-                    ...[-1, 1, 0.5, NaN].flatMap((callbackIndex) => [
-                        new ProviderDeliveryExecution({ ...test.execution, callbackIndex }),
-                        new ProviderDeliveryExecution({
-                            ...test.execution,
-                            callbackIndex,
-                            prepared: Option.some(singleton),
-                        }),
+                    ...Arr.flatMap([-1, 1, 0.5, NaN], (callbackIndex) => [
+                        reviseExecution(test.execution, { callbackIndex }),
+                        reviseExecution(test.execution, { callbackIndex, prepared: Option.some(singleton) }),
                     ]),
-                    new ProviderDeliveryExecution({ ...test.execution, prepared: Option.some(multiple) }),
+                    reviseExecution(test.execution, { prepared: Option.some(multiple) }),
                 ];
 
                 for (const execution of executions) {
@@ -686,14 +713,16 @@ describe('Slack delivery preparation', () => {
                         {
                             name: 'onNewMention',
                             presentationVersion: 1,
-                            destination: {
-                                _tag: 'SlackThread',
-                                thread: { teamId, channelId, threadTs: rootTs, isDm: false },
-                            },
-                            activationTarget: {
-                                _tag: 'SlackMessage',
-                                message: { teamId, channelId, messageTs: rootTs },
-                            },
+                            destination: yield* Schema.encodeEffect(SlackDeliveryDestinationJson)(
+                                SlackDeliveryDestination.make({
+                                    thread: SlackThreadRef.make({ teamId, channelId, threadTs: rootTs, isDm: false }),
+                                }),
+                            ),
+                            activationTarget: yield* Schema.encodeEffect(SlackActivationTargetJson)(
+                                SlackActivationTarget.make({
+                                    message: SlackMessageRef.make({ teamId, channelId, messageTs: rootTs }),
+                                }),
+                            ),
                             supportedOperations: threadSupportedOperations,
                             reactionTargets: ['ActivationTarget', 'MessageTarget'],
                         },
@@ -715,10 +744,11 @@ describe('Slack delivery preparation', () => {
                         {
                             name: 'onSubscribedThreadEvents',
                             presentationVersion: 1,
-                            destination: {
-                                _tag: 'SlackThread',
-                                thread: { teamId, channelId, threadTs: rootTs, isDm: false },
-                            },
+                            destination: yield* Schema.encodeEffect(SlackDeliveryDestinationJson)(
+                                SlackDeliveryDestination.make({
+                                    thread: SlackThreadRef.make({ teamId, channelId, threadTs: rootTs, isDm: false }),
+                                }),
+                            ),
                             supportedOperations: threadSupportedOperations,
                             reactionTargets: ['MessageTarget'],
                         },
@@ -813,7 +843,7 @@ describe('Slack delivery preparation', () => {
             const test = yield* makeTestDeliveryExecution();
 
             const withPrepare = (prepare: ProviderDeliveryExecution['prepare']) =>
-                new ProviderDeliveryExecution({ ...test.execution, prepare });
+                reviseExecution(test.execution, { prepare });
 
             const conflict = yield* processor
                 .process(
@@ -858,8 +888,7 @@ describe('Slack delivery preparation', () => {
             const test = yield* makeTestDeliveryExecution();
 
             const withPrepared = (callback: string) =>
-                new ProviderDeliveryExecution({
-                    ...test.execution,
+                reviseExecution(test.execution, {
                     prepared: Option.some(
                         PreparedDeliveryInvocation.make({
                             callbacks: [
@@ -895,8 +924,7 @@ describe('Slack delivery preparation', () => {
         Effect.gen(function* () {
             const test = yield* makeTestDeliveryExecution();
 
-            const execution = new ProviderDeliveryExecution({
-                ...test.execution,
+            const execution = reviseExecution(test.execution, {
                 prepared: Option.some(
                     PreparedDeliveryInvocation.make({
                         callbacks: [

@@ -1,5 +1,5 @@
 import type { DeliveryCallbackResult, DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Cause, Effect, Option, Predicate, Schema } from 'effect';
+import { Array as Arr, Cause, Effect, Option, Predicate, Schema } from 'effect';
 
 import type { SlackNewMention, SlackSubscribedThreadEvents } from './SlackCallbackEvents';
 
@@ -15,11 +15,14 @@ export interface SlackCallbackRetryability extends Schema.Schema.Type<typeof Sla
 
 const SlackCallbackRetryableFlag = Schema.Struct({ retryable: Schema.Boolean });
 
-export class SlackCallbackError extends Schema.TaggedError<SlackCallbackError>()('SlackCallbackError', {
-    callback: SlackCallbackName,
-    retryable: Schema.Boolean,
-    reason: Schema.Literals(['failed', 'unexpected']),
-}) {}
+export class SlackCallbackError extends Schema.TaggedError<SlackCallbackError, { readonly brand: unique symbol }>()(
+    'SlackCallbackError',
+    {
+        callback: SlackCallbackName,
+        retryable: Schema.Boolean,
+        reason: Schema.Literals(['failed', 'unexpected']),
+    },
+) {}
 
 /**
  * One application callback. `delivery` names the delivery and can hand it to a remote worker; a callback
@@ -52,7 +55,8 @@ const narrowSlackCallbackCause = (input: {
     readonly cause: Cause.Cause<unknown>;
 }) => {
     if (Cause.hasInterrupts(input.cause)) {
-        const preservedReasons = input.cause.reasons.filter(
+        const preservedReasons = Arr.filter(
+            input.cause.reasons,
             (reason) => Cause.isInterruptReason(reason) || Cause.isDieReason(reason),
         );
 
@@ -98,7 +102,7 @@ const wrapCallback = <A, E, R>(callback: SlackCallbackName, handler: SlackCallba
 /** The application's callbacks after wrapping: each failure is narrowed to a `SlackCallbackError`. */
 export type SlackCallbackOperations<R = never> = SlackCallbackHandlers<SlackCallbackError, R>;
 
-export const makeSlackCallbacks = <E, R>(handlers: SlackCallbackHandlers<E, R>): SlackCallbackOperations<R> => ({
+export const wrapSlackCallbacks = <E, R>(handlers: SlackCallbackHandlers<E, R>): SlackCallbackOperations<R> => ({
     onNewMention: wrapCallback('onNewMention', handlers.onNewMention),
     onSubscribedThreadEvents: wrapCallback('onSubscribedThreadEvents', handlers.onSubscribedThreadEvents),
 });

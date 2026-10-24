@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Effect, Match, Queue, Schema } from 'effect';
+import { Array as Arr, Effect, Match, Queue, Record as Rec, Schema } from 'effect';
 
 import { SlackApi, SlackApiError, SlackFileAuthorizationError, type SlackFileUploadError } from '../src/SlackApi';
 import { SlackFileId, SlackFileRecord, SlackFileRef, type SlackUploadFileInput } from '../src/SlackModels';
@@ -91,7 +91,7 @@ const completionParams = (request: RecordedSlackRequest | undefined) =>
     });
 
 const steps = (requests: ReadonlyArray<RecordedSlackRequest>) =>
-    requests.map((request) => slackMethod(request) ?? `${request.method} ${new URL(request.url).pathname}`);
+    Arr.map(requests, (request) => slackMethod(request) ?? `${request.method} ${new URL(request.url).pathname}`);
 
 describe('Slack file upload', () => {
     it.effect('uploads to a thread through the external upload sequence', ({ expect }) =>
@@ -126,7 +126,7 @@ describe('Slack file upload', () => {
                     downloadUrl: privateDownloadUrl,
                 }),
             );
-            expect(Object.values(file)).not.toContain(uploadUrl);
+            expect(Rec.values(file)).not.toContain(uploadUrl);
         }),
     );
 
@@ -142,7 +142,7 @@ describe('Slack file upload', () => {
                 files: [{ id: fileId }],
                 channel_id: channelRef.channelId,
             });
-            expect(requests.some((request) => slackMethod(request) === 'files.upload')).toBe(false);
+            expect(Arr.some(requests, (request) => slackMethod(request) === 'files.upload')).toBe(false);
         }),
     );
 

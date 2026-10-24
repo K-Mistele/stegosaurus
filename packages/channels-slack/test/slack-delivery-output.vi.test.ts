@@ -20,7 +20,7 @@ import {
 } from '@stegosaurus/channels-delivery/DeliveryMessage';
 import { PreparedDeliveryCallback } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { DeliveryActivity, SetActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
-import { Effect, Layer, Ref, Result, Schema } from 'effect';
+import { Array as Arr, Effect, Layer, Ref, Result, Schema } from 'effect';
 
 import { commentOutputScenarios } from '../../channels-delivery/test/comment-output-scenarios';
 import {
@@ -40,7 +40,7 @@ import {
     SlackTeamId,
     SlackThreadRef,
     SlackUserId,
-    makeSlackOutputProcessor,
+    slackOutputProcessor,
     slackPresentationVersion,
     slackThreadSupportedOperations,
     SlackActivationTarget,
@@ -67,16 +67,22 @@ const postedRef = SlackMessageRef.make({
     messageTs: SlackMessageTs.make('1700000009.000009'),
 });
 
-const prepared = (overrides: Partial<PreparedDeliveryCallback> = {}) =>
-    PreparedDeliveryCallback.make({
-        name: 'onNewMention',
-        presentationVersion: slackPresentationVersion,
-        destination: Schema.encodeSync(SlackDeliveryDestinationJson)(SlackDeliveryDestination.make({ thread })),
-        supportedOperations: slackThreadSupportedOperations,
-        ...overrides,
-    });
+const encodedDestination = Schema.encodeEffect(SlackDeliveryDestinationJson)(
+    SlackDeliveryDestination.make({ thread }),
+).pipe(Effect.orDie);
 
-const attempt = (operation: ProviderOutputOperation, invocation = prepared()) =>
+const prepared = (overrides: Partial<PreparedDeliveryCallback> = {}) =>
+    Effect.map(encodedDestination, (destination) =>
+        PreparedDeliveryCallback.make({
+            name: 'onNewMention',
+            presentationVersion: slackPresentationVersion,
+            destination,
+            supportedOperations: slackThreadSupportedOperations,
+            ...overrides,
+        }),
+    );
+
+const attempt = (operation: ProviderOutputOperation, invocation: PreparedDeliveryCallback) =>
     ProviderOutputAttempt.make({
         deliveryId: formatDeliveryId({
             mailboxKey: 'slack:v1:mailbox',
@@ -103,7 +109,7 @@ type SlackCalls = {
 };
 
 /** A `SlackApi` that records every post, edit, and deletion; posts answer with `postedRef`. Each fails with `failWith`. */
-const recordingSlackApi = (calls: Ref.Ref<SlackCalls>, failWith?: string) =>
+const recordingSlackApi = (calls: Ref.Ref<SlackCalls>, failWith: string | undefined) =>
     Layer.mock(SlackApi, {
         setThreadStatus: (request) =>
             Effect.gen(function* () {
@@ -186,7 +192,10 @@ const recordingSlackApi = (calls: Ref.Ref<SlackCalls>, failWith?: string) =>
 
 const run = (
     operation: ProviderOutputOperation,
-    options: { readonly failWith?: string; readonly invocation?: PreparedDeliveryCallback } = {},
+    options: {
+        readonly failWith?: string;
+        readonly invocation?: Effect.Effect<PreparedDeliveryCallback>;
+    } = {},
 ) =>
     Effect.gen(function* () {
         const calls = yield* Ref.make<SlackCalls>({
@@ -198,10 +207,12 @@ const run = (
             reactions: [],
         });
 
-        const processor = yield* makeSlackOutputProcessor({ namespace: 'slack-output-test' });
+        const processor = yield* slackOutputProcessor({ namespace: 'slack-output-test' });
+
+        const invocation = yield* options.invocation ?? prepared();
 
         const result = yield* processor
-            .process(attempt(operation, options.invocation))
+            .process(attempt(operation, invocation))
             .pipe(Effect.provide(recordingSlackApi(calls, options.failWith)), Effect.result);
 
         return { result, ...(yield* Ref.get(calls)) };
@@ -228,13 +239,15 @@ commentOutputScenarios({
             Effect.map(({ result, posts, updates, deletes }) => ({
                 result,
                 shown: [
-                    ...posts.map(
+                    ...Arr.map(
+                        posts,
                         ({ content }) => `post: ${Schema.is(SlackMarkdownContent)(content) ? content.markdown : '?'}`,
                     ),
-                    ...updates.map(
+                    ...Arr.map(
+                        updates,
                         ({ content }) => `edit: ${Schema.is(SlackMarkdownContent)(content) ? content.markdown : '?'}`,
                     ),
-                    ...deletes.map(() => 'delete'),
+                    ...Arr.map(deletes, () => 'delete'),
                 ],
             })),
         ),
@@ -243,7 +256,9 @@ commentOutputScenarios({
 const messageId = MessageId.make('progress');
 
 /** The reference a later update or deletion receives: the receipt of the message's create. */
-const postedReference = Schema.encodeSync(SlackOutputReceiptJson)(SlackOutputReceipt.make({ message: postedRef }));
+const encodePostedReference = Schema.encodeEffect(SlackOutputReceiptJson)(
+    SlackOutputReceipt.make({ message: postedRef }),
+).pipe(Effect.orDie);
 
 const completed = DeliveryOutcome.cases.Completed.make({});
 
@@ -261,7 +276,7 @@ describe('Slack delivery output', () => {
                 );
 
                 expect(posts).toEqual([
-                    { thread, content: { _tag: 'SlackMarkdownContent', markdown: 'The fix is ready.' } },
+                    { thread, content: SlackMarkdownContent.make({ markdown: 'The fix is ready.' }) },
                 ]);
 
                 if (!Result.isSuccess(result)) return expect.unreachable();
@@ -327,9 +342,11 @@ describe('Slack delivery output', () => {
 
     it.effect('posts a message and keeps the posted message as the reference for later changes', ({ expect }) =>
         Effect.gen(function* () {
+            const postedReference = yield* encodePostedReference;
+
             const { result, posts } = yield* run(CreateMessage.make({ messageId, markdown: 'Running tests…' }));
 
-            expect(posts).toEqual([{ thread, content: { _tag: 'SlackMarkdownContent', markdown: 'Running tests…' } }]);
+            expect(posts).toEqual([{ thread, content: SlackMarkdownContent.make({ markdown: 'Running tests…' }) }]);
 
             if (!Result.isSuccess(result)) return expect.unreachable();
             expect(result.success.receipt).toEqual(postedReference);
@@ -338,6 +355,8 @@ describe('Slack delivery output', () => {
 
     it.effect('edits and removes the message its reference names', ({ expect }) =>
         Effect.gen(function* () {
+            const postedReference = yield* encodePostedReference;
+
             const updated = yield* run(
                 ProviderUpdateMessage.make({
                     messageId,
@@ -349,7 +368,7 @@ describe('Slack delivery output', () => {
             expect(updated.updates).toEqual([
                 {
                     message: postedRef,
-                    content: { _tag: 'SlackMarkdownContent', markdown: 'Tests passed.' },
+                    content: SlackMarkdownContent.make({ markdown: 'Tests passed.' }),
                 },
             ]);
             expect(Result.isSuccess(updated.result)).toBe(true);
@@ -364,6 +383,8 @@ describe('Slack delivery output', () => {
 
     it.effect('counts a message already gone as deleted, but not as edited', ({ expect }) =>
         Effect.gen(function* () {
+            const postedReference = yield* encodePostedReference;
+
             const deleted = yield* run(ProviderDeleteMessage.make({ messageId, reference: postedReference }), {
                 failWith: 'message_not_found',
             });
@@ -385,6 +406,8 @@ describe('Slack delivery output', () => {
 
     it.effect('retries an edit Slack may get over, and refuses a reference it cannot read', ({ expect }) =>
         Effect.gen(function* () {
+            const postedReference = yield* encodePostedReference;
+
             const unreachable = yield* run(
                 ProviderUpdateMessage.make({ messageId, markdown: 'x', reference: postedReference }),
                 { failWith: 'Could not reach Slack' },
@@ -475,11 +498,12 @@ describe('Slack delivery output', () => {
             messageTs: SlackMessageTs.make('1700000005.000005'),
         });
 
-        const withTrigger = prepared({
-            activationTarget: Schema.encodeSync(SlackActivationTargetJson)(
-                SlackActivationTarget.make({ message: triggerRef }),
-            ),
-        });
+        const withTrigger = Schema.encodeEffect(SlackActivationTargetJson)(
+            SlackActivationTarget.make({ message: triggerRef }),
+        ).pipe(
+            Effect.orDie,
+            Effect.flatMap((activationTarget) => prepared({ activationTarget })),
+        );
 
         const onActivation = ProviderReactionTarget.cases.ActivationTarget.make({});
 
@@ -510,6 +534,8 @@ describe('Slack delivery output', () => {
 
         it.effect('reacts on a message the delivery posted, through its receipt', ({ expect }) =>
             Effect.gen(function* () {
+                const postedReference = yield* encodePostedReference;
+
                 const { result, reactions } = yield* run(
                     react(
                         ProviderReactionTarget.cases.MessageTarget.make({
@@ -543,7 +569,7 @@ describe('Slack delivery output', () => {
                     failWith: 'message_not_found',
                 });
 
-                expect([again, gone, messageGone].map(({ result }) => Result.isSuccess(result))).toEqual([
+                expect(Arr.map([again, gone, messageGone], ({ result }) => Result.isSuccess(result))).toEqual([
                     true,
                     true,
                     true,

@@ -17,15 +17,21 @@ export const slackFileOrigins: ReadonlySet<string> = new Set([
 export const isSlackFileUrl = (value: string) => URL.canParse(value) && slackFileOrigins.has(new URL(value).origin);
 
 /** Slack rejected a Web API call with `missing_scope`. Callers narrow it to an operation-specific scope error. */
-export class SlackMissingScopeError extends Schema.TaggedError<SlackMissingScopeError>()('SlackMissingScopeError', {
+export class SlackMissingScopeError extends Schema.TaggedError<
+    SlackMissingScopeError,
+    { readonly brand: unique symbol }
+>()('SlackMissingScopeError', {
     operation: SlackApiOperation,
     needed: Schema.NullOr(Schema.String),
 }) {}
 
-class SlackRateLimitedError extends Schema.TaggedError<SlackRateLimitedError>()('SlackRateLimitedError', {
-    operation: SlackApiOperation,
-    retryAfterMs: Schema.optionalKey(Schema.Finite),
-}) {}
+class SlackRateLimitedError extends Schema.TaggedError<SlackRateLimitedError, { readonly brand: unique symbol }>()(
+    'SlackRateLimitedError',
+    {
+        operation: SlackApiOperation,
+        retryAfterMs: Schema.optionalKey(Schema.Finite),
+    },
+) {}
 
 const SlackResponseStatus = Schema.Struct({
     ok: Schema.Boolean,
@@ -89,7 +95,7 @@ const rejected = (operation: SlackApiOperation, status: typeof SlackResponseStat
 
 /** One bot-token-authenticated transport for Slack Web API methods and private file downloads. */
 export class SlackHttpClient extends Context.Service<SlackHttpClient, SlackHttpClientOperations>()(
-    '@stegosaurus/channels-slack/SlackHttpClient',
+    '@stegosaurus/channels-slack/api/SlackHttpClient',
     {
         /** Reads `SLACK_BOT_TOKEN` and the optional `SLACK_API_ORIGIN`. Construction performs no I/O. */
         make: Effect.gen(function* () {

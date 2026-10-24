@@ -70,7 +70,7 @@ const slackWebhookHandler =
         });
 
 /** Verifies Slack Events API requests from their exact bytes and admits supported events to thread mailboxes. */
-export const makeSlackWebhookProvider = (
+export const slackWebhookProvider = (
     options: SlackWebhookProviderOptions,
 ): WebhookProvider<Crypto.Crypto | SlackApi> => ({
     providerName: 'slack',

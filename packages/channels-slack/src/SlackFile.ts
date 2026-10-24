@@ -8,7 +8,10 @@ import { type SlackDownloadBytesOptions, SlackFileRecord, slackFileRecordFromMet
 import type { SlackFileMetadata } from './SlackWebhookEventSchemas';
 
 /** A Slack file you can download. `SlackApi` returns its fields as a `SlackFileRecord`. */
-export class SlackFile extends Schema.TaggedClass<SlackFile>()('SlackFile', SlackFileRecord.fields) {
+export class SlackFile extends Schema.TaggedClass<SlackFile, { readonly brand: unique symbol }>()(
+    'SlackFile',
+    SlackFileRecord.fields,
+) {
     /** Streams the file with the bot token. The stream is not buffered. */
     download(): Effect.Effect<Stream.Stream<Uint8Array, SlackApiError>, SlackFileDownloadError, SlackApi> {
         return Effect.flatMap(SlackApi, (api) =>

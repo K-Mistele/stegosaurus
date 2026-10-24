@@ -6,7 +6,7 @@
  * so the message stays where it is and any change, such as a removed task, is shown as it is.
  */
 import type { DeliveryPlan, DeliveryPlanItem } from '@stegosaurus/channels-delivery/DeliveryPlan';
-import { Match, Predicate, Schema } from 'effect';
+import { Array as Arr, Match, Predicate, Schema } from 'effect';
 
 import { SlackMessageRef, SlackPlan, SlackPlanTask } from './SlackModels';
 
@@ -55,5 +55,5 @@ export const slackPlanTask = (item: DeliveryPlanItem) => {
 export const slackPlan = (plan: DeliveryPlan) =>
     SlackPlan.make({
         title: plan.title ?? slackDefaultPlanTitle,
-        tasks: plan.items.map(slackPlanTask),
+        tasks: Arr.map(plan.items, (item) => slackPlanTask(item)),
     });
