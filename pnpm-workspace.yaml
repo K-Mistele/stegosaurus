@@ -6,7 +6,9 @@ packages:
 catalogMode: prefer
 
 catalog:
-    '@alchemy.run/pkg': 2.0.0-beta.83
+    '@alchemy.run/cloudflare': 2.0.0-beta.84
+    '@alchemy.run/infisical': 2.0.0-beta.84
+    '@alchemy.run/pkg': 2.0.0-beta.84
     '@durable-streams/cli': 0.2.7
     '@durable-streams/server-conformance-tests': 0.3.7
     '@effect/platform-bun': 4.0.6
@@ -33,7 +35,7 @@ catalog:
     '@types/node': ^24
     '@types/react': 19.2.2
     '@types/turndown': 5.0.6
-    alchemy: 2.0.0-beta.83
+    alchemy: 2.0.0-beta.84
     effect: 4.0.6
     emulate: 0.11.2
     eslint-plugin-better-tailwindcss: 4.10.0
@@ -91,5 +93,21 @@ minimumReleaseAgeExclude:
     - '@opentui/keymap@0.6.8'
     - '@opentui/react@0.6.8'
     - '@opentui/solid@0.6.8'
+    - '@alchemy.run/acme@2.0.0-beta.84'
+    - '@alchemy.run/cloudflare-runtime@2.0.0-beta.84'
+    - '@alchemy.run/cloudflare@2.0.0-beta.84'
+    - '@alchemy.run/docker@2.0.0-beta.84'
+    - '@alchemy.run/infisical@2.0.0-beta.84'
+    - '@alchemy.run/node-utils@2.0.0-beta.84'
+    - '@alchemy.run/pkg@2.0.0-beta.84'
+    - '@alchemy.run/sql@2.0.0-beta.84'
+    - '@distilled.cloud/acme@1.0.0-rc.17'
+    - '@distilled.cloud/aws4signer@1.0.0-rc.17'
+    - '@distilled.cloud/cloudflare@1.0.0-rc.17'
+    - '@distilled.cloud/core@1.0.0-rc.17'
+    - '@distilled.cloud/github@1.0.0-rc.17'
+    - '@distilled.cloud/iceberg@1.0.0-rc.17'
+    - '@distilled.cloud/infisical@1.0.0-rc.17'
+    - alchemy@2.0.0-beta.84
 patchedDependencies:
     '@durable-streams/server-conformance-tests@0.3.7': patches/@durable-streams__server-conformance-tests@0.3.7.patch

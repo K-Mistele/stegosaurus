@@ -28,6 +28,8 @@
         "release:publish": "bun packages/fold-cli/scripts/release/publish.ts"
     },
     "dependencies": {
+        "@alchemy.run/cloudflare": "catalog:",
+        "@alchemy.run/infisical": "catalog:",
         "@alchemy.run/pkg": "catalog:",
         "@effect/platform-node": "catalog:",
         "alchemy": "catalog:",

@@ -4,7 +4,7 @@
  * The mailbox code depends on this narrow service instead of the whole Durable Object state, so a
  * test can stand in for storage without faking the rest of the Durable Object.
  */
-import * as Cloudflare from 'alchemy/Cloudflare';
+import * as Cloudflare from '@alchemy.run/cloudflare';
 import { RuntimeContext } from 'alchemy/RuntimeContext';
 import { Context, Effect, Layer, type Schema } from 'effect';
 

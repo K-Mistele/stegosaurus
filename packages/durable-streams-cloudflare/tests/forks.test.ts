@@ -1,5 +1,5 @@
 import { expect } from 'alchemy-test';
-import * as Cloudflare from 'alchemy/Cloudflare';
+import * as Cloudflare from '@alchemy.run/cloudflare';
 import * as Test from 'alchemy/Test/Alchemy';
 import { Buffer } from 'node:buffer';
 import { Array as Arr, Clock, Effect, Order, Random, Schedule, Stream, String as Str } from 'effect';

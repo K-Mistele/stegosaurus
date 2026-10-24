@@ -18,6 +18,7 @@
         "@stegosaurus/channels-delivery": "workspace:*"
     },
     "devDependencies": {
+        "@alchemy.run/cloudflare": "catalog:",
         "@effect/platform-node": "catalog:",
         "@effect/vitest": "catalog:",
         "@stegosaurus/channels-github": "workspace:*",
