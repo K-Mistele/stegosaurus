@@ -11,7 +11,7 @@
         ".": "./src/index.ts"
     },
     "scripts": {
-        "typecheck": "tsc",
+        "typecheck": "tsrs",
         "test": "vp test",
         "smoke:live": "bun --env-file=../../.env run scripts/slack-api-live-smoke.ts"
     },

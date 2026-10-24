@@ -36,7 +36,7 @@
         }
     },
     "scripts": {
-        "typecheck": "tsc",
+        "typecheck": "tsrs",
         "test": "vp test",
         "test:tui": "FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiModelSelectionTerminalControl.vi.test.ts && FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiSessionPickerTerminalControl.vi.test.ts && FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiCompactionTerminalControl.vi.test.ts && FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiToolInspectTerminalControl.vi.test.ts && FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiTerminalControl.vi.test.ts"
     },

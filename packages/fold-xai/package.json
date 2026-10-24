@@ -23,7 +23,7 @@
         }
     },
     "scripts": {
-        "typecheck": "tsc",
+        "typecheck": "tsrs",
         "test": "vp test"
     },
     "dependencies": {

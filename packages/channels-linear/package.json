@@ -11,7 +11,7 @@
         ".": "./src/index.ts"
     },
     "scripts": {
-        "typecheck": "tsc",
+        "typecheck": "tsrs",
         "test": "vp test",
         "smoke:api:live": "bun run scripts/linear-api-live-smoke.ts",
         "smoke:files:live": "bun run scripts/linear-files-live-smoke.ts"

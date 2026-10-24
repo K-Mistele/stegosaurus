@@ -22,7 +22,7 @@
     "./*/index": null
   },
   "scripts": {
-    "typecheck": "tsc && tsc -p tsconfig.build.json",
+    "typecheck": "tsrs && tsrs -p tsconfig.build.json",
     "test": "vp test test/HumanlayerFork.test.ts"
   },
   "peerDependencies": {

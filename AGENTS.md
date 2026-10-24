@@ -13,7 +13,7 @@ pnpm format        # oxfmt, writes files
 pnpm format:check  # oxfmt, no writes (CI)
 pnpm lint          # oxlint with type-aware rules; does not type check
 pnpm lint:fix
-pnpm typecheck     # tsc at the root, then `vp run -r typecheck`: every package's `typecheck` script, 4 at a time
+pnpm typecheck     # tsrs at the root, then `vp run -r typecheck`: every package's `typecheck` script, 4 at a time
 pnpm typed:check   # typed-lint: TypeScript-API rules from typed-lint.config.json (Bun)
 pnpm test          # `vp run -r test`: every package's `test` script
 pnpm build:packages  # build the fold packages' publishable dist/ (Bun); preview-packages runs it before pkg pack
@@ -90,9 +90,10 @@ pnpm alchemy:destroy   # alchemy destroy
 - Write Effect tests with `it.effect` from `@effect/vitest`.
 - Lint treats every `@effect/tsgo` diagnostic and every anti-slop and automation rule as an error. Fix the code; don't disable the rule.
 - Put per-package lint overrides in `tooling/lint/overrides.ts`, not in a package's `vite.config.ts`.
+- Typecheck runs tsrs (oxc's Rust port of the TypeScript 7 compiler), not `tsc`: same errors and `.d.ts` output, about 3x faster with less than half the memory. It reads the same tsconfigs and takes `tsc`'s flags (`tsrs -p <dir>`). The `typescript` package stays for the editor and for effect-tsgo. Effect diagnostics run only in lint, so tsrs loses none.
 - `pnpm install` runs `prepare`, which patches TypeScript (`effect-tsgo patch --oxlint`). Lint needs that patch.
 - fmt and lint skip `packages/alchemy-test`, `packages/effect-ai-*`, `tools/anti-slop`, `tools/automation`, and `tools/typed-lint` (`tooling/ignores.ts`). Typecheck skips any package without a `typecheck` script; `alchemy-test` and `anti-slop` have one. Lint alone also skips `packages/fold-cli`, `packages/fold-tui-theme` and `packages/fold` (an install script that runs before any dependency exists). `typed:check` skips `effect-ai-*`, `fold-cli` and `fold-tui-theme` too (`typed-lint.config.json`).
-- A new app or package needs a `tsconfig.json` (extend `../../tsconfig.json`) and a `"typecheck": "tsc"` script to get type checked, and a `test` script to run under `pnpm test`.
+- A new app or package needs a `tsconfig.json` (extend `../../tsconfig.json`) and a `"typecheck": "tsrs"` script to get type checked, and a `test` script to run under `pnpm test`.
 - Keep `packages/alchemy-test` close to upstream and log any local change in its `VENDORED.md`.
 - `tools/anti-slop`, `tools/automation`, and `tools/typed-lint` are ours to change; edit rules in place and note the change in the tool's `VENDORED.md`.
 

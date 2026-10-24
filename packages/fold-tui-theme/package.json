@@ -60,7 +60,7 @@
         "covenant": "bun run src/main.tsx --theme covenant",
         "wintermute": "bun run src/main.tsx --theme wintermute",
         "demo": "bun run src/main.tsx --demo",
-        "typecheck": "tsc"
+        "typecheck": "tsrs"
     },
     "dependencies": {
         "@opentui/core": "catalog:",

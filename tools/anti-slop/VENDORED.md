@@ -15,5 +15,5 @@ Tests run with `vp test` (Vitest globals); upstream runs each test file with `ts
 ## Local changes
 
 - `tsconfig.json` sets `allowImportingTsExtensions`: the root tsconfig doesn't, and upstream source imports `./x.ts`.
-- `package.json` has a `typecheck` script so `pnpm typecheck` covers this package.
+- `package.json` has a `typecheck` script so `pnpm typecheck` covers this package; it runs `tsrs`, like every package.
 - `no-manual-tagged-construction` skips `_tag: Schema.tag…(...)` fields (`Schema.tag`, `Schema.tagDefaultOmit`): they declare a schema's tag field, not a hand-built value.
