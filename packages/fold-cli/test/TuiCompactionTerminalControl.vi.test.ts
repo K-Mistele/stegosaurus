@@ -26,6 +26,9 @@ terminalDescribe('TUI manual compaction', () => {
         await session.screen.waitForText('Build the compaction view', { timeoutMs: 10_000 });
         await session.screen.waitForText('EVENTS · [SELECTED]', { timeoutMs: 10_000 });
         await session.screen.capture({ settleMs: 100, deadlineMs: 5_000, allowIncomplete: true });
+        // The glitch effect randomly shifts rows, which can expose the input hint under the compaction overlay.
+        await session.keyboard.type('f');
+        await session.screen.waitForText('F:OFF', { timeoutMs: 10_000 });
         await session.keyboard.type('i');
         await session.screen.waitForText('MESSAGE ROOT', { timeoutMs: 10_000 });
         await session.keyboard.type('/compact');
