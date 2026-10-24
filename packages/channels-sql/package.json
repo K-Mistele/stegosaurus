@@ -11,7 +11,7 @@
         ".": "./src/index.ts"
     },
     "scripts": {
-        "typecheck": "tsc && tsc -p test-backends",
+        "typecheck": "tsrs && tsrs -p test-backends",
         "test": "vp test"
     },
     "dependencies": {
