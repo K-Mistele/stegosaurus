@@ -1,0 +1,321 @@
+import { deflateSync } from 'node:zlib';
+
+import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
+import * as NodeServices from '@effect/platform-node/NodeServices';
+import {
+    AgentId,
+    buildPrompt,
+    EventLog,
+    foldPartOptionsKey,
+    layerInMemoryEventLog,
+    LogEntryInputs,
+    MessageId,
+    messagesForAgent,
+    providerToolCallIdKey,
+    ToolCallId,
+    type FoldTool,
+    type ToolResultFailure,
+    type ToolResultLogEntry,
+    type ToolResultSuccess,
+} from '@stegosaurus/fold-core';
+import {
+    Array as Arr,
+    Effect,
+    FileSystem,
+    Option,
+    Path,
+    Predicate,
+    Schema,
+    type Scope,
+    Stream,
+    String as Str,
+} from 'effect';
+import { type LanguageModel, type Prompt, Toolkit } from 'effect/ai';
+
+import { readTool } from '../../src/index';
+import { callTool, runHandler } from '../TestHelpers';
+
+export const imageIdentificationPrompt =
+    'Inspect the image returned by read. Name its three vertical color bands from left to right. ' +
+    'Answer only as left=<color>,middle=<color>,right=<color>.';
+
+export const expectedImageIdentification = 'left=yellow,middle=magenta,right=cyan';
+
+const imageWidth = 96;
+
+const imageHeight = 48;
+
+const fixtureAgentId = AgentId.make('agent_aaaaaaaaaaaaaaaaaaaaaaaa');
+
+export type CapturedFetchRequest = {
+    readonly url: string;
+    readonly authorization: string | null;
+    readonly body: string;
+};
+
+const isWebRequest = (input: string | URL | Request): input is Request => Predicate.hasProperty(input, 'url');
+
+/** Replace only Fetch while recording the fully encoded outbound HTTP request. */
+export const makeCapturingFetch =
+    (requests: Array<CapturedFetchRequest>, respond: () => Response): typeof fetch =>
+    (input: string | URL | Request, init: RequestInit | undefined) => {
+        const request = isWebRequest(input) ? input : new Request(String(input), init);
+
+        return request
+            .clone()
+            .text()
+            .then((body) => {
+                requests.push({
+                    url: request.url,
+                    authorization: request.headers.get('authorization'),
+                    body,
+                });
+
+                return respond();
+            });
+    };
+
+/** A real scoped temp directory for production filesystem and process-backed tool handlers. */
+export const makeTemporaryTestDirectory = (prefix: string): Effect.Effect<string, never, Scope.Scope> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+
+        return yield* fs.makeTempDirectoryScoped({ prefix });
+    }).pipe(Effect.orDie, Effect.provide(NodeFileSystem.layer));
+
+const pngCrc32 = (bytes: Uint8Array): number => {
+    let crc = 0xffffffff;
+
+    for (const byte of bytes) {
+        crc ^= byte;
+
+        for (let bit = 0; bit < 8; bit += 1) {
+            crc = (crc >>> 1) ^ ((crc & 1) === 1 ? 0xedb88320 : 0);
+        }
+    }
+
+    return (crc ^ 0xffffffff) >>> 0;
+};
+
+const pngChunk = (type: string, data: Uint8Array): Buffer => {
+    const typeBytes = Buffer.from(type, 'ascii');
+    const chunk = Buffer.alloc(12 + data.byteLength);
+    chunk.writeUInt32BE(data.byteLength, 0);
+    typeBytes.copy(chunk, 4);
+    Buffer.from(data).copy(chunk, 8);
+    chunk.writeUInt32BE(pngCrc32(Buffer.concat([typeBytes, data])), 8 + data.byteLength);
+
+    return chunk;
+};
+
+/** Generate a tiny lossless PNG with three unambiguous, metadata-free color bands. */
+export const makeDeterministicColorBandsPng = (): Uint8Array => {
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(imageWidth, 0);
+    header.writeUInt32BE(imageHeight, 4);
+    header[8] = 8; // bit depth
+    header[9] = 6; // RGBA
+
+    const scanlines = Buffer.alloc(imageHeight * (1 + imageWidth * 4));
+
+    for (let y = 0; y < imageHeight; y += 1) {
+        const rowOffset = y * (1 + imageWidth * 4);
+        scanlines[rowOffset] = 0; // no PNG row filter
+
+        for (let x = 0; x < imageWidth; x += 1) {
+            const pixelOffset = rowOffset + 1 + x * 4;
+
+            const color: readonly [number, number, number] =
+                x < imageWidth / 3 ? [255, 255, 0] : x < (imageWidth * 2) / 3 ? [255, 0, 255] : [0, 255, 255];
+
+            scanlines[pixelOffset] = color[0];
+            scanlines[pixelOffset + 1] = color[1];
+            scanlines[pixelOffset + 2] = color[2];
+            scanlines[pixelOffset + 3] = 255;
+        }
+    }
+
+    return Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        pngChunk('IHDR', header),
+        pngChunk('IDAT', deflateSync(scanlines)),
+        pngChunk('IEND', new Uint8Array()),
+    ]);
+};
+
+const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
+
+const letterAt = (index: number): string => String.fromCharCode(Option.getOrThrow(Str.charCodeAt('a', 0)) + index);
+
+const toolCallIdAt = (index: number): ToolCallId => ToolCallId.make(`tool_call_${Str.repeat(24)(letterAt(index))}`);
+
+const messageIdAt = (index: number): MessageId => MessageId.make(`msg_${Str.repeat(24)(letterAt(index))}`);
+
+export type DurableToolResultInput = {
+    readonly name: string;
+    readonly params: Schema.Json;
+    readonly result: Schema.Json;
+    readonly isFailure: boolean;
+    readonly providerToolCallId?: string;
+};
+
+export type SessionPromptFixture = {
+    readonly prompt: Prompt.Prompt;
+    readonly entries: ReadonlyArray<ToolResultLogEntry>;
+};
+
+/** Execute one production Fold tool handler under the same platform and per-call services as runtime. */
+export const executeToolHandler = <R>(tool: FoldTool<R>, params: Schema.Json) => runHandler(callTool(tool, params));
+
+/** Decode a real handler result/failure into the JSON shape accepted by the durable EventLog. */
+export const decodeToolResultJson = (result: ToolResultSuccess | ToolResultFailure) => decodeJson(result);
+
+/** Persist real tool results, project the EventLog, and build the exact prompt used by session turns. */
+export const buildSessionPromptWithToolResults = (input: {
+    readonly userText: string;
+    readonly toolResults: ReadonlyArray<DurableToolResultInput>;
+}): Effect.Effect<SessionPromptFixture> =>
+    Effect.gen(function* () {
+        const eventLog = yield* EventLog;
+        yield* eventLog
+            .append(
+                LogEntryInputs['user-message']({
+                    agentId: fixtureAgentId,
+                    parentAgentId: null,
+                    toolCallId: null,
+                    messageId: messageIdAt(0),
+                    message: {
+                        role: 'user',
+                        content: [{ type: 'text', text: input.userText }],
+                    },
+                }),
+            )
+            .pipe(Effect.orDie);
+        yield* eventLog
+            .append(
+                LogEntryInputs['assistant-message']({
+                    agentId: fixtureAgentId,
+                    parentAgentId: null,
+                    toolCallId: null,
+                    messageId: messageIdAt(1),
+                    finish: null,
+                    message: {
+                        role: 'assistant',
+                        content: Arr.map(input.toolResults, (toolResult, index) => ({
+                            type: 'tool-call' as const,
+                            id: toolCallIdAt(index),
+                            name: toolResult.name,
+                            params: toolResult.params,
+                            providerExecuted: false,
+                            options: {
+                                [foldPartOptionsKey]: {
+                                    [providerToolCallIdKey]: toolResult.providerToolCallId ?? `call_test_${index + 1}`,
+                                },
+                            },
+                        })),
+                    },
+                }),
+            )
+            .pipe(Effect.orDie);
+
+        for (const [index, toolResult] of input.toolResults.entries()) {
+            yield* eventLog
+                .append(
+                    LogEntryInputs['tool-result']({
+                        agentId: fixtureAgentId,
+                        parentAgentId: null,
+                        toolCallId: toolCallIdAt(index),
+                        messageId: messageIdAt(index + 2),
+                        message: {
+                            role: 'tool',
+                            content: [
+                                {
+                                    type: 'tool-result',
+                                    id: toolCallIdAt(index),
+                                    name: toolResult.name,
+                                    result: toolResult.result,
+                                    isFailure: toolResult.isFailure,
+                                },
+                            ],
+                        },
+                    }),
+                )
+                .pipe(Effect.orDie);
+        }
+
+        const allEntries = yield* Stream.runCollect(eventLog.entries()).pipe(Effect.orDie);
+
+        const entries = Arr.filter(allEntries, (entry): entry is ToolResultLogEntry =>
+            Predicate.isTagged(entry, 'tool-result'),
+        );
+
+        const prompt = yield* buildPrompt(messagesForAgent(allEntries, fixtureAgentId)).pipe(Effect.orDie);
+
+        return { prompt, entries };
+    }).pipe(Effect.provide(layerInMemoryEventLog));
+
+export type ImageReadPromptFixture = {
+    readonly prompt: Prompt.Prompt;
+    readonly readResult: Schema.Json;
+    readonly sourceImageBase64: string;
+};
+
+/** Execute the production read tool, then feed its durable result through the session prompt builder. */
+export const makeImageReadPromptFixture = makeTemporaryTestDirectory('fold-image-read-delivery-').pipe(
+    Effect.flatMap((directory) =>
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const sourceImage = makeDeterministicColorBandsPng();
+            yield* fs.writeFile(path.join(directory, 'visual-fixture.png'), sourceImage).pipe(Effect.orDie);
+
+            const result = yield* executeToolHandler(readTool({ cwd: directory }), { path: 'visual-fixture.png' });
+            const readResult = yield* decodeJson(result);
+
+            const { prompt } = yield* buildSessionPromptWithToolResults({
+                userText: imageIdentificationPrompt,
+                toolResults: [
+                    {
+                        name: 'read',
+                        params: { path: 'visual-fixture.png' },
+                        result: readResult,
+                        isFailure: false,
+                        providerToolCallId: 'call_image_read_delivery',
+                    },
+                ],
+            });
+
+            return {
+                prompt,
+                readResult,
+                sourceImageBase64: Buffer.from(sourceImage).toString('base64'),
+            };
+        }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+);
+
+/**
+ * Run the exact model-call shape used by AgentRuntime: session-built prompt, streaming, an explicitly
+ * empty active toolkit, and tool-call resolution disabled for runtime-owned settlement.
+ */
+export const runImageReadInference = (model: LanguageModel.LanguageModel) =>
+    Effect.gen(function* () {
+        const fixture = yield* makeImageReadPromptFixture;
+        const emptyToolkit = yield* Toolkit.empty;
+
+        const parts = yield* Stream.runCollect(
+            model.streamText({
+                prompt: fixture.prompt,
+                toolkit: emptyToolkit,
+                disableToolCallResolution: true,
+            }),
+        );
+
+        let text = '';
+
+        for (const part of parts) {
+            if (part.type === 'text-delta') text += part.delta;
+        }
+
+        return { ...fixture, text };
+    });

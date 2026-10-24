@@ -1,4 +1,4 @@
 {
-  "extends": "../../tsconfig.json",
-  "include": ["src", "tests", "alchemy.run.ts", "vite.config.ts"]
+    "extends": "../../tsconfig.json",
+    "include": ["src", "tests", "alchemy.run.ts", "vite.config.ts"]
 }

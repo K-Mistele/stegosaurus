@@ -1,21 +1,21 @@
 {
-  "name": "@stegosaurus/durable-streams-client",
-  "version": "0.0.0",
-  "description": "Effect client for Durable Streams.",
-  "files": [
-    "src"
-  ],
-  "type": "module",
-  "scripts": {
-    "typecheck": "tsc",
-    "test": "vp test"
-  },
-  "dependencies": {
-    "@stegosaurus/durable-streams-protocol": "workspace:*",
-    "effect": "catalog:"
-  },
-  "devDependencies": {
-    "@effect/vitest": "catalog:",
-    "vite-plus": "catalog:"
-  }
+    "name": "@stegosaurus/durable-streams-client",
+    "version": "0.0.0",
+    "description": "Effect client for Durable Streams.",
+    "files": [
+        "src"
+    ],
+    "type": "module",
+    "scripts": {
+        "typecheck": "tsc",
+        "test": "vp test"
+    },
+    "dependencies": {
+        "@stegosaurus/durable-streams-protocol": "workspace:*",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "vite-plus": "catalog:"
+    }
 }

@@ -1,0 +1,369 @@
+/**
+ * This file implements the pure text-matching engine behind the edit tool (D18, pi port from
+ * edit-diff.ts): exact substring match first, then a normalization fallback (NFKC, per-line trailing
+ * whitespace, smart quotes/dashes/special spaces) that is still exact substring matching - never fuzzy.
+ * All edits match against the original content; overlaps are rejected; untouched lines stay
+ * byte-identical even when a normalized match was needed; BOM and CRLF endings are preserved. Error
+ * strings are pi's, verbatim. Pure and isomorphic: platform handlers do the file IO around it.
+ */
+import { Array as Arr, Effect, Option, pipe, Schema, String as Str } from 'effect';
+
+/** One targeted replacement: exact old text and its replacement. */
+export const EditPair = Schema.Struct({
+    oldText: Schema.String,
+    newText: Schema.String,
+});
+
+export type EditPair = typeof EditPair.Type;
+
+/** A model-visible edit failure. `message` strings are pi's, verbatim. */
+export class EditEngineError extends Schema.TaggedError<EditEngineError, { readonly brand: unique symbol }>()(
+    'EditEngineError',
+    {
+        message: Schema.String,
+    },
+) {}
+
+const bomCharacter = '﻿';
+
+/** Strip a single leading BOM, remembering it for re-attachment. */
+export const stripBom = (text: string): { readonly bom: string; readonly text: string } =>
+    Str.startsWith(bomCharacter)(text) ? { bom: bomCharacter, text: Str.slice(1)(text) } : { bom: '', text };
+
+/** Detect the file's line ending from its first newline (pi semantics: first line wins). */
+export const detectLineEnding = (text: string): '\r\n' | '\n' => {
+    const index = Str.indexOf('\n')(text);
+
+    return Option.isSome(index) && index.value > 0 && text[index.value - 1] === '\r' ? '\r\n' : '\n';
+};
+
+/** Normalize CRLF and lone CR to LF for matching. */
+export const normalizeToLF = (text: string): string => pipe(text, Str.replace(/\r\n/g, '\n'), Str.replace(/\r/g, '\n'));
+
+/** Re-apply the detected line ending after matching happened in LF space. */
+export const restoreLineEndings = (text: string, ending: '\r\n' | '\n'): string =>
+    ending === '\r\n' ? Str.replace(/\n/g, '\r\n')(text) : text;
+
+const smartSingleQuotes = /[‘’‚‛]/g;
+
+const smartDoubleQuotes = /[“”„‟]/g;
+
+const unicodeDashes = /[‐‑‒–—―−]/g;
+
+const specialSpaces = /[  -   　]/g;
+
+/**
+ * The normalization fallback (pi's `normalizeForFuzzyMatch`): still exact substring matching, but in a
+ * canonicalized space. Steps in order: NFKC, per-line trailing-whitespace strip, smart single quotes,
+ * smart double quotes, unicode dashes, special spaces.
+ */
+export const normalizeForMatch = (text: string): string =>
+    pipe(
+        text,
+        Str.normalize('NFKC'),
+        Str.split('\n'),
+        Arr.map((line) => Str.trimEnd(line)),
+        Arr.join('\n'),
+        Str.replace(smartSingleQuotes, "'"),
+        Str.replace(smartDoubleQuotes, '"'),
+        Str.replace(unicodeDashes, '-'),
+        Str.replace(specialSpaces, ' '),
+    );
+
+type FoundMatch = {
+    readonly index: number;
+    readonly matchLength: number;
+    readonly usedNormalizedMatch: boolean;
+};
+
+/** Find `oldText` in `content`: exact first, then in normalized space (pi's `fuzzyFindText`). */
+const findText = (content: string, oldText: string): FoundMatch | null => {
+    const exactIndex = Str.indexOf(oldText)(content);
+
+    if (Option.isSome(exactIndex))
+        return { index: exactIndex.value, matchLength: oldText.length, usedNormalizedMatch: false };
+
+    const normalizedContent = normalizeForMatch(content);
+    const normalizedOldText = normalizeForMatch(oldText);
+    const normalizedIndex = Str.indexOf(normalizedOldText)(normalizedContent);
+
+    if (Option.isNone(normalizedIndex)) return null;
+
+    return { index: normalizedIndex.value, matchLength: normalizedOldText.length, usedNormalizedMatch: true };
+};
+
+/** Count occurrences in normalized space (pi counts there regardless of how the match was found). */
+const countOccurrences = (content: string, oldText: string): number =>
+    Str.split(normalizeForMatch(content), normalizeForMatch(oldText)).length - 1;
+
+type MatchedEdit = {
+    readonly editIndex: number;
+    readonly matchIndex: number;
+    readonly matchLength: number;
+    readonly newText: string;
+};
+
+/** Apply replacements right-to-left so earlier offsets stay valid (pi's reverse splice). */
+const applyReplacements = (content: string, replacements: ReadonlyArray<MatchedEdit>): string => {
+    let result = content;
+
+    for (let index = replacements.length - 1; index >= 0; index -= 1) {
+        const replacement = replacements[index];
+
+        if (replacement === undefined) continue;
+        result =
+            Str.substring(0, replacement.matchIndex)(result) +
+            replacement.newText +
+            Str.substring(replacement.matchIndex + replacement.matchLength)(result);
+    }
+
+    return result;
+};
+
+/** Split text into lines that keep their trailing newline (pi's `splitLinesWithEndings`). */
+const splitLinesWithEndings = (content: string): ReadonlyArray<string> =>
+    Option.getOrElse(Str.match(/[^\n]*\n|[^\n]+/g)(content), () => []);
+
+/** Map a character span in the base content to the inclusive line range it touches. */
+const lineRangeFor = (lineOffsets: ReadonlyArray<number>, matchIndex: number, matchLength: number) => {
+    let first = 0;
+    let last = 0;
+
+    for (let line = 0; line < lineOffsets.length; line += 1) {
+        const start = lineOffsets[line] ?? 0;
+
+        if (start <= matchIndex) first = line;
+
+        if (start < matchIndex + Math.max(matchLength, 1)) last = line;
+    }
+
+    return { first, last };
+};
+
+/**
+ * Apply replacements found in normalized space while copying every untouched line verbatim from the
+ * original (pi's `applyReplacementsPreservingUnchangedLines`): only the line groups a replacement
+ * touches are emitted from the normalized base; everything else keeps its original bytes.
+ */
+const applyReplacementsPreservingUnchangedLines = (
+    originalContent: string,
+    normalizedBase: string,
+    replacements: ReadonlyArray<MatchedEdit>,
+): Effect.Effect<string, EditEngineError> => {
+    const originalLines = splitLinesWithEndings(originalContent);
+    const baseLines = splitLinesWithEndings(normalizedBase);
+
+    if (originalLines.length !== baseLines.length) {
+        return Effect.fail(
+            EditEngineError.make({
+                message: 'Cannot preserve unchanged lines because the base content has a different line count.',
+            }),
+        );
+    }
+
+    const offsets: Array<number> = [];
+    let offset = 0;
+
+    for (const line of baseLines) {
+        offsets.push(offset);
+        offset += line.length;
+    }
+
+    // Widen each replacement to whole lines and group adjacent/overlapping ranges.
+    const ranges = Arr.map(replacements, (replacement) => ({
+        ...lineRangeFor(offsets, replacement.matchIndex, replacement.matchLength),
+        replacement,
+    })).sort((a, b) => a.first - b.first);
+
+    const groups: Array<{ first: number; last: number; members: Array<MatchedEdit> }> = [];
+
+    for (const range of ranges) {
+        const current = groups[groups.length - 1];
+
+        if (current !== undefined && range.first <= current.last + 1) {
+            current.last = Math.max(current.last, range.last);
+            current.members.push(range.replacement);
+        } else {
+            groups.push({ first: range.first, last: range.last, members: [range.replacement] });
+        }
+    }
+
+    let result = '';
+    let cursor = 0;
+
+    for (const group of groups) {
+        result += Arr.join(originalLines.slice(cursor, group.first), '');
+
+        const groupStart = offsets[group.first] ?? 0;
+
+        const groupEnd =
+            group.last + 1 < baseLines.length
+                ? (offsets[group.last + 1] ?? normalizedBase.length)
+                : normalizedBase.length;
+
+        const groupText = Str.substring(groupStart, groupEnd)(normalizedBase);
+
+        const rebased = Arr.map(group.members, (member) => ({
+            ...member,
+            matchIndex: member.matchIndex - groupStart,
+        })).sort((a, b) => a.matchIndex - b.matchIndex);
+
+        result += applyReplacements(groupText, rebased);
+        cursor = group.last + 1;
+    }
+
+    result += Arr.join(originalLines.slice(cursor), '');
+
+    return Effect.succeed(result);
+};
+
+/** Outcome of a successful edit application. */
+export type ApplyEditsOutcome = {
+    /** Final file content, BOM and original line endings restored. */
+    readonly content: string;
+    readonly editsApplied: number;
+};
+
+/**
+ * Apply one batch of edits to raw file content (pi's execute + `applyEditsToNormalizedContent`).
+ * `path` appears only inside error messages. All edits match against the original content; if any edit
+ * needs the normalization fallback, every edit is re-matched in normalized space, and untouched lines
+ * are preserved byte-for-byte from the original.
+ */
+export const applyEdits = (input: {
+    readonly rawContent: string;
+    readonly edits: ReadonlyArray<EditPair>;
+    readonly path: string;
+}): Effect.Effect<ApplyEditsOutcome, EditEngineError> =>
+    Effect.gen(function* () {
+        const { edits, path } = input;
+        const { bom, text } = stripBom(input.rawContent);
+        const originalEnding = detectLineEnding(text);
+        const normalizedContent = normalizeToLF(text);
+
+        const normalizedEdits = Arr.map(edits, (edit) => ({
+            oldText: normalizeToLF(edit.oldText),
+            newText: normalizeToLF(edit.newText),
+        }));
+
+        const single = normalizedEdits.length === 1;
+
+        for (const [index, edit] of normalizedEdits.entries()) {
+            if (edit.oldText.length === 0) {
+                return yield* EditEngineError.make({
+                    message: single
+                        ? `oldText must not be empty in ${path}.`
+                        : `edits[${index}].oldText must not be empty in ${path}.`,
+                });
+            }
+        }
+
+        // If ANY edit needs the normalized fallback, all edits switch to normalized space (pi semantics).
+        const initialMatches = Arr.map(normalizedEdits, (edit) => findText(normalizedContent, edit.oldText));
+        const usedNormalizedMatch = Arr.some(initialMatches, (match) => match?.usedNormalizedMatch === true);
+        const baseContent = usedNormalizedMatch ? normalizeForMatch(normalizedContent) : normalizedContent;
+
+        const matchedEdits: Array<MatchedEdit> = [];
+
+        for (const [index, edit] of normalizedEdits.entries()) {
+            // pi's fuzzyFindText: even against the normalized base, the raw oldText is tried exactly
+            // first (its match length differs from the normalized target's when normalization shrinks it).
+            let target = edit.oldText;
+            let found = Str.indexOf(target)(baseContent);
+
+            if (Option.isNone(found) && usedNormalizedMatch) {
+                target = normalizeForMatch(edit.oldText);
+                found = Str.indexOf(target)(baseContent);
+            }
+
+            if (Option.isNone(found)) {
+                return yield* EditEngineError.make({
+                    message: single
+                        ? `Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.`
+                        : `Could not find edits[${index}] in ${path}. The oldText must match exactly including all whitespace and newlines.`,
+                });
+            }
+
+            const occurrences = countOccurrences(normalizedContent, edit.oldText);
+
+            if (occurrences > 1) {
+                return yield* EditEngineError.make({
+                    message: single
+                        ? `Found ${occurrences} occurrences of the text in ${path}. The text must be unique. Please provide more context to make it unique.`
+                        : `Found ${occurrences} occurrences of edits[${index}] in ${path}. Each oldText must be unique. Please provide more context to make it unique.`,
+                });
+            }
+
+            matchedEdits.push({
+                editIndex: index,
+                matchIndex: found.value,
+                matchLength: target.length,
+                newText: edit.newText,
+            });
+        }
+
+        matchedEdits.sort((a, b) => a.matchIndex - b.matchIndex);
+
+        for (let index = 1; index < matchedEdits.length; index += 1) {
+            const previous = matchedEdits[index - 1];
+            const current = matchedEdits[index];
+
+            if (
+                previous !== undefined &&
+                current !== undefined &&
+                previous.matchIndex + previous.matchLength > current.matchIndex
+            ) {
+                return yield* EditEngineError.make({
+                    message: `edits[${previous.editIndex}] and edits[${current.editIndex}] overlap in ${path}. Merge them into one edit or target disjoint regions.`,
+                });
+            }
+        }
+
+        const newContent = usedNormalizedMatch
+            ? yield* applyReplacementsPreservingUnchangedLines(normalizedContent, baseContent, matchedEdits)
+            : applyReplacements(baseContent, matchedEdits);
+
+        if (newContent === normalizedContent) {
+            return yield* EditEngineError.make({
+                message: single
+                    ? `No changes made to ${path}. The replacement produced identical content. This might indicate an issue with special characters or the text not existing as expected.`
+                    : `No changes made to ${path}. The replacements produced identical content.`,
+            });
+        }
+
+        return {
+            content: bom + restoreLineEndings(newContent, originalEnding),
+            editsApplied: edits.length,
+        };
+    });
+
+/**
+ * Normalize decoded edit-tool input into an edit batch (pi's `prepareEditArguments` +
+ * `validateEditInput`): the batch form, plus the legacy top-level oldText/newText pair, which appends as
+ * the final edit. A JSON-string edits array is already decoded to the batch form by the edit tool's
+ * parameter schema.
+ */
+export const normalizeEditInput = (input: {
+    readonly edits?: ReadonlyArray<EditPair> | undefined;
+    readonly oldText?: string | undefined;
+    readonly newText?: string | undefined;
+}): Effect.Effect<ReadonlyArray<EditPair>, EditEngineError> =>
+    Effect.gen(function* () {
+        const { edits: batch = [] } = input;
+
+        // The legacy single-edit form counts only when both halves are present.
+        const single = Option.all({
+            oldText: Option.fromUndefinedOr(input.oldText),
+            newText: Option.fromUndefinedOr(input.newText),
+        });
+
+        const edits: ReadonlyArray<EditPair> = [...batch, ...Option.toArray(single)];
+
+        if (Arr.isReadonlyArrayEmpty(edits)) {
+            return yield* EditEngineError.make({
+                message: 'Edit tool input is invalid. edits must contain at least one replacement.',
+            });
+        }
+
+        return edits;
+    });

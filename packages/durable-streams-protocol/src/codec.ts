@@ -1,47 +1,43 @@
-import { Array as Arr, Order, pipe, Schema, SchemaGetter, String as Str } from "effect";
+import { Array as Arr, Order, pipe, Schema, SchemaGetter, String as Str } from 'effect';
 
 // Offset = number of messages in the stream up to this point.
 // The wire keeps upstream's "<16 digits>_<16 digits>" shape (the conformance suite sends
 // "0000000000000000_0000000000000000"); the left half is always zero.
 export const Offset = Schema.String.check(Schema.isPattern(/^0{16}_\d{16}$/)).pipe(
-  Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(Schema.brand("Offset")), {
-    decode: SchemaGetter.transform((wire) => Number(Str.slice(17)(wire))),
-    encode: SchemaGetter.transform(
-      (count) => `${Str.repeat(16)("0")}_${Str.padStart(16, "0")(String(count))}`,
-    ),
-  }),
+    Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(Schema.brand('Offset')), {
+        decode: SchemaGetter.transform((wire) => Number(Str.slice(17)(wire))),
+        encode: SchemaGetter.transform((count) => `${Str.repeat(16)('0')}_${Str.padStart(16, '0')(String(count))}`),
+    }),
 );
 
 export type Offset = typeof Offset.Type;
 
-export const OffsetParam = Schema.Union([Schema.Literals(["-1", "now"]), Offset]);
+export const OffsetParam = Schema.Union([Schema.Literals(['-1', 'now']), Offset]);
 
 export type OffsetParam = typeof OffsetParam.Type;
 
 // "0" | "[1-9]\d*" → safe integer (Schema.Int is Number.isSafeInteger); the decoded side checks
 // >= 0 too, so a negative value fails to encode instead of producing an invalid header
-export const NonNegativeIntFromString = Schema.String.check(
-  Schema.isPattern(/^(0|[1-9]\d*)$/),
-).pipe(
-  Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), {
-    decode: SchemaGetter.transform(Number),
-    encode: SchemaGetter.transform(String),
-  }),
+export const NonNegativeIntFromString = Schema.String.check(Schema.isPattern(/^(0|[1-9]\d*)$/)).pipe(
+    Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), {
+        decode: SchemaGetter.transform(Number),
+        encode: SchemaGetter.transform(String),
+    }),
 );
 
-export const ProducerEpoch = NonNegativeIntFromString.pipe(Schema.brand("ProducerEpoch"));
+export const ProducerEpoch = NonNegativeIntFromString.pipe(Schema.brand('ProducerEpoch'));
 
 export type ProducerEpoch = typeof ProducerEpoch.Type;
 
-export const ProducerSeq = NonNegativeIntFromString.pipe(Schema.brand("ProducerSeq"));
+export const ProducerSeq = NonNegativeIntFromString.pipe(Schema.brand('ProducerSeq'));
 
 export type ProducerSeq = typeof ProducerSeq.Type;
 
-export const ProducerId = Schema.NonEmptyString.pipe(Schema.brand("ProducerId"));
+export const ProducerId = Schema.NonEmptyString.pipe(Schema.brand('ProducerId'));
 
 export type ProducerId = typeof ProducerId.Type;
 
-export const StreamSeq = Schema.NonEmptyString.pipe(Schema.brand("StreamSeq"));
+export const StreamSeq = Schema.NonEmptyString.pipe(Schema.brand('StreamSeq'));
 
 export type StreamSeq = typeof StreamSeq.Type;
 
@@ -51,34 +47,31 @@ const textEncoder = new TextEncoder();
  * PROTOCOL.md 5.2: `Stream-Seq` values compare byte-wise. JS `<` compares UTF-16 code units, which
  * differs for characters above U+FFFF against U+E000–U+FFFF, so compare the UTF-8 bytes.
  */
-export const StreamSeqOrder: Order.Order<StreamSeq> = Order.mapInput(
-  Arr.makeOrder(Order.Number),
-  (seq: StreamSeq) => Arr.fromIterable(textEncoder.encode(seq)),
+export const StreamSeqOrder: Order.Order<StreamSeq> = Order.mapInput(Arr.makeOrder(Order.Number), (seq: StreamSeq) =>
+    Arr.fromIterable(textEncoder.encode(seq)),
 );
 
 export const TtlSeconds = NonNegativeIntFromString;
 
 export type TtlSeconds = typeof TtlSeconds.Type;
 
-export const Cursor = NonNegativeIntFromString.pipe(Schema.brand("Cursor"));
+export const Cursor = NonNegativeIntFromString.pipe(Schema.brand('Cursor'));
 
 export type Cursor = typeof Cursor.Type;
 
 // Path of a stream on this server, e.g. "/v1/stream/orders"
-export const StreamPath = Schema.String.check(Schema.isPattern(/^\//)).pipe(
-  Schema.brand("StreamPath"),
-);
+export const StreamPath = Schema.String.check(Schema.isPattern(/^\//)).pipe(Schema.brand('StreamPath'));
 
 export type StreamPath = typeof StreamPath.Type;
 
 // PROTOCOL.md 4.1: "true" in any case means present; any other value means absent, never an error
 export const TrueFlag = Schema.String.pipe(
-  Schema.decodeTo(Schema.Boolean, {
-    decode: SchemaGetter.transform((value) => Str.toLowerCase(value) === "true"),
-    encode: SchemaGetter.transform(String),
-  }),
+    Schema.decodeTo(Schema.Boolean, {
+        decode: SchemaGetter.transform((value) => Str.toLowerCase(value) === 'true'),
+        encode: SchemaGetter.transform(String),
+    }),
 );
 
 // Content-Type is stored and echoed as sent; compare by media type: "Application/JSON; charset=utf-8" → "application/json"
 export const mediaTypeOf = (contentType: string): string =>
-  pipe(contentType, Str.split(";"), Arr.headNonEmpty, Str.trim, Str.toLowerCase);
+    pipe(contentType, Str.split(';'), Arr.headNonEmpty, Str.trim, Str.toLowerCase);

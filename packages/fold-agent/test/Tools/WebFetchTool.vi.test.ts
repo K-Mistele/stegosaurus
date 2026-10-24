@@ -1,0 +1,254 @@
+/**
+ * WebFetchTool exercised against a real loopback HTTP server (the real transport seam, per the testing
+ * reference). The image case serves a genuine 128x128 photograph (`fixtures/hopper.png`, the standard
+ * Pillow test image), so the assertions prove the tool fetches and returns a real image, not a
+ * hand-built placeholder.
+ */
+import { createServer, type Server } from 'node:http';
+
+import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
+import * as NodePath from '@effect/platform-node/NodePath';
+import { it } from '@effect/vitest';
+import { ToolResultMultipart, type ToolResultSuccess, ToolResultText } from '@stegosaurus/fold-core';
+import { Array as Arr, Effect, FileSystem, Layer, Path, Predicate, Schema } from 'effect';
+import { Base64 } from 'effect/encoding';
+import { constVoid } from 'effect/Function';
+import { FetchHttpClient } from 'effect/http';
+import { afterAll, beforeAll, expect } from 'vite-plus/test';
+
+import { webFetchTool } from '../../src/index';
+import { handlerOf, messageOf, runHandler } from '../TestHelpers';
+
+const hopperPng = await Effect.runPromise(
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        return yield* fs.readFile(yield* path.fromFileUrl(new URL('../fixtures/hopper.png', import.meta.url)));
+    }).pipe(Effect.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer))),
+);
+
+const hopperBase64 = Base64.encode(hopperPng);
+
+const richHtml = Arr.join(
+    [
+        '<!doctype html>',
+        '<html><head><title>Doc</title></head><body>',
+        '<h1>Title</h1>',
+        '<p>Intro with a <a href="https://example.com/docs">link</a> inside.</p>',
+        '<ul><li>alpha</li><li>beta</li></ul>',
+        '<pre><code>const x = 1</code></pre>',
+        '</body></html>',
+    ],
+    '',
+);
+
+/** Width/height read from a PNG IHDR (bytes 16-23, big-endian). */
+const pngDimensions = (bytes: Uint8Array) => {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+    return { width: view.getUint32(16, false), height: view.getUint32(20, false) };
+};
+
+const isToolResultMultipart = Schema.is(ToolResultMultipart);
+
+const isToolResultText = Schema.is(ToolResultText);
+
+const contentOf = (result: ToolResultSuccess): ToolResultMultipart['content'] => {
+    if (!isToolResultMultipart(result)) throw new Error('expected multipart tool output');
+
+    return result.content;
+};
+
+const firstText = (result: ToolResultSuccess): string => {
+    if (isToolResultText(result)) return result.text;
+    const block = contentOf(result)[0];
+
+    if (block?._tag !== 'text-part') throw new Error('expected a text part');
+
+    return block.text;
+};
+
+const fetchResult = (
+    url: string,
+    options: { readonly format?: 'markdown' | 'text' | 'html'; readonly timeout_seconds?: number } | undefined,
+) => runHandler(handlerOf(webFetchTool())({ url, ...options })).pipe(Effect.provide(FetchHttpClient.layer));
+
+let server: Server;
+
+let baseUrl = '';
+
+beforeAll(() => {
+    server = createServer((request, response) => {
+        const path = request.url ?? '/';
+
+        if (path === '/page.html') {
+            response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+            response.end(richHtml);
+
+            return;
+        }
+
+        if (path === '/plain.txt') {
+            response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+            response.end('plain body text');
+
+            return;
+        }
+
+        if (path === '/photo.png') {
+            response.writeHead(200, { 'content-type': 'image/png' });
+            response.end(hopperPng);
+
+            return;
+        }
+
+        if (path === '/streamed-huge') {
+            // No content-length: the streaming cap is the only guard. 6MB in 1MB chunks trips it at 5MB.
+            response.writeHead(200, { 'content-type': 'application/octet-stream' });
+            response.on('error', constVoid);
+
+            for (let index = 0; index < 6; index++) response.write(Buffer.alloc(1024 * 1024, index));
+            response.end();
+
+            return;
+        }
+
+        if (path === '/declared-huge') {
+            // Advertises 6MB but sends almost nothing: only the content-length precheck can reject this.
+            response.writeHead(200, {
+                'content-type': 'application/octet-stream',
+                'content-length': String(6 * 1024 * 1024),
+            });
+            response.on('error', constVoid);
+            response.end(Buffer.alloc(16));
+
+            return;
+        }
+
+        if (path === '/slow') {
+            // Never respond; the client's timeout must fire.
+            return;
+        }
+
+        response.writeHead(404);
+        response.end('not found');
+    });
+
+    return Effect.runPromise(
+        Effect.callback<void>((resume) => {
+            server.listen(0, '127.0.0.1', () => resume(Effect.void));
+        }),
+    ).then(() => {
+        const address = server.address();
+        const port = Predicate.isString(address) || address === null ? 0 : address.port;
+        baseUrl = `http://127.0.0.1:${port}`;
+    });
+});
+
+afterAll(() => {
+    server.closeAllConnections();
+
+    return Effect.runPromise(
+        Effect.callback<void>((resume) => {
+            server.close(() => resume(Effect.void));
+        }),
+    );
+});
+
+it.live('renders HTML as markdown through turndown (links, headings, lists, fenced code)', () =>
+    Effect.gen(function* () {
+        const markdown = firstText(yield* fetchResult(`${baseUrl}/page.html`, undefined));
+
+        expect(markdown).toContain('# Title');
+        expect(markdown).toContain('[link](https://example.com/docs)');
+        expect(markdown).toMatch(/[-*]\s+alpha/);
+        expect(markdown).toContain('```');
+        expect(markdown).toContain('const x = 1');
+    }),
+);
+
+it.live('strips tags for the text format', () =>
+    Effect.gen(function* () {
+        const text = firstText(yield* fetchResult(`${baseUrl}/page.html`, { format: 'text' }));
+
+        expect(text).toContain('Title');
+        expect(text).toContain('link');
+        expect(text).not.toContain('<h1>');
+        expect(text).not.toContain('# Title');
+    }),
+);
+
+it.live('returns raw HTML for the html format', () =>
+    Effect.gen(function* () {
+        const raw = firstText(yield* fetchResult(`${baseUrl}/page.html`, { format: 'html' }));
+
+        expect(raw).toContain('<h1>Title</h1>');
+    }),
+);
+
+it.live('returns non-HTML bodies unchanged', () =>
+    Effect.gen(function* () {
+        expect(firstText(yield* fetchResult(`${baseUrl}/plain.txt`, undefined))).toBe('plain body text');
+    }),
+);
+
+it.live('returns a fetched PNG photo as an image content block', () =>
+    Effect.gen(function* () {
+        const result = yield* fetchResult(`${baseUrl}/photo.png`, undefined);
+        const blocks = contentOf(result);
+
+        expect(firstText(result)).toContain('Fetched image [image/png]');
+
+        const image = blocks[1];
+
+        if (image?._tag !== 'image-part') throw new Error('expected an image part');
+        expect(image.mediaType).toBe('image/png');
+        // A real 128x128 photo is within the resize limits, so it round-trips byte-for-byte.
+        expect(image.data).toBe(hopperBase64);
+
+        const decoded = new Uint8Array(Buffer.from(image.data, 'base64'));
+        expect(Array.from(decoded.subarray(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]); // PNG signature
+        expect(pngDimensions(decoded)).toEqual({ width: 128, height: 128 });
+    }),
+);
+
+it.live('rejects up front when the declared content-length exceeds the cap', () =>
+    Effect.gen(function* () {
+        const failure = yield* fetchResult(`${baseUrl}/declared-huge`, undefined).pipe(Effect.flip);
+
+        expect(yield* messageOf(failure)).toBe('Response too large (exceeds 5MB limit)');
+    }),
+);
+
+it.live('rejects while streaming when an unmeasured body exceeds the cap', () =>
+    Effect.gen(function* () {
+        const failure = yield* fetchResult(`${baseUrl}/streamed-huge`, undefined).pipe(Effect.flip);
+
+        expect(yield* messageOf(failure)).toBe('Response too large (exceeds 5MB limit)');
+    }),
+);
+
+it.live('surfaces a non-2xx status', () =>
+    Effect.gen(function* () {
+        const failure = yield* fetchResult(`${baseUrl}/notfound`, undefined).pipe(Effect.flip);
+
+        expect(yield* messageOf(failure)).toBe('Request failed with status code: 404');
+    }),
+);
+
+it.live('rejects non-http(s) URLs before making a request', () =>
+    Effect.gen(function* () {
+        const failure = yield* fetchResult('ftp://example.com/data', undefined).pipe(Effect.flip);
+
+        expect(yield* messageOf(failure)).toBe('URL must start with http:// or https://');
+    }),
+);
+
+it.live('times out a response that never arrives', () =>
+    Effect.gen(function* () {
+        const failure = yield* fetchResult(`${baseUrl}/slow`, { timeout_seconds: 0.3 }).pipe(Effect.flip);
+
+        expect(yield* messageOf(failure)).toContain('timed out');
+    }),
+);

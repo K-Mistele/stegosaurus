@@ -1,0 +1,498 @@
+/**
+ * This file implements the D5 session layout and discovery: one JSONL log per session under
+ * `~/.fold/sessions/<project-slug>/<sess_id>.jsonl`, where the slug is the escaped working directory
+ * (pi-style), so "resume the latest session in this project" is a directory listing. `prepareSessionLog`
+ * mints the session id UP FRONT (the file is named by it - `Session.open({ sessionId })` records the
+ * same id durably) and returns the log location; `listSessionLogs`/`latestSessionLog` discover
+ * existing logs newest-first for the resume-latest path, while `sessionLogById` resolves an exact
+ * `sess_*` id inside the current project's slug directory.
+ */
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+import { SessionId, encodedContentText, makeSessionId, usageInputTotal } from '@stegosaurus/fold-core';
+import type {
+    ActiveModel,
+    AgentFinishedLogEntry,
+    AgentStartedLogEntry,
+    AssistantMessageLogEntry,
+    LogEntry,
+    Ids,
+    ModelChangeLogEntry,
+    SessionStartedLogEntry,
+    SessionTitleLogEntry,
+    UserMessageLogEntry,
+} from '@stegosaurus/fold-core';
+import {
+    Array as Arr,
+    Predicate,
+    Clock,
+    Effect,
+    Exit,
+    FileSystem,
+    Match,
+    Option,
+    Path,
+    Schema,
+    String as Str,
+    Struct,
+    pipe,
+} from 'effect';
+
+import { loadEntries } from '../EventLog/JsonlLayer';
+import { toolOutputSessionDirFor } from '../OutputStore/OutputStore';
+
+/** Options shared by the layout helpers. */
+export type SessionLayoutOptions = {
+    /** The project working directory the sessions belong to. Defaults to `process.cwd()`. */
+    readonly cwd?: string;
+    /** The fold home directory. Defaults to `~/.fold`. */
+    readonly foldHome?: string;
+};
+
+/** One discovered session log. */
+export type SessionLogRef = {
+    readonly sessionId: SessionId;
+    readonly path: string;
+    /** Last-modified time of the log file, for newest-first ordering. */
+    readonly mtimeMs: number;
+    readonly size?: number;
+};
+
+/** Lightweight metadata used by session pickers without resuming the agent runtime. */
+export type SessionSummary = SessionLogRef & {
+    readonly title: string;
+    readonly status: 'ready' | 'running' | 'stopped' | 'error';
+    readonly turns: number;
+    readonly providerId: string | null;
+    readonly modelId: string | null;
+    readonly model: ActiveModel | null;
+    readonly contextTokens: number | null;
+    readonly mode: string | null;
+    readonly rpi: boolean;
+    readonly profile: string | null;
+};
+
+const decodeSessionId = Schema.decodeUnknownOption(SessionId);
+
+/**
+ * The project slug for one working directory (pi-style escaped cwd): every non-alphanumeric run
+ * becomes a single dash, so `/Users/kyle/projects/fold` -> `Users-kyle-projects-fold`. Deterministic,
+ * filesystem-safe, and readable in a directory listing.
+ */
+export const projectSlugFor = (cwd: string): string => {
+    const slug = pipe(cwd, Str.replace(/[^a-zA-Z0-9]+/g, '-'), Str.replace(/^-+|-+$/g, ''));
+
+    return slug.length === 0 ? 'root' : slug;
+};
+
+/** The sessions directory for one project: `<foldHome>/sessions/<project-slug>`. */
+export const sessionsDirFor = (options: SessionLayoutOptions | undefined): string =>
+    join(options?.foldHome ?? join(homedir(), '.fold'), 'sessions', projectSlugFor(options?.cwd ?? process.cwd()));
+
+/** The log path for one session id under the project's sessions directory. */
+export const sessionLogPathFor = (sessionId: SessionId, options: SessionLayoutOptions | undefined): string =>
+    join(sessionsDirFor(options), `${sessionId}.jsonl`);
+
+/** Schema for a deleted session record in the index. */
+const DeletedIndexRecord = Schema.TaggedStruct('deleted', {
+    sessionId: SessionId,
+    ts: Schema.Finite,
+});
+
+/** Schema for the session summary as persisted in the index. */
+const SessionSummarySchema = Schema.Struct({
+    sessionId: SessionId,
+    path: Schema.String,
+    mtimeMs: Schema.Finite,
+    size: Schema.optional(Schema.Finite),
+    title: Schema.String,
+    status: Schema.Literals(['ready', 'running', 'stopped', 'error']),
+    turns: Schema.Finite,
+    providerId: Schema.NullOr(Schema.String),
+    modelId: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.Any),
+    contextTokens: Schema.NullOr(Schema.Finite),
+    mode: Schema.NullOr(Schema.String),
+    rpi: Schema.Boolean,
+    profile: Schema.NullOr(Schema.String),
+});
+
+/** Schema for a summary record in the index (includes source file metadata for cache validation). */
+const SummaryIndexRecord = Schema.TaggedStruct('summary', {
+    sourceMtimeMs: Schema.Finite,
+    sourceSize: Schema.Finite,
+    summary: SessionSummarySchema,
+});
+
+const SessionIndexRecordSchema = Schema.Union([SummaryIndexRecord, DeletedIndexRecord]);
+
+type SessionIndexRecord = typeof SessionIndexRecordSchema.Type;
+
+const SessionIndexLine = Schema.fromJsonString(SessionIndexRecordSchema);
+
+const decodeIndexLine = Schema.decodeUnknownOption(SessionIndexLine);
+
+const encodeIndexLine = Schema.encodeEffect(SessionIndexLine);
+
+const appendSessionIndexRecord = (
+    record: SessionIndexRecord,
+    options: SessionLayoutOptions | undefined,
+): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const directory = sessionsDirFor(options);
+        yield* fs.makeDirectory(directory, { recursive: true }).pipe(
+            Effect.andThen(encodeIndexLine(record)),
+            Effect.flatMap((line) =>
+                fs.writeFileString(path.join(directory, 'index.jsonl'), `${line}\n`, { flag: 'a' }),
+            ),
+            Effect.catch((error) =>
+                Effect.logWarning(
+                    `could not append session index record at ${path.join(directory, 'index.jsonl')}: ${error.message}`,
+                ),
+            ),
+        );
+    });
+
+const sessionIdFromIndexRecord = Match.type<SessionIndexRecord>().pipe(
+    Match.tag('summary', ({ summary }) => summary.sessionId),
+    Match.tag('deleted', ({ sessionId }) => sessionId),
+    Match.exhaustive,
+);
+
+const loadSessionIndex = (
+    options: SessionLayoutOptions | undefined,
+): Effect.Effect<Map<SessionId, SessionIndexRecord>, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        return yield* fs.readFileString(path.join(sessionsDirFor(options), 'index.jsonl')).pipe(
+            Effect.map((contents) => {
+                const latest = new Map<SessionId, SessionIndexRecord>();
+
+                for (const line of Str.split(contents, '\n')) {
+                    if (Str.trim(line).length === 0) continue;
+                    // A partial/corrupt cache row is independently recoverable from the source log.
+                    const record = decodeIndexLine(line);
+
+                    if (Option.isSome(record)) latest.set(sessionIdFromIndexRecord(record.value), record.value);
+                }
+
+                return latest;
+            }),
+            Effect.orElseSucceed(() => new Map<SessionId, SessionIndexRecord>()),
+        );
+    });
+
+/**
+ * Mint a session id and prepare its log location: the directory exists, the path is derived from the
+ * id, and the host provides layerJsonl(path) around Session.open({ sessionId }), so the
+ * durable `session_started.sessionId` and the filename agree (D5).
+ */
+export const prepareSessionLog = (
+    options: SessionLayoutOptions | undefined,
+): Effect.Effect<{ readonly sessionId: SessionId; readonly path: string }, never, Ids | FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const sessionId = yield* makeSessionId;
+        const directory = sessionsDirFor(options);
+        yield* fs.makeDirectory(directory, { recursive: true }).pipe(Effect.orDie);
+
+        const path = sessionLogPathFor(sessionId, options);
+
+        return { sessionId, path };
+    });
+
+/** Discover this project's session logs, newest first (by file mtime). */
+export const listSessionLogs = (
+    options: SessionLayoutOptions | undefined,
+): Effect.Effect<ReadonlyArray<SessionLogRef>, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const directory = sessionsDirFor(options);
+
+        const names = yield* fs.readDirectory(directory).pipe(Effect.orElseSucceed(() => []));
+
+        const refs: Array<SessionLogRef> = [];
+
+        for (const name of names) {
+            if (!Str.endsWith('.jsonl')(name)) continue;
+            const decoded = decodeSessionId(Str.slice(0, -'.jsonl'.length)(name));
+
+            if (Option.isNone(decoded)) continue;
+
+            const path = pathService.join(directory, name);
+            const info = yield* fs.stat(path).pipe(Effect.orElseSucceed(() => null));
+
+            if (info === null || info.type !== 'File') continue;
+
+            refs.push({
+                sessionId: decoded.value,
+                path,
+                mtimeMs: Option.match(info.mtime, { onNone: () => 0, onSome: (mtime) => mtime.getTime() }),
+                size: Number(info.size),
+            });
+        }
+
+        return refs.sort((left, right) => right.mtimeMs - left.mtimeMs);
+    });
+
+// Type-safe entry predicates that narrow the LogEntry union.
+const isSessionStarted = (entry: LogEntry): entry is SessionStartedLogEntry =>
+    Predicate.isTagged(entry, 'session_started');
+
+const isSessionTitle = (entry: LogEntry): entry is SessionTitleLogEntry => Predicate.isTagged(entry, 'session_title');
+
+const isUserMessage = (entry: LogEntry): entry is UserMessageLogEntry => Predicate.isTagged(entry, 'user-message');
+
+const isAgentFinished = (entry: LogEntry): entry is AgentFinishedLogEntry =>
+    Predicate.isTagged(entry, 'agent-finished');
+
+type ModelCarrier = AgentStartedLogEntry | ModelChangeLogEntry;
+
+const carriesModel = (entry: LogEntry): entry is ModelCarrier =>
+    Predicate.isTagged(entry, 'agent_started') || Predicate.isTagged(entry, 'model-change');
+
+type FinishedAssistantMessage = AssistantMessageLogEntry & {
+    readonly finish: NonNullable<AssistantMessageLogEntry['finish']>;
+};
+
+const isFinishedAssistantMessage = (entry: LogEntry): entry is FinishedAssistantMessage =>
+    Predicate.isTagged(entry, 'assistant-message') && entry.finish !== null;
+
+/**
+ * The launch fields fold records in `session_started.meta`. Meta is an open JSON record; a session
+ * whose meta does not match reads as having none of these fields.
+ */
+const FoldSessionMeta = Schema.Struct({
+    mode: Schema.optionalKey(Schema.String),
+    rpi: Schema.optionalKey(Schema.Boolean),
+    profile: Schema.optionalKey(Schema.String),
+});
+
+type FoldSessionMeta = typeof FoldSessionMeta.Type;
+
+const decodeFoldSessionMeta = Schema.decodeUnknownOption(FoldSessionMeta);
+
+const sessionMeta = (started: SessionStartedLogEntry | undefined): FoldSessionMeta =>
+    started === undefined ? {} : Option.getOrElse(decodeFoldSessionMeta(started.meta), () => ({}));
+
+const computeStatus = (
+    lastFinished: AgentFinishedLogEntry | undefined,
+    latestRootEntry: LogEntry | undefined,
+): SessionSummary['status'] => {
+    // No finish yet, or activity after the last finish → derive from latest activity
+    if (lastFinished === undefined || (latestRootEntry !== undefined && latestRootEntry.seq > lastFinished.seq)) {
+        return Predicate.isTagged(latestRootEntry, 'system-message') ||
+            Predicate.isTagged(latestRootEntry, 'agent_started')
+            ? 'ready'
+            : 'running';
+    }
+
+    // Finished → map outcome to status
+    return Match.value(lastFinished.outcome).pipe(
+        Match.when('completed', () => 'ready' as const),
+        Match.when('error', () => 'error' as const),
+        Match.orElse(() => 'stopped' as const),
+    );
+};
+
+const sessionSummary = (ref: SessionLogRef, entries: ReadonlyArray<LogEntry>): SessionSummary => {
+    const started = Option.getOrUndefined(Arr.findFirst(entries, isSessionStarted));
+    const rootAgentId = started?.rootAgentId ?? null;
+
+    const rootEntries = Arr.filter(
+        entries,
+        (entry) =>
+            isSessionStarted(entry) ||
+            isSessionTitle(entry) ||
+            (rootAgentId === null ? entry.parentAgentId === null : entry.agentId === rootAgentId),
+    );
+
+    const userEntries = Arr.filter(rootEntries, isUserMessage);
+    const generatedTitle = Option.getOrUndefined(Arr.findLast(rootEntries, isSessionTitle));
+
+    const title =
+        generatedTitle !== undefined
+            ? generatedTitle.title
+            : userEntries[0] === undefined
+              ? 'Untitled session'
+              : Str.trim(Str.replace(/\s+/g, ' ')(encodedContentText(userEntries[0].message.content)));
+
+    const modelEntry = Option.getOrUndefined(Arr.findLast(rootEntries, carriesModel));
+    const model = modelEntry?.model ?? null;
+    const latestUsage = Option.getOrUndefined(Arr.findLast(rootEntries, isFinishedAssistantMessage));
+    const meta = sessionMeta(started);
+    const lastFinished = Option.getOrUndefined(Arr.findLast(rootEntries, isAgentFinished));
+    const latestRootEntry = Option.getOrUndefined(Arr.findLast(rootEntries, (entry) => !isSessionTitle(entry)));
+    const status = computeStatus(lastFinished, latestRootEntry);
+
+    return {
+        ...ref,
+        title: title.length === 0 ? 'Untitled session' : title,
+        status,
+        turns: userEntries.length,
+        providerId: model?.providerId ?? null,
+        modelId: model?.modelId ?? null,
+        model,
+        contextTokens: latestUsage !== undefined ? usageInputTotal(latestUsage.finish.usage) : null,
+        mode: meta.mode ?? null,
+        rpi: meta.rpi === true,
+        profile: meta.profile ?? null,
+    };
+};
+
+const loadSessionSummary = (
+    ref: SessionLogRef,
+): Effect.Effect<SessionSummary | null, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const entries = yield* loadEntries(fs, ref.path);
+
+        return sessionSummary(ref, entries);
+    }).pipe(
+        Effect.exit,
+        Effect.map((exit) => (Exit.isSuccess(exit) ? exit.value : null)),
+    );
+
+/** Check if a cached record is still valid for the given session log ref. */
+const isCacheHit = (
+    cached: SessionIndexRecord | undefined,
+    ref: SessionLogRef,
+): cached is typeof SummaryIndexRecord.Type =>
+    cached !== undefined &&
+    Predicate.isTagged(cached, 'summary') &&
+    cached.sourceMtimeMs === ref.mtimeMs &&
+    cached.sourceSize === (ref.size ?? 0);
+
+/** Read the one-file picker cache, rebuilding only stale/missing records from authoritative logs. */
+export const listSessionSummaries = (
+    options: SessionLayoutOptions | undefined,
+): Effect.Effect<ReadonlyArray<SessionSummary>, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const refs = yield* listSessionLogs(options);
+        const index = yield* loadSessionIndex(options);
+
+        const summaries = yield* Effect.forEach(
+            refs,
+            (ref): Effect.Effect<SessionSummary | null, never, FileSystem.FileSystem | Path.Path> => {
+                const cached = index.get(ref.sessionId);
+
+                if (isCacheHit(cached, ref)) {
+                    // The index's summary, with the file facts (path, mtime, size) taken from the current listing.
+                    const cachedSummary = {
+                        ...Struct.omit(cached.summary, ['size']),
+                        ...Struct.pick(ref, ['path', 'mtimeMs', 'size']),
+                    };
+
+                    return Effect.succeed(cachedSummary);
+                }
+
+                return loadSessionSummary(ref).pipe(
+                    Effect.tap((summary) =>
+                        summary === null
+                            ? Effect.void
+                            : appendSessionIndexRecord(
+                                  SummaryIndexRecord.make({
+                                      sourceMtimeMs: ref.mtimeMs,
+                                      sourceSize: ref.size ?? 0,
+                                      summary,
+                                  }),
+                                  options,
+                              ),
+                    ),
+                );
+            },
+            { concurrency: 8 },
+        );
+
+        return Arr.filter(summaries, (summary): summary is SessionSummary => summary !== null);
+    });
+
+export type DeleteSessionResult = {
+    readonly deleted: boolean;
+    readonly outputRemoved: boolean;
+};
+
+/** Delete one project's session log and all full tool-output files owned by that session. */
+export const deleteSession = (
+    sessionId: SessionId,
+    options: SessionLayoutOptions | undefined,
+): Effect.Effect<DeleteSessionResult, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const logPath = sessionLogPathFor(sessionId, options);
+        const exists = yield* fs.exists(logPath).pipe(Effect.orDie);
+
+        if (!exists) return { deleted: false, outputRemoved: true };
+
+        const foldHome = options?.foldHome ?? path.join(homedir(), '.fold');
+        const outputDirectory = toolOutputSessionDirFor({ sessionId, foldHome });
+        const outputExists = yield* fs.exists(outputDirectory).pipe(Effect.orDie);
+        yield* fs.remove(logPath).pipe(Effect.orDie);
+        const ts = yield* Clock.currentTimeMillis;
+        yield* appendSessionIndexRecord(DeletedIndexRecord.make({ sessionId, ts }), options);
+
+        if (!outputExists) return { deleted: true, outputRemoved: true };
+
+        const outputRemoval = yield* Effect.exit(fs.remove(outputDirectory, { recursive: true }));
+
+        return { deleted: true, outputRemoved: Exit.isSuccess(outputRemoval) };
+    });
+
+/** The newest session log for this project, or null when none exist ("resume latest" - D5). */
+export const latestSessionLog = (
+    options: SessionLayoutOptions | undefined,
+): Effect.Effect<SessionLogRef | null, never, FileSystem.FileSystem | Path.Path> =>
+    listSessionLogs(options).pipe(Effect.map((refs) => refs[0] ?? null));
+
+/** Resolve an exact session id under this project's session directory, or null when it is absent. */
+export const sessionLogById = (
+    sessionId: SessionId,
+    options: SessionLayoutOptions | undefined,
+): Effect.Effect<SessionLogRef | null, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = sessionLogPathFor(sessionId, options);
+        const info = yield* fs.stat(path).pipe(Effect.orElseSucceed(() => null));
+
+        if (info === null || info.type !== 'File') return null;
+
+        return {
+            sessionId,
+            path,
+            mtimeMs: Option.match(info.mtime, { onNone: () => 0, onSome: (mtime) => mtime.getTime() }),
+            size: Number(info.size),
+        };
+    });
+
+/** Rebuild and append one authoritative summary after session metadata changes. */
+export const refreshSessionSummaryIndex = (
+    sessionId: SessionId,
+    options: SessionLayoutOptions | undefined,
+): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
+    sessionLogById(sessionId, options).pipe(
+        Effect.flatMap((ref) => {
+            if (ref === null) return Effect.void;
+
+            return loadSessionSummary(ref).pipe(
+                Effect.flatMap((summary) =>
+                    summary === null
+                        ? Effect.void
+                        : appendSessionIndexRecord(
+                              SummaryIndexRecord.make({
+                                  sourceMtimeMs: ref.mtimeMs,
+                                  sourceSize: ref.size ?? 0,
+                                  summary,
+                              }),
+                              options,
+                          ),
+                ),
+            );
+        }),
+    );

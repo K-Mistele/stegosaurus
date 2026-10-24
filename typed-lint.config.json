@@ -1,19 +1,31 @@
 {
-  "projects": ["tsconfig.json", "apps/*/tsconfig.json", "packages/*/tsconfig.json"],
-  "projectExcludes": ["packages/alchemy-test/**"],
-  "sourceExcludes": [
-    "**/*.d.ts",
-    "**/node_modules/**",
-    "**/dist/**",
-    "**/build/**",
-    "**/coverage/**",
-    "packages/alchemy-test/**",
-    "tools/**"
-  ],
-  "rules": {
-    "no-svg-files": "error",
-    "no-xstate-derived-boolean-context": "error",
-    "prefer-effect-array-match": "error",
-    "prefer-typed-schema-apis": "error"
-  }
+    "projects": ["tsconfig.json", "apps/*/tsconfig.json", "packages/*/tsconfig.json"],
+    "projectExcludes": [
+        "packages/alchemy-test/**",
+        "packages/effect-ai-anthropic/**",
+        "packages/effect-ai-openai/**",
+        "packages/effect-ai-openai-compat/**",
+        "packages/fold-cli/**",
+        "packages/fold-tui-theme/**"
+    ],
+    "sourceExcludes": [
+        "**/*.d.ts",
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/coverage/**",
+        "packages/alchemy-test/**",
+        "tools/**",
+        "packages/effect-ai-anthropic/**",
+        "packages/effect-ai-openai/**",
+        "packages/effect-ai-openai-compat/**",
+        "packages/fold-cli/**",
+        "packages/fold-tui-theme/**"
+    ],
+    "rules": {
+        "no-svg-files": "error",
+        "no-xstate-derived-boolean-context": "error",
+        "prefer-effect-array-match": "error",
+        "prefer-typed-schema-apis": "error"
+    }
 }

@@ -1,0 +1,16 @@
+{
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "lib": ["ESNext"],
+        "exactOptionalPropertyTypes": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitReturns": true,
+        "noImplicitOverride": true,
+        "noFallthroughCasesInSwitch": true,
+        "resolveJsonModule": true,
+        "jsx": "preserve",
+        "jsxImportSource": "@opentui/solid",
+        "types": ["node", "bun"]
+    },
+    "include": ["src", "test", "scripts", "vite.config.ts"]
+}

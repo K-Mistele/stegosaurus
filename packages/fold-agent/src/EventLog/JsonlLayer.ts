@@ -1,0 +1,262 @@
+import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
+import * as NodePath from '@effect/platform-node/NodePath';
+import {
+    EventLog,
+    EventLogCorruptEntryError,
+    EventLogInvalidEntryError,
+    EventLogUnavailableError,
+    Ids,
+    LogEntry as LogEntrySchema,
+    decodeStoredLogEntry,
+    layerLiveIdFactory,
+    storedLogEntry,
+    type EventLogError,
+    type EventLogService,
+    type EventLogUnsupportedVersionError,
+    type LogEntry,
+    type LogEntryInput,
+    type LogSeq,
+} from '@stegosaurus/fold-core';
+import {
+    Array as Arr,
+    Effect,
+    FileSystem,
+    Layer,
+    Path,
+    PubSub,
+    Ref,
+    Schema,
+    Semaphore,
+    Stream,
+    String as Str,
+    type PlatformError,
+} from 'effect';
+
+const textEncoder = new TextEncoder();
+
+const entriesFrom = (entries: ReadonlyArray<LogEntry>, fromSeq: LogSeq) =>
+    Arr.filter(entries, (entry) => entry.seq >= fromSeq);
+
+const unavailableError = (
+    operation: 'append' | 'entries',
+    message: string,
+    retryable: boolean,
+    cause: PlatformError.PlatformError,
+) =>
+    EventLogUnavailableError.make({
+        operation,
+        message,
+        retryable,
+        cause,
+    });
+
+const corruptEntryError = (line: number, message: string, cause: unknown, seq: number | undefined) =>
+    EventLogCorruptEntryError.make({ operation: 'entries', message, line, seq, cause });
+
+const invalidEntryError = (message: string, cause: unknown) =>
+    EventLogInvalidEntryError.make({
+        operation: 'append',
+        message,
+        cause,
+    });
+
+const jsonlLines = (contents: string): ReadonlyArray<string> => {
+    if (contents.length === 0) return [];
+
+    if (Str.endsWith('\n')(contents)) return Str.split(Str.slice(0, -1)(contents), '\n');
+
+    return Str.split(contents, '\n');
+};
+
+const decodeJsonText = Schema.decodeEffect(Schema.fromJsonString(Schema.Json));
+
+const encodeLogEntryLine = Schema.encodeEffect(Schema.fromJsonString(LogEntrySchema));
+
+const decodeJsonlLine = (
+    line: string,
+    lineNumber: number,
+): Effect.Effect<LogEntry, EventLogCorruptEntryError | EventLogUnsupportedVersionError> =>
+    Effect.gen(function* () {
+        if (line.length === 0) {
+            return yield* corruptEntryError(lineNumber, `Empty JSONL line at line ${lineNumber}`, undefined, undefined);
+        }
+
+        const parsed = yield* decodeJsonText(line).pipe(
+            Effect.mapError((cause) =>
+                corruptEntryError(lineNumber, `Invalid JSON at line ${lineNumber}`, cause, undefined),
+            ),
+        );
+
+        const entry = yield* decodeStoredLogEntry(parsed).pipe(
+            Effect.catchTag('EventLogCorruptEntryError', (error) =>
+                corruptEntryError(
+                    lineNumber,
+                    `Invalid EventLog entry at line ${lineNumber}`,
+                    error.cause ?? error,
+                    error.seq,
+                ),
+            ),
+        );
+
+        const expectedSeq = lineNumber - 1;
+
+        if (entry.seq !== expectedSeq) {
+            return yield* corruptEntryError(
+                lineNumber,
+                `Invalid EventLog sequence at line ${lineNumber}: expected ${expectedSeq}, got ${entry.seq}`,
+                undefined,
+                entry.seq,
+            );
+        }
+
+        return entry;
+    });
+
+const decodeJsonl = (
+    contents: string,
+): Effect.Effect<ReadonlyArray<LogEntry>, EventLogCorruptEntryError | EventLogUnsupportedVersionError> =>
+    Effect.forEach(jsonlLines(contents), (line, index) => decodeJsonlLine(line, index + 1), { concurrency: 1 });
+
+const encodeJsonlLine = (entry: LogEntry): Effect.Effect<string, EventLogInvalidEntryError> =>
+    Effect.gen(function* () {
+        const line = yield* encodeLogEntryLine(entry).pipe(
+            Effect.mapError((cause) => invalidEntryError('Unable to encode EventLog entry', cause)),
+        );
+
+        return `${line}\n`;
+    });
+
+/** Read every entry from a JSONL EventLog file, without building an EventLog service. */
+export const loadEntries = (
+    fs: FileSystem.FileSystem,
+    filePath: string,
+): Effect.Effect<
+    ReadonlyArray<LogEntry>,
+    EventLogCorruptEntryError | EventLogUnsupportedVersionError | EventLogUnavailableError,
+    Path.Path
+> =>
+    Effect.gen(function* () {
+        const path = yield* Path.Path;
+        yield* fs
+            .makeDirectory(path.dirname(filePath), { recursive: true })
+            .pipe(
+                Effect.mapError((cause) =>
+                    unavailableError('entries', `Unable to create EventLog directory for ${filePath}`, false, cause),
+                ),
+            );
+
+        const exists = yield* fs
+            .exists(filePath)
+            .pipe(
+                Effect.mapError((cause) =>
+                    unavailableError('entries', `Unable to inspect EventLog file ${filePath}`, false, cause),
+                ),
+            );
+
+        if (!exists) return [];
+
+        const contents = yield* fs
+            .readFileString(filePath)
+            .pipe(
+                Effect.mapError((cause) =>
+                    unavailableError('entries', `Unable to read EventLog file ${filePath}`, false, cause),
+                ),
+            );
+
+        return yield* decodeJsonl(contents);
+    });
+
+const appendJsonlLine = (
+    fs: FileSystem.FileSystem,
+    filePath: string,
+    line: string,
+): Effect.Effect<void, EventLogUnavailableError> =>
+    Effect.scoped(
+        Effect.gen(function* () {
+            const file = yield* fs
+                .open(filePath, { flag: 'a' })
+                .pipe(
+                    Effect.mapError((cause) =>
+                        unavailableError('append', `Unable to open EventLog file ${filePath}`, true, cause),
+                    ),
+                );
+
+            yield* file
+                .writeAll(textEncoder.encode(line))
+                .pipe(
+                    Effect.mapError((cause) =>
+                        unavailableError('append', `Unable to write EventLog file ${filePath}`, true, cause),
+                    ),
+                );
+            yield* file.sync.pipe(
+                Effect.mapError((cause) =>
+                    unavailableError('append', `Unable to fsync EventLog file ${filePath}`, true, cause),
+                ),
+            );
+        }),
+    );
+
+/** JSONL-backed EventLog layer using the caller-supplied ID service. */
+export const layerJsonlWithIds = (
+    filePath: string,
+): Layer.Layer<EventLog, EventLogError, FileSystem.FileSystem | Path.Path | Ids> =>
+    Layer.effect(
+        EventLog,
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const ids = yield* Ids;
+            const initialEntries = yield* loadEntries(fs, filePath);
+            const entriesRef = yield* Ref.make<ReadonlyArray<LogEntry>>(initialEntries);
+            const pubsub = yield* PubSub.unbounded<LogEntry>();
+            const appendLock = yield* Semaphore.make(1);
+
+            const append = Effect.fn('fold.event_log.jsonl.append')((input: LogEntryInput) =>
+                appendLock.withPermit(
+                    Effect.gen(function* () {
+                        const current = yield* Ref.get(entriesRef);
+                        const stored = yield* storedLogEntry(input, current.length, yield* ids.makeEventId);
+                        const line = yield* encodeJsonlLine(stored);
+
+                        yield* appendJsonlLine(fs, filePath, line);
+                        yield* Ref.set(entriesRef, [...current, stored]);
+                        yield* PubSub.publish(pubsub, stored);
+
+                        return stored;
+                    }),
+                ),
+            );
+
+            const entries: EventLogService['entries'] = (fromSeq = 0) =>
+                Stream.fromIterableEffect(
+                    Ref.get(entriesRef).pipe(Effect.map((snapshot) => entriesFrom(snapshot, fromSeq))),
+                );
+
+            const subscribe: EventLogService['subscribe'] = (fromSeq = 0) =>
+                Stream.unwrap(
+                    appendLock.withPermit(
+                        Effect.gen(function* () {
+                            const subscription = yield* PubSub.subscribe(pubsub);
+                            const snapshot = yield* Ref.get(entriesRef);
+
+                            return Stream.fromIterable(entriesFrom(snapshot, fromSeq)).pipe(
+                                Stream.concat(
+                                    Stream.fromSubscription(subscription).pipe(
+                                        Stream.filter((entry) => entry.seq >= fromSeq),
+                                    ),
+                                ),
+                            );
+                        }),
+                    ),
+                );
+
+            return { append, entries, subscribe };
+        }),
+    );
+
+/** JSONL-backed EventLog layer. The provided file path represents one fold session. */
+export const layerJsonl = (filePath: string): Layer.Layer<EventLog, EventLogError, FileSystem.FileSystem | Path.Path> =>
+    layerJsonlWithIds(filePath).pipe(Layer.provide(layerLiveIdFactory));
+
+/** Node-backed JSONL EventLog layer using the `@effect/platform-node` FileSystem and Path layers. */
+export const layerJsonlNode = (filePath: string): Layer.Layer<EventLog, EventLogError> =>
+    layerJsonl(filePath).pipe(Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)));

@@ -1,0 +1,80 @@
+{
+    "name": "@stegosaurus/fold-tui-theme",
+    "version": "0.0.0",
+    "license": "MIT",
+    "files": [
+        "dist"
+    ],
+    "type": "module",
+    "module": "src/main.tsx",
+    "exports": {
+        ".": "./src/main.tsx",
+        "./tactical": "./src/theme/tactical.ts",
+        "./themes": "./src/theme/index.ts",
+        "./theme-types": "./src/theme/types.ts",
+        "./glow": "./src/hud/GlowEffect.ts",
+        "./postfx": "./src/hud/postfx.ts"
+    },
+    "publishConfig": {
+        "module": "./dist/main.js",
+        "types": "./dist/main.d.ts",
+        "exports": {
+            ".": {
+                "types": "./dist/main.d.ts",
+                "import": "./dist/main.js",
+                "default": "./dist/main.js"
+            },
+            "./tactical": {
+                "types": "./dist/theme/tactical.d.ts",
+                "import": "./dist/theme/tactical.js",
+                "default": "./dist/theme/tactical.js"
+            },
+            "./themes": {
+                "types": "./dist/theme/index.d.ts",
+                "import": "./dist/theme/index.js",
+                "default": "./dist/theme/index.js"
+            },
+            "./theme-types": {
+                "types": "./dist/theme/types.d.ts",
+                "import": "./dist/theme/types.js",
+                "default": "./dist/theme/types.js"
+            },
+            "./glow": {
+                "types": "./dist/hud/GlowEffect.d.ts",
+                "import": "./dist/hud/GlowEffect.js",
+                "default": "./dist/hud/GlowEffect.js"
+            },
+            "./postfx": {
+                "types": "./dist/hud/postfx.d.ts",
+                "import": "./dist/hud/postfx.js",
+                "default": "./dist/hud/postfx.js"
+            }
+        }
+    },
+    "scripts": {
+        "start": "bun run src/main.tsx",
+        "rapture": "bun run src/main.tsx --theme rapture",
+        "tactical": "bun run src/main.tsx --theme tactical",
+        "neuromancer": "bun run src/main.tsx --theme neuromancer",
+        "redalert": "bun run src/main.tsx --theme redalert",
+        "covenant": "bun run src/main.tsx --theme covenant",
+        "wintermute": "bun run src/main.tsx --theme wintermute",
+        "demo": "bun run src/main.tsx --demo",
+        "typecheck": "tsc"
+    },
+    "dependencies": {
+        "@opentui/core": "catalog:",
+        "@opentui/react": "catalog:",
+        "react": "catalog:"
+    },
+    "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "@types/react": "catalog:",
+        "effect": "catalog:",
+        "typescript": "catalog:"
+    },
+    "peerDependencies": {
+        "effect": "catalog:"
+    }
+}

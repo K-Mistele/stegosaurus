@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": [
+      "ESNext"
+    ],
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitReturns": false,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "src",
+    "vite.config.ts"
+  ]
+}

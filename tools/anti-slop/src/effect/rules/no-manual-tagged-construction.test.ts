@@ -10,6 +10,8 @@ new RuleTester().run(
 			'Match.value(value).pipe(Match.tag("Ready", handleReady));',
 			"Ready.make({ value });",
 			"new NotFound({ id });",
+			'Schema.Struct({ _tag: Schema.tag("Ready"), value: Schema.String });',
+			'Schema.Struct({ _tag: Schema.tagDefaultOmit("Granted"), token: Schema.String });',
 		],
 		invalid: [
 			{
@@ -27,6 +29,10 @@ new RuleTester().run(
 			{
 				filename: "value.ts",
 				code: 'const value = { _tag: "Ready" as const, payload };',
+				errors: [{ messageId: "manualConstruction" }],
+			},
+			{
+				code: 'const value = { _tag: Other.tag("Ready") };',
 				errors: [{ messageId: "manualConstruction" }],
 			},
 			{

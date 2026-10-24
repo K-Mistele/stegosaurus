@@ -1,131 +1,131 @@
 name: CI
 
 on:
-  pull_request:
-  push:
-    branches: [master]
+    pull_request:
+    push:
+        branches: [master]
 
 # a new push to a PR cancels the run for its previous commit
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+    group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
 
 jobs:
-  changes:
-    name: Detect changes
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      durable-streams: ${{ steps.filter.outputs.durable-streams }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+    changes:
+        name: Detect changes
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            pull-requests: read
+        outputs:
+            durable-streams: ${{ steps.filter.outputs.durable-streams }}
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v4
 
-      - name: Filter paths
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            durable-streams:
-              - packages/durable-streams-protocol/**
-              - packages/durable-streams-server/**
-              - packages/durable-streams-cloudflare/**
+            - name: Filter paths
+              id: filter
+              uses: dorny/paths-filter@v3
+              with:
+                  filters: |
+                      durable-streams:
+                        - packages/durable-streams-protocol/**
+                        - packages/durable-streams-server/**
+                        - packages/durable-streams-cloudflare/**
 
-  check:
-    name: Format, lint and types
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+    check:
+        name: Format, lint and types
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 12.15.0
+            - name: Set up pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 12.15.0
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: pnpm
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.4.2
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
 
-      - name: Check
-        run: pnpm check
+            - name: Check
+              run: pnpm check
 
-      # `pnpm check` formats in place; fail if that changed any file
-      - name: Fail on unformatted files
-        run: git diff --exit-code
+            # `pnpm check` formats in place; fail if that changed any file
+            - name: Fail on unformatted files
+              run: git diff --exit-code
 
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+    test:
+        name: Tests
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 12.15.0
+            - name: Set up pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 12.15.0
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: pnpm
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.4.2
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
 
-      - name: Test
-        run: pnpm test
+            - name: Test
+              run: pnpm test
 
-  # runs the Durable Streams Worker in local workerd, so it needs no Cloudflare account
-  conformance:
-    name: Durable Streams conformance
-    needs: changes
-    if: needs.changes.outputs.durable-streams == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+    # runs the Durable Streams Worker in local workerd, so it needs no Cloudflare account
+    conformance:
+        name: Durable Streams conformance
+        needs: changes
+        if: needs.changes.outputs.durable-streams == 'true'
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 12.15.0
+            - name: Set up pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 12.15.0
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: pnpm
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.4.2
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
 
-      - name: Conformance suite
-        run: pnpm test:conformance
+            - name: Conformance suite
+              run: pnpm test:conformance

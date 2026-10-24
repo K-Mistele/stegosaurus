@@ -1,0 +1,258 @@
+import * as NodeServices from '@effect/platform-node/NodeServices';
+import { expect, it } from '@effect/vitest';
+import { ToolResultFailure, ToolResultMultipart, type ToolResultSuccess, ToolResultText } from '@stegosaurus/fold-core';
+import { Array as Arr, Effect, FileSystem, Path, Schema, String as Str } from 'effect';
+
+import { readTool } from '../../src/index';
+import { handlerOf, messageOf, runHandler, tempDir } from '../TestHelpers';
+
+const onePixelPngBase64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/** Minimal valid 1x1 24-bit BMP. */
+const onePixelBmp = (): Uint8Array => {
+    const bytes = new Uint8Array(58);
+    const view = new DataView(bytes.buffer);
+    bytes[0] = 0x42; // B
+    bytes[1] = 0x4d; // M
+    view.setUint32(2, 58, true); // file size
+    view.setUint32(10, 54, true); // pixel offset
+    view.setUint32(14, 40, true); // DIB header size
+    view.setInt32(18, 1, true); // width
+    view.setInt32(22, 1, true); // height
+    view.setUint16(26, 1, true); // planes
+    view.setUint16(28, 24, true); // bpp
+    view.setUint32(34, 4, true); // image size
+    bytes[54] = 0xff; // blue
+    bytes[55] = 0x00;
+    bytes[56] = 0x00;
+
+    return bytes;
+};
+
+const isToolResultMultipart = Schema.is(ToolResultMultipart);
+
+const isToolResultText = Schema.is(ToolResultText);
+
+const contentOf = (result: ToolResultSuccess): ToolResultMultipart['content'] => {
+    if (!isToolResultMultipart(result)) throw new Error('expected multipart tool output');
+
+    return result.content;
+};
+
+const firstText = (result: ToolResultSuccess): string => {
+    if (isToolResultText(result)) return result.text;
+    const block = contentOf(result)[0];
+
+    if (block?._tag !== 'text-part') throw new Error('expected a text part');
+
+    return block.text;
+};
+
+it.effect('reads text with arrow-separated line numbers', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFileString(path.join(dir, 'plain.txt'), 'first line\nsecond line\n');
+
+        const result = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'plain.txt' }));
+
+        expect(firstText(result)).toBe('1→first line\n2→second line\n3→');
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('right-aligns line numbers to the largest displayed line number', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFileString(
+            path.join(dir, 'aligned.txt'),
+            Arr.join(
+                Array.from({ length: 10 }, (_, index) => `line ${index + 1}`),
+                '\n',
+            ),
+        );
+
+        const result = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'aligned.txt' }));
+
+        expect(firstText(result)).toContain(' 1→line 1');
+        expect(firstText(result)).toContain('10→line 10');
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('applies 1-indexed offset and limit with the more-lines notice', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFileString(
+            path.join(dir, 'lines.txt'),
+            Arr.join(
+                Array.from({ length: 10 }, (_, index) => `line-${index + 1}`),
+                '\n',
+            ),
+        );
+
+        const result = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'lines.txt', offset: 3, limit: 2 }));
+
+        expect(firstText(result)).toBe('3→line-3\n4→line-4\n\n[6 more lines in file. Use offset=5 to continue.]');
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('head-truncates large files with pi verbatim notice', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        const lines = Array.from({ length: 2500 }, (_, index) => `l${index + 1}`);
+        yield* fs.writeFileString(path.join(dir, 'big.txt'), Arr.join(lines, '\n'));
+
+        const result = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'big.txt' }));
+        const text = firstText(result);
+
+        expect(Str.endsWith('[Showing lines 1-2000 of 2500. Use offset=2001 to continue.]')(text)).toBe(true);
+        expect(Str.startsWith('   1→l1\n')(text)).toBe(true);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('redirects oversized single lines to bash', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFileString(path.join(dir, 'huge-line.txt'), Str.repeat(60 * 1024)('x'));
+
+        const result = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'huge-line.txt' }));
+
+        expect(firstText(result)).toBe(
+            `[Line 1 is 60.0KB, exceeds 50.0KB limit. Use bash: sed -n '1p' huge-line.txt | head -c 51200]`,
+        );
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('fails with the offset-beyond-EOF message', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFileString(path.join(dir, 'short.txt'), 'only\n');
+
+        const failure = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'short.txt', offset: 99 })).pipe(
+            Effect.flip,
+        );
+
+        expect(failure).toEqual(ToolResultFailure.make({ text: 'Offset 99 is beyond end of file (2 lines total)' }));
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('fails with a model-actionable message for missing files', () =>
+    Effect.gen(function* () {
+        const dir = yield* tempDir;
+
+        const failure = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'nope.txt' })).pipe(Effect.flip);
+
+        expect(yield* messageOf(failure)).toContain('file not found: nope.txt');
+    }),
+);
+
+it.effect('rejects binary files without returning database-invalid null bytes', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFile(path.join(dir, 'binary.dat'), Buffer.from([0x61, 0x62, 0x00, 0x63]));
+
+        const failure = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'binary.dat' })).pipe(Effect.flip);
+
+        expect(yield* messageOf(failure)).toBe('Cannot read binary file: binary.dat');
+        expect(yield* messageOf(failure)).not.toContain('\0');
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('rejects a null byte beyond the binary detection sample', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFile(
+            path.join(dir, 'late-null.txt'),
+            Buffer.concat([Buffer.alloc(5_000, 0x61), Buffer.from([0x00])]),
+        );
+
+        const failure = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'late-null.txt' })).pipe(
+            Effect.flip,
+        );
+
+        expect(yield* messageOf(failure)).toBe('Cannot read binary file: late-null.txt');
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('rejects malformed UTF-8 with a model-actionable message', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFile(path.join(dir, 'malformed.txt'), Buffer.from([0x61, 0x80, 0x62]));
+
+        const failure = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'malformed.txt' })).pipe(
+            Effect.flip,
+        );
+
+        expect(yield* messageOf(failure)).toBe('Cannot read file because it is not valid UTF-8: malformed.txt');
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('returns PNG images as an image content block with a note (hard requirement)', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFile(path.join(dir, 'pixel.png'), Buffer.from(onePixelPngBase64, 'base64'));
+
+        const result = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'pixel.png' }));
+        const blocks = contentOf(result);
+
+        expect(blocks[0]?._tag).toBe('text-part');
+        expect(firstText(result)).toContain('Read image file [image/png]');
+
+        const image = blocks[1];
+
+        if (image?._tag !== 'image-part') throw new Error('expected an image part');
+        expect(image.mediaType).toBe('image/png');
+        // Small image passes through unresized: bytes round-trip exactly.
+        expect(image.data).toBe(onePixelPngBase64);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('converts BMP to PNG with a conversion hint', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFile(path.join(dir, 'pixel.bmp'), onePixelBmp());
+
+        const result = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: 'pixel.bmp' }));
+        const blocks = contentOf(result);
+
+        expect(firstText(result)).toContain('[Image converted from image/bmp to image/png.]');
+        const image = blocks[1];
+
+        if (image?._tag !== 'image-part') throw new Error('expected an image part');
+        expect(image.mediaType).toBe('image/png');
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect('resolves macOS filename variants (curly apostrophe)', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* tempDir;
+        yield* fs.writeFileString(path.join(dir, 'it’s a file.txt'), 'variant content\n');
+
+        const result = yield* runHandler(handlerOf(readTool({ cwd: dir }))({ path: "it's a file.txt" }));
+
+        expect(firstText(result)).toBe('1→variant content\n2→');
+    }).pipe(Effect.provide(NodeServices.layer)),
+);

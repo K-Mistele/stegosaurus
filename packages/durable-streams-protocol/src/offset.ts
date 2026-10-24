@@ -1,4 +1,4 @@
-import { Offset } from "./codec";
+import { Offset } from './codec';
 
 export const zero = Offset.make(0);
 

@@ -1,0 +1,154 @@
+/**
+ * Regenerates `src/Catalog/BakedCatalog.ts` - the baked models.dev snapshot for the `anthropic`,
+ * `openai`, and `xai` providers, normalized to core `ModelCatalogEntry` rows. Reads a local snapshot
+ * from `/tmp/models_dev_api.json` when present (avoid hammering models.dev while iterating),
+ * otherwise fetches `https://models.dev/api.json` fresh.
+ *
+ * Usage: `bun packages/fold-agent/scripts/update-model-catalog.ts`
+ * Run `pnpm format` afterwards to format the generated file.
+ */
+import * as NodeRuntime from '@effect/platform-node/NodeRuntime';
+import * as NodeServices from '@effect/platform-node/NodeServices';
+import type { ModelCatalogEntry, ModelPricing } from '@stegosaurus/fold-core';
+import { Array as Arr, Effect, FileSystem, Layer, Order, Path, Schema, String as Str } from 'effect';
+import { FetchHttpClient, HttpClient, HttpClientResponse } from 'effect/http';
+
+import { decodeModelsDevModels, ModelsDevPayload } from '../src/Catalog/ModelsDevSchema';
+import { modelCatalogEntriesFromModelsDev } from '../src/Catalog/Normalize';
+
+const SNAPSHOT_PATH = '/tmp/models_dev_api.json';
+
+const MODELS_DEV_URL = 'https://models.dev/api.json';
+
+const BAKED_PROVIDERS: ReadonlySet<string> = new Set(['anthropic', 'openai', 'xai']);
+
+/** The bake could not read, decode, or normalize a usable snapshot. */
+class CatalogBakeError extends Schema.TaggedError<CatalogBakeError, { readonly brand: unique symbol }>()(
+    'CatalogBakeError',
+    {
+        message: Schema.String,
+    },
+) {}
+
+const decodePayloadText = Schema.decodeEffect(Schema.fromJsonString(ModelsDevPayload));
+
+/** The decoded provider map: the local snapshot when present, a fresh fetch otherwise. */
+const readPayload: Effect.Effect<ModelsDevPayload, CatalogBakeError, HttpClient.HttpClient | FileSystem.FileSystem> =
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const snapshotExists = yield* fs.exists(SNAPSHOT_PATH).pipe(Effect.orElseSucceed(() => false));
+
+        if (snapshotExists) {
+            return yield* fs.readFileString(SNAPSHOT_PATH).pipe(
+                Effect.mapError((error) =>
+                    CatalogBakeError.make({ message: `could not read ${SNAPSHOT_PATH}: ${error.message}` }),
+                ),
+                Effect.flatMap((text) =>
+                    decodePayloadText(text).pipe(
+                        Effect.mapError((error) =>
+                            CatalogBakeError.make({ message: `could not parse ${SNAPSHOT_PATH}: ${error.message}` }),
+                        ),
+                    ),
+                ),
+                Effect.tap(() => Effect.log(`using local snapshot ${SNAPSHOT_PATH}`)),
+            );
+        }
+
+        return yield* HttpClient.get(MODELS_DEV_URL).pipe(
+            Effect.flatMap(HttpClientResponse.filterStatusOk),
+            Effect.flatMap(HttpClientResponse.schemaBodyJson(ModelsDevPayload)),
+            Effect.mapError((error) =>
+                CatalogBakeError.make({ message: `could not fetch ${MODELS_DEV_URL}: ${error.message}` }),
+            ),
+            Effect.tap(() => Effect.log(`fetched ${MODELS_DEV_URL}`)),
+        );
+    });
+
+const stringLiteral = (value: string): string => `'${Str.replaceAll("'", "\\'")(Str.replaceAll('\\', '\\\\')(value))}'`;
+
+const nullableString = (value: string | null): string => (value === null ? 'null' : stringLiteral(value));
+
+const nullableNumber = (value: number | null): string => (value === null ? 'null' : String(value));
+
+const effortsLiteral = (efforts: ReadonlyArray<string> | null): string =>
+    efforts === null ? 'null' : `[${Arr.join(Arr.map(efforts, stringLiteral), ', ')}]`;
+
+const pricingLiteral = (pricing: ModelPricing | null): string =>
+    pricing === null
+        ? 'null'
+        : `{ inputPerMTokens: ${pricing.inputPerMTokens}, outputPerMTokens: ${pricing.outputPerMTokens}, ` +
+          `cacheReadPerMTokens: ${nullableNumber(pricing.cacheReadPerMTokens)}, ` +
+          `cacheWritePerMTokens: ${nullableNumber(pricing.cacheWritePerMTokens)} }`;
+
+const entrySource = (entry: ModelCatalogEntry): string =>
+    Arr.join(
+        [
+            '\t{',
+            `\t\tproviderId: ${stringLiteral(entry.providerId)},`,
+            `\t\tmodelId: ${stringLiteral(entry.modelId)},`,
+            `\t\tname: ${nullableString(entry.name)},`,
+            `\t\tcontextWindow: ${entry.contextWindow},`,
+            `\t\tmaxInputTokens: ${nullableNumber(entry.maxInputTokens)},`,
+            `\t\tmaxOutputTokens: ${entry.maxOutputTokens},`,
+            `\t\treasoning: ${entry.reasoning},`,
+            `\t\treasoningEfforts: ${effortsLiteral(entry.reasoningEfforts)},`,
+            `\t\tvision: ${entry.vision},`,
+            `\t\ttoolCall: ${entry.toolCall},`,
+            `\t\tpricing: ${pricingLiteral(entry.pricing)},`,
+            '\t},',
+        ],
+        '\n',
+    );
+
+const fileSource = (entries: ReadonlyArray<ModelCatalogEntry>): string =>
+    Arr.join(
+        [
+            '// GENERATED by scripts/update-model-catalog.ts - do not edit by hand.',
+            '// Baked models.dev snapshot for the anthropic, openai, and xai providers, normalized to ModelCatalogEntry.',
+            '// Regenerate: bun packages/fold-agent/scripts/update-model-catalog.ts',
+            "import type { ModelCatalogEntry } from '@stegosaurus/fold-core'",
+            '',
+            '/**',
+            ' * The offline model catalog: the last-resort fallback when neither a cached nor a freshly fetched',
+            ' * models.dev catalog is available (D15). Covers every anthropic, openai, and xai model models.dev',
+            ' * knew at generation time.',
+            ' */',
+            'export const bakedModelCatalog: ReadonlyArray<ModelCatalogEntry> = [',
+            ...Arr.map(entries, entrySource),
+            ']',
+            '',
+        ],
+        '\n',
+    );
+
+const localeOrder: Order.Order<string> = (self, that) => Str.localeCompare(that)(self);
+
+const entryOrder: Order.Order<ModelCatalogEntry> = Order.combine(
+    Order.mapInput(localeOrder, (entry: ModelCatalogEntry) => entry.providerId),
+    Order.mapInput(localeOrder, (entry: ModelCatalogEntry) => entry.modelId),
+);
+
+const main = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const scriptPath = yield* path.fromFileUrl(new URL(import.meta.url));
+    const targetPath = path.join(path.dirname(scriptPath), '..', 'src', 'Catalog', 'BakedCatalog.ts');
+    const payload = yield* readPayload;
+    const models = yield* decodeModelsDevModels(payload);
+    const baked = Arr.filter(models, (named) => BAKED_PROVIDERS.has(named.providerId));
+
+    const entries = Arr.sort(modelCatalogEntriesFromModelsDev(baked), entryOrder);
+
+    if (Arr.isArrayEmpty(entries)) {
+        return yield* CatalogBakeError.make({
+            message: 'no anthropic/openai/xai entries survived normalization; refusing to bake',
+        });
+    }
+
+    yield* fs.writeFileString(targetPath, fileSource(entries));
+
+    yield* Effect.log(`wrote ${entries.length} entries to ${targetPath}`);
+});
+
+// oxlint-disable-next-line effecttsgo/strict-effect-provide -- entry point
+main.pipe(Effect.provide(Layer.merge(NodeServices.layer, FetchHttpClient.layer)), NodeRuntime.runMain);

@@ -1,0 +1,16 @@
+{
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "lib": ["ESNext", "DOM"],
+        "exactOptionalPropertyTypes": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitReturns": true,
+        "noImplicitOverride": true,
+        "noFallthroughCasesInSwitch": true,
+        "resolveJsonModule": true,
+        "jsx": "react-jsx",
+        "jsxImportSource": "@opentui/react",
+        "types": ["node", "bun"]
+    },
+    "include": ["src", "scripts"]
+}

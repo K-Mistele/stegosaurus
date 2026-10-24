@@ -1,0 +1,43 @@
+import * as NodeServices from '@effect/platform-node/NodeServices';
+/**
+ * Config-driven coding agent (D25/D27): the batteries-included launch path the CLI/OpenTUI will use.
+ * Loads `~/.fold/config.jsonc` (writing a commented starter on first run), resolves the mode's `smart`
+ * role to a model, folds this directory's agentfiles (AGENTS.md/CLAUDE.md) into the system prompt, and
+ * runs the default coding mode over a JSONL session log under `~/.fold/sessions`.
+ *
+ * First run:  bun packages/fold-agent/examples/ConfigAgent.ts
+ *   -> writes ~/.fold/config.jsonc; edit providers/roles, export the referenced API key env var, re-run.
+ * Then:       bun packages/fold-agent/examples/ConfigAgent.ts "your prompt"
+ */
+import * as NodeRuntime from '@effect/platform-node/NodeRuntime';
+import { layerLiveIdFactory } from '@stegosaurus/fold-core';
+import { Console, Effect, Layer } from 'effect';
+import { FetchHttpClient } from 'effect/http';
+
+import { configInit, launchSession, loadFoldConfigOrNull, Photon } from '../src/index';
+
+const prompt = process.argv[2] ?? 'List the files in the current directory and briefly summarize this project.';
+
+const program = Effect.gen(function* () {
+    const config = yield* loadFoldConfigOrNull(undefined);
+
+    if (config === null) {
+        const init = yield* configInit(undefined);
+        yield* Console.log(`No config found - wrote a starter to ${init.configPath}`);
+        yield* Console.log('Edit its providers/roles, export the referenced API key env var, then re-run.');
+
+        return;
+    }
+
+    const session = yield* launchSession({ config });
+    yield* Console.log(`session ${session.sessionId} started; sending prompt...\n`);
+
+    const finished = yield* session.send(prompt);
+    yield* Console.log(`\n[${finished.outcome}] ${finished.resultText ?? '(no text)'}`);
+}).pipe(
+    // oxlint-disable-next-line effecttsgo/strict-effect-provide -- entry point
+    Effect.provide(Layer.mergeAll(layerLiveIdFactory, NodeServices.layer, FetchHttpClient.layer, Photon.layer)),
+    Effect.scoped,
+);
+
+NodeRuntime.runMain(program);

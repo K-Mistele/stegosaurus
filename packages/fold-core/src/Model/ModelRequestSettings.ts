@@ -1,0 +1,239 @@
+/**
+ * This file applies the active model and reasoning settings to outgoing model requests. The agent loop
+ * wraps each model call with `ModelRequestSettings.wrap`, which provides the provider's per-request
+ * config service (OpenAI/Anthropic `Config` via `withConfigOverride`) around the request effect. The
+ * projected reasoning level binds reasoning/thinking on every provider, and on openai-compatible/codex
+ * the projected model id also binds the request `model` - so `thinking-change` and same-provider
+ * `model-change` entries take effect on the very next turn without rebuilding any layer (D23).
+ */
+import { AnthropicLanguageModel } from '@stegosaurus/effect-ai-anthropic';
+import { OpenAiLanguageModel } from '@stegosaurus/effect-ai-openai';
+import { Array as Arr, Data, Match, Context, Layer, String as Str } from 'effect';
+import type { Effect } from 'effect';
+
+import type {
+    ActiveModel,
+    AnthropicThinkingSetting,
+    CodexReasoningSetting,
+    OpenAiReasoningSetting,
+    ReasoningLevel,
+} from '../EventLog/Schemas';
+import { OpenAiReasoningDisabled, OpenAiReasoningWithEffort } from '../EventLog/Schemas';
+
+const CodexReasoning = Data.taggedEnum<CodexReasoningSetting>();
+
+const AnthropicThinking = Data.taggedEnum<AnthropicThinkingSetting>();
+
+type Mutable<T> = { -readonly [Key in keyof T]: T[Key] };
+
+// The provider's Config omits this Responses API field even though the request encoder accepts it.
+type OpenAiConfigBuilder = Mutable<Parameters<typeof OpenAiLanguageModel.withConfigOverride>[1]> & {
+    prompt_cache_key?: string;
+};
+
+/**
+ * Map one reasoning level onto the OpenAI effort scale. `off` disables reasoning config entirely
+ * (provider default applies); every other level passes straight through - the wire scale includes
+ * `max` (gpt-5.6 family), and levels a model does not support are rejected per-model by catalog
+ * validation at config time (D23/D25). Direct-SDK callers bypass that validation and own the 400 risk.
+ */
+export const resolveOpenAiReasoning = (level: ReasoningLevel): OpenAiReasoningSetting => {
+    if (level === 'off') return OpenAiReasoningDisabled.make({});
+
+    return OpenAiReasoningWithEffort.make({ effort: level });
+};
+
+/**
+ * Map one reasoning level onto codex reasoning; codex always requests auto summaries (D23). Same
+ * straight pass-through as {@link resolveOpenAiReasoning}: per-model support is catalog data
+ * validated at config time, so no level is clamped here.
+ */
+export const resolveCodexReasoning = (level: ReasoningLevel): CodexReasoningSetting =>
+    level === 'off' ? CodexReasoning.disabled() : CodexReasoning.effort({ effort: level, summary: 'auto' });
+
+/**
+ * Claude models that support adaptive thinking (`thinking: { type: "adaptive" }`): Opus 4.6+,
+ * Sonnet 4.6+, and the Fable/Mythos tier. On these models `budget_tokens` is deprecated (4.6) or
+ * rejected with a 400 (4.7+/Sonnet 5/Fable), so adaptive is the default. Interim pattern table
+ * until the ModelCatalog owns per-model capability data (D23).
+ */
+export const adaptiveThinkingModelPatterns: ReadonlyArray<RegExp> = [
+    /fable/,
+    /mythos/,
+    /opus-4-[6-9]/,
+    /sonnet-4-6/,
+    /sonnet-5/,
+];
+
+/** True when the claude model id supports adaptive thinking. */
+export const supportsAdaptiveThinking = (modelId: string): boolean => {
+    const id = Str.toLowerCase(modelId);
+
+    return Arr.some(adaptiveThinkingModelPatterns, (pattern) => pattern.test(id));
+};
+
+/**
+ * Default per-level thinking budgets for pre-adaptive anthropic models (Haiku 4.5, Sonnet 4.5, and
+ * older) - pi's table (`simple-options.ts`), with `xhigh`/`max` clamped to the `high` budget until
+ * ModelCatalog-driven per-model budgets and max_tokens fitting land (D23). The provider defaults
+ * `max_tokens` to the model's max output, which comfortably exceeds these budgets.
+ */
+export const defaultAnthropicThinkingBudgets = {
+    minimal: 1024,
+    low: 2048,
+    medium: 8192,
+    high: 16384,
+    xhigh: 16384,
+    max: 16384,
+} as const satisfies Record<Exclude<ReasoningLevel, 'off'>, number>;
+
+/**
+ * Map one reasoning level onto an anthropic thinking setting for the given model: `off` disables
+ * thinking; adaptive-capable models (Opus 4.6+, Sonnet 4.6+, Fable/Mythos) get adaptive thinking
+ * with depth steered via effort at request time; pre-adaptive models get pi's budget table.
+ */
+export const resolveAnthropicThinking = (level: ReasoningLevel, modelId: string): AnthropicThinkingSetting =>
+    level === 'off'
+        ? AnthropicThinking.disabled()
+        : supportsAdaptiveThinking(modelId)
+          ? AnthropicThinking.adaptive()
+          : AnthropicThinking.budget({ budgetTokens: defaultAnthropicThinkingBudgets[level] });
+
+/**
+ * Map one reasoning level onto the anthropic per-request effort knob used alongside adaptive
+ * thinking. The vendored provider `Config` currently exposes only `low | medium | high`, so
+ * `minimal` maps to `low` and `xhigh`/`max` clamp to `high` until the SDK exposes the full scale.
+ */
+export const anthropicEffortForLevel = (level: ReasoningLevel): 'low' | 'medium' | 'high' =>
+    Match.value(level).pipe(
+        Match.withReturnType<'low' | 'medium' | 'high'>(),
+        Match.when(Match.is('off', 'minimal', 'low'), () => 'low'),
+        Match.when('medium', () => 'medium'),
+        Match.when(Match.is('high', 'xhigh', 'max'), () => 'high'),
+        Match.exhaustive,
+    );
+
+/** Input for wrapping one model request: the projected active model and reasoning level. */
+export type WrapModelRequestInput = {
+    readonly model: ActiveModel | null;
+    readonly reasoningLevel: ReasoningLevel | null;
+    readonly promptCacheKey?: string | null;
+};
+
+/**
+ * Request-time model settings application.
+ *
+ * `wrap` returns a combinator that provides provider-specific per-request configuration around one
+ * model request effect: the effective reasoning setting binds when enabled, and on openai-compatible
+ * and codex models the projected model id also binds the request `model`.
+ */
+export type ModelRequestSettingsService = {
+    readonly wrap: (input: WrapModelRequestInput) => <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+};
+
+/** ModelRequestSettings service tag. */
+export class ModelRequestSettings extends Context.Service<ModelRequestSettings, ModelRequestSettingsService>()(
+    '@stegosaurus/fold-core/Model/ModelRequestSettings',
+) {}
+
+type RequestWrapper = <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+
+const identity = <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => self;
+
+/**
+ * Live ModelRequestSettings. The effective setting is the model's stored resolved setting while the
+ * projected level still equals the level it was minted for, otherwise re-derived from the projected
+ * level (the `thinking-change` path). openai-compatible and codex apply through the OpenAI provider's
+ * per-request `Config`; anthropic applies adaptive thinking + effort (or a thinking budget on
+ * pre-adaptive models) through the Anthropic provider's `Config`.
+ */
+export const liveModelRequestSettingsLayer: Layer.Layer<ModelRequestSettings> = Layer.succeed(ModelRequestSettings, {
+    wrap: ({ model, reasoningLevel, promptCacheKey = null }) => {
+        if (model === null) return identity;
+
+        const level = reasoningLevel ?? model.requestedReasoningLevel;
+
+        return Match.value(model).pipe(
+            Match.withReturnType<RequestWrapper>(),
+            Match.discriminatorsExhaustive('providerKind')({
+                'openai-compatible': (model) => {
+                    let setting = model.reasoning;
+
+                    if (level !== model.requestedReasoningLevel) {
+                        setting = resolveOpenAiReasoning(level);
+                    }
+
+                    const reasoning = Match.valueTags(setting, {
+                        disabled: () => ({}),
+                        effort: ({ effort }) => {
+                            if (model.reasoningSummary === undefined) return { reasoning: { effort } };
+
+                            return { reasoning: { effort, summary: model.reasoningSummary } };
+                        },
+                    });
+
+                    const config: OpenAiConfigBuilder = {
+                        model: model.modelId,
+                        ...reasoning,
+                    };
+
+                    if (promptCacheKey !== null) {
+                        config.prompt_cache_key = promptCacheKey;
+                    }
+
+                    return <A, E, R>(self: Effect.Effect<A, E, R>) =>
+                        OpenAiLanguageModel.withConfigOverride(self, config);
+                },
+                codex: (model) => {
+                    const setting =
+                        level === model.requestedReasoningLevel ? model.reasoning : resolveCodexReasoning(level);
+
+                    const reasoning = Match.valueTags(setting, {
+                        disabled: () => ({}),
+                        effort: ({ effort, summary }) => ({ reasoning: { effort, summary } }),
+                    });
+
+                    const config: OpenAiConfigBuilder = {
+                        model: model.modelId,
+                        ...reasoning,
+                    };
+
+                    if (promptCacheKey !== null) {
+                        config.prompt_cache_key = promptCacheKey;
+                    }
+
+                    return <A, E, R>(self: Effect.Effect<A, E, R>) =>
+                        OpenAiLanguageModel.withConfigOverride(self, config);
+                },
+                anthropic: (model) => {
+                    const setting =
+                        level === model.requestedReasoningLevel
+                            ? model.thinking
+                            : resolveAnthropicThinking(level, model.modelId);
+
+                    // Unlike the OpenAI config, the anthropic generated schema types `model` as a strict literal
+                    // union, so the projected model id cannot bind per-request; anthropic model selection stays at
+                    // layer construction until the AgentModels layer seam lands (D15). Tools opt out of strict
+                    // structured-output mode at definition time; do not pass the provider's `strictJsonSchema`
+                    // config helper here, because this beta provider accidentally forwards it into the API payload.
+                    return Match.valueTags(setting, {
+                        disabled: () => identity,
+                        adaptive:
+                            () =>
+                            <A, E, R>(self: Effect.Effect<A, E, R>) =>
+                                AnthropicLanguageModel.withConfigOverride(self, {
+                                    thinking: { type: 'adaptive' },
+                                    output_config: { effort: anthropicEffortForLevel(level) },
+                                }),
+                        budget:
+                            (budget) =>
+                            <A, E, R>(self: Effect.Effect<A, E, R>) =>
+                                AnthropicLanguageModel.withConfigOverride(self, {
+                                    thinking: { type: 'enabled', budget_tokens: budget.budgetTokens },
+                                }),
+                    });
+                },
+            }),
+        );
+    },
+});

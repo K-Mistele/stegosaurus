@@ -1,0 +1,268 @@
+import * as NodeServices from '@effect/platform-node/NodeServices';
+/**
+ * Engine tests for per-agent rosters (D21, round-five shape): the roster is the subagentTool value's
+ * argument - each value advertises exactly its own roster and its closure is the dispatch authority -
+ * so depth is roster nesting (a type carrying its own subagentTool dispatches grandchildren), an
+ * out-of-roster type comes back as an instructive typed failure, and duplicate type names across
+ * distinct definitions are a session-start defect.
+ */
+import { expect, it } from '@effect/vitest';
+import { Array as Arr, Predicate, Cause, Effect, Exit, Schema, Option, String as Str } from 'effect';
+
+import {
+    forkSubagent,
+    defineAgent,
+    defineForkAgent,
+    defineSubagent,
+    defineTool,
+    renderSubagentResult,
+    Session,
+    subagentTool,
+    withSubagentCapabilities,
+    type ForkAgentDefinition,
+    type ToolResultLogEntry,
+} from '../../src/index';
+import { claudeActiveModel, gptActiveModel, scriptedModel } from '../Api/ApiTestHelpers';
+import { textTurn, toolCallTurn } from '../TestLayers/ScriptedLanguageModel';
+import { subagentStartedEntries } from './DriveHarness';
+
+const encodeJsonText = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+it.effect('each subagentTool value advertises exactly its own roster', () =>
+    Effect.gen(function* () {
+        const scripted = yield* scriptedModel(claudeActiveModel, []);
+        const alpha = defineSubagent({ name: 'alpha', description: 'first specialist', model: scripted.model });
+        const beta = defineSubagent({ name: 'beta', description: 'second specialist', model: scripted.model });
+
+        const wide = yield* subagentTool([alpha, beta], undefined).init;
+        const narrow = yield* subagentTool([beta], undefined).init;
+
+        expect(wide.tool.description).toContain('- alpha: first specialist');
+        expect(wide.tool.description).toContain('- beta: second specialist');
+        expect(narrow.tool.description).not.toContain('alpha');
+        expect(narrow.tool.description).toContain('- beta: second specialist');
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect('nested rosters give depth; out-of-roster dispatch fails instructively; envelopes chain', () =>
+    Effect.gen(function* () {
+        const researcherScripted = yield* scriptedModel(claudeActiveModel, [
+            textTurn('grandchild findings', undefined),
+        ]);
+
+        const researcher = defineSubagent({
+            name: 'researcher',
+            description: 'explores',
+            model: researcherScripted.model,
+        });
+
+        // generalPurpose may dispatch ONLY researcher; its model first tries to dispatch itself
+        // (out of roster - typed failure it can read), then dispatches the researcher, then finishes.
+        const generalScripted = yield* scriptedModel(claudeActiveModel, [
+            toolCallTurn(
+                [
+                    {
+                        id: 'gp-call-1',
+                        name: 'subagent',
+                        params: { description: 'self', prompt: 'recurse', agent: 'general-purpose' },
+                    },
+                ],
+                undefined,
+            ),
+            toolCallTurn(
+                [
+                    {
+                        id: 'gp-call-2',
+                        name: 'subagent',
+                        params: { description: 'delegate', prompt: 'explore the module', agent: 'researcher' },
+                    },
+                ],
+                undefined,
+            ),
+            textTurn('delegated and done', undefined),
+        ]);
+
+        const generalPurpose = defineSubagent({
+            name: 'general-purpose',
+            description: 'delegates',
+            model: generalScripted.model,
+            tools: [subagentTool([researcher], undefined)],
+        });
+
+        const rootScripted = yield* scriptedModel(gptActiveModel, [
+            toolCallTurn(
+                [
+                    {
+                        id: 'root-call-1',
+                        name: 'subagent',
+                        params: { description: 'gp', prompt: 'do the thing', agent: 'general-purpose' },
+                    },
+                ],
+                undefined,
+            ),
+            textTurn('root done', undefined),
+        ]);
+
+        const session = yield* Session.open({
+            agent: defineAgent({
+                model: rootScripted.model,
+                tools: [subagentTool([generalPurpose, researcher], undefined)],
+            }),
+        });
+
+        const finished = yield* session.send('go');
+        expect(finished.outcome).toBe('completed');
+
+        const entries = yield* session.entries;
+        const started = subagentStartedEntries(entries);
+        expect(Arr.map(started, (entry) => entry.agentType)).toEqual(['general-purpose', 'researcher']);
+
+        // The grandchild's parent is generalPurpose, not the root (envelope chain).
+        const generalStarted = started[0];
+        const grandchildStarted = started[1];
+        expect(grandchildStarted?.parentAgentId).toBe(generalStarted?.agentId);
+
+        // The out-of-roster attempt came back schema-encoded with the caller's available list.
+        const toolResults = Arr.filter(entries, (entry): entry is ToolResultLogEntry =>
+            Predicate.isTagged(entry, 'tool-result'),
+        );
+
+        const renderedToolResults = yield* Effect.forEach(toolResults, (entry) =>
+            encodeJsonText(entry).pipe(Effect.map((json) => ({ entry, json }))),
+        );
+
+        const selfDispatchResult = Option.getOrUndefined(
+            Arr.findFirst(
+                renderedToolResults,
+                ({ entry, json }) => entry.agentId === generalStarted?.agentId && Str.includes('not available')(json),
+            ),
+        )?.entry;
+
+        if (selfDispatchResult === undefined) throw new Error('expected the out-of-roster failure result');
+        const renderedFailure = yield* encodeJsonText(selfDispatchResult.message.content[0]);
+        expect(renderedFailure).toContain('Agent type \\"general-purpose\\" is not available to you');
+        expect(renderedFailure).toContain('researcher');
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect('duplicate type names across distinct definitions defect at session start', () =>
+    Effect.gen(function* () {
+        const scripted = yield* scriptedModel(claudeActiveModel, []);
+        const first = defineSubagent({ name: 'twin', description: 'one', model: scripted.model });
+        const second = defineSubagent({ name: 'twin', description: 'two', model: scripted.model });
+
+        const exit = yield* Session.open({
+            agent: defineAgent({ model: scripted.model, tools: [subagentTool([first, second], undefined)] }),
+        }).pipe(Effect.exit);
+
+        if (!Exit.isFailure(exit)) throw new Error('expected session start to defect');
+        expect(String(Cause.squash(exit.cause))).toContain('duplicate subagent type name');
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect('the same definition shared by two rosters is one registry entry', () =>
+    Effect.gen(function* () {
+        const sharedScripted = yield* scriptedModel(claudeActiveModel, [textTurn('shared findings', undefined)]);
+        const shared = defineSubagent({ name: 'shared', description: 'shared', model: sharedScripted.model });
+
+        const middle = defineSubagent({
+            name: 'middle',
+            description: 'middle',
+            model: sharedScripted.model,
+            tools: [subagentTool([shared], undefined)],
+        });
+
+        const rootScripted = yield* scriptedModel(gptActiveModel, [
+            toolCallTurn(
+                [{ id: 'r1', name: 'subagent', params: { description: 'd', prompt: 'p', agent: 'shared' } }],
+                undefined,
+            ),
+            textTurn('done', undefined),
+        ]);
+
+        // `shared` is reachable through the root roster AND through middle's roster: one entry, no defect.
+        const session = yield* Session.open({
+            agent: defineAgent({
+                model: rootScripted.model,
+                tools: [subagentTool([middle, shared], undefined)],
+            }),
+        });
+
+        const finished = yield* session.send('go');
+        expect(finished.outcome).toBe('completed');
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+const hostAgentTool = (forkAgent: ForkAgentDefinition) =>
+    withSubagentCapabilities(
+        defineTool({
+            name: 'agent',
+            description: 'Fork the current agent for an isolated task.',
+            parameters: Schema.Struct({ prompt: Schema.String }),
+            success: Schema.Struct({ content: Schema.String }),
+            handler: ({ prompt }) =>
+                Effect.gen(function* () {
+                    const result = yield* forkSubagent({
+                        prompt,
+                        skill: null,
+                        forkAgentDefinitionId: forkAgent.id,
+                        history: 'all',
+                    }).pipe(Effect.orDie);
+
+                    return { content: renderSubagentResult(result) };
+                }),
+        }),
+        { agents: [], forkAgent },
+    );
+
+it.effect('host agent tools configure two fork generations structurally', () =>
+    Effect.gen(function* () {
+        const leafFork = defineForkAgent({ id: 'leaf-fork', tools: [] });
+
+        const delegatingFork = defineForkAgent({
+            id: 'delegating-fork',
+            tools: [hostAgentTool(leafFork)],
+        });
+
+        const scripted = yield* scriptedModel(gptActiveModel, [
+            toolCallTurn([{ id: 'root-fork', name: 'agent', params: { prompt: 'first child' } }], undefined),
+            toolCallTurn([{ id: 'child-fork', name: 'agent', params: { prompt: 'leaf child' } }], undefined),
+            textTurn('leaf done', undefined),
+            textTurn('child done', undefined),
+            textTurn('root done', undefined),
+        ]);
+
+        const session = yield* Session.open({
+            agent: defineAgent({ model: scripted.model, tools: [hostAgentTool(delegatingFork)] }),
+        });
+
+        const finished = yield* session.send('go');
+        expect(finished.outcome).toBe('completed');
+
+        const started = subagentStartedEntries(yield* session.entries);
+        expect(started).toHaveLength(2);
+        expect(started[0]?.fork?.definitionId).toBe('delegating-fork');
+        expect(started[0]?.tools).toContain('agent');
+        expect(started[1]?.fork?.definitionId).toBe('leaf-fork');
+        expect(started[1]?.tools).not.toContain('agent');
+        expect(started[1]?.parentAgentId).toBe(started[0]?.agentId);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect('duplicate fork agent definition ids defect at session start', () =>
+    Effect.gen(function* () {
+        const scripted = yield* scriptedModel(claudeActiveModel, []);
+        const first = defineForkAgent({ id: 'duplicate', tools: [] });
+        const second = defineForkAgent({ id: 'duplicate', tools: [] });
+
+        const exit = yield* Session.open({
+            agent: defineAgent({
+                model: scripted.model,
+                tools: [subagentTool([], { forkAgent: first }), subagentTool([], { forkAgent: second })],
+            }),
+        }).pipe(Effect.exit);
+
+        if (!Exit.isFailure(exit)) throw new Error('expected session start to defect');
+        expect(String(Cause.squash(exit.cause))).toContain('duplicate fork agent definition id');
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

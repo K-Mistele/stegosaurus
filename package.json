@@ -1,53 +1,59 @@
 {
-  "name": "stegosaurus",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "format": "vp fmt",
-    "format:check": "vp fmt --check",
-    "lint": "vp lint",
-    "lint:fix": "vp lint --fix",
-    "typecheck": "tsc && vp run -r typecheck",
-    "typed:check": "bun tools/typed-lint/src/cli.ts check",
-    "check": "vp run format && vp run lint && vp run typecheck && vp run typed:check",
-    "test": "vp run -r test",
-    "test:conformance": "vp run @stegosaurus/durable-streams-cloudflare#test:conformance",
-    "ready": "vp run check && vp run test",
-    "alchemy:deploy": "alchemy deploy --stage prod",
-    "alchemy:destroy": "alchemy destroy",
-    "alchemy:dev": "alchemy dev",
-    "prepare": "vp config && effect-tsgo patch --oxlint",
-    "test:stack": "bun alchemy-test test"
-  },
-  "dependencies": {
-    "@alchemy.run/pkg": "catalog:",
-    "@effect/platform-node": "catalog:",
-    "alchemy": "catalog:",
-    "effect": "catalog:"
-  },
-  "devDependencies": {
-    "@effect/tsgo": "catalog:",
-    "@stegosaurus/alchemy-test": "workspace:*",
-    "@stegosaurus/automation": "workspace:*",
-    "@stegosaurus/typed-lint": "workspace:*",
-    "@types/node": "catalog:",
-    "alchemy-test": "workspace:@stegosaurus/alchemy-test@*",
-    "eslint-plugin-better-tailwindcss": "catalog:",
-    "oxlint-tsgolint": "catalog:",
-    "tailwindcss": "catalog:",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vite-plus": "catalog:"
-  },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "12.15.0",
-      "onFail": "download"
+    "name": "stegosaurus",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "format": "vp fmt",
+        "format:check": "vp fmt --check",
+        "lint": "vp lint",
+        "lint:fix": "vp lint --fix",
+        "typecheck": "tsc && vp run -r typecheck",
+        "typed:check": "bun tools/typed-lint/src/cli.ts check",
+        "check": "vp run format && vp run lint && vp run typecheck && vp run typed:check",
+        "test": "vp run -r test",
+        "test:conformance": "vp run @stegosaurus/durable-streams-cloudflare#test:conformance",
+        "ready": "vp run check && vp run test",
+        "alchemy:deploy": "alchemy deploy --stage prod",
+        "alchemy:destroy": "alchemy destroy",
+        "alchemy:dev": "alchemy dev",
+        "prepare": "vp config && effect-tsgo patch --oxlint",
+        "test:stack": "bun alchemy-test test",
+        "build:packages": "bun packages/fold-cli/scripts/build-packages.ts",
+        "build:binaries": "bun packages/fold-cli/scripts/build-binaries.ts",
+        "release:tag-info": "bun packages/fold-cli/scripts/release/tag-info.ts",
+        "release:prepare": "bun packages/fold-cli/scripts/release/prepare.ts",
+        "release:validate": "bun packages/fold-cli/scripts/release/validate-manifest.ts",
+        "release:publish": "bun packages/fold-cli/scripts/release/publish.ts"
+    },
+    "dependencies": {
+        "@alchemy.run/pkg": "catalog:",
+        "@effect/platform-node": "catalog:",
+        "alchemy": "catalog:",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "@effect/tsgo": "catalog:",
+        "@stegosaurus/alchemy-test": "workspace:*",
+        "@stegosaurus/automation": "workspace:*",
+        "@stegosaurus/typed-lint": "workspace:*",
+        "@types/node": "catalog:",
+        "alchemy-test": "workspace:@stegosaurus/alchemy-test@*",
+        "eslint-plugin-better-tailwindcss": "catalog:",
+        "oxlint-tsgolint": "catalog:",
+        "tailwindcss": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vite-plus": "catalog:"
+    },
+    "devEngines": {
+        "packageManager": {
+            "name": "pnpm",
+            "version": "12.15.0",
+            "onFail": "download"
+        }
+    },
+    "engines": {
+        "node": ">=24.11.1"
     }
-  },
-  "engines": {
-    "node": ">=22.18.0"
-  }
 }

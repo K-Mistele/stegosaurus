@@ -1,0 +1,333 @@
+/**
+ * D5 session layout/discovery tests: the project slug is deterministic and filesystem-safe, prepared
+ * logs live at `<foldHome>/sessions/<slug>/<sess_id>.jsonl` with the directory created, a prepared log
+ * round-trips a real session (`Session.open({ sessionId })` with a provided JSONL layer records the SAME id the filename
+ * carries), and discovery lists a project's logs newest-first with the latest ready for
+ * `Session.open`.
+ */
+import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
+import * as NodePath from '@effect/platform-node/NodePath';
+import * as NodeServices from '@effect/platform-node/NodeServices';
+import { expect, it } from '@effect/vitest';
+import {
+    customModel,
+    defineAgent,
+    layerLiveIdFactory,
+    OpenAiReasoningDisabled,
+    SessionId,
+    Session,
+} from '@stegosaurus/fold-core';
+import {
+    Array as Arr,
+    Layer,
+    Effect,
+    FileSystem,
+    Option,
+    Path,
+    Predicate,
+    Schema,
+    Stream,
+    String as Str,
+} from 'effect';
+import { LanguageModel } from 'effect/ai';
+
+import {
+    layerJsonl,
+    latestSessionLog,
+    deleteSession,
+    listSessionLogs,
+    listSessionSummaries,
+    prepareSessionLog as prepareSessionLogRaw,
+    projectSlugFor,
+    sessionLogPathFor,
+    sessionsDirFor,
+    toolOutputSessionDirFor,
+} from '../../src/index';
+import { tempDir } from '../TestHelpers';
+
+// The Ids service is provided by the runtime in production (see cli.ts). Tests supply the same live
+// factory so `prepareSessionLog` mints real ids; swap in `layerDeterministicIds` where determinism matters.
+const JsonObject = Schema.Record(Schema.String, Schema.Json);
+
+const decodeJsonObject = Schema.decodeUnknownEffect(JsonObject);
+
+const decodeIndexRow = Schema.decodeEffect(Schema.fromJsonString(JsonObject));
+
+const encodeIndexRow = Schema.encodeEffect(Schema.fromJsonString(JsonObject));
+
+const prepareSessionLog = (options: Parameters<typeof prepareSessionLogRaw>[0]) =>
+    prepareSessionLogRaw(options).pipe(Effect.provide(layerLiveIdFactory));
+
+it.effect('the project slug is a deterministic, filesystem-safe escape of the cwd', () =>
+    Effect.sync(() => {
+        expect(projectSlugFor('/Users/kyle/projects/fold')).toBe('Users-kyle-projects-fold');
+        expect(projectSlugFor('/w e i r d//path!!')).toBe('w-e-i-r-d-path');
+        expect(projectSlugFor('/')).toBe('root');
+    }),
+);
+
+it.effect('prepareSessionLog mints the id, creates the directory, and derives the path from the id', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const foldHome = yield* tempDir;
+        const cwd = '/some/project';
+
+        const prepared = yield* prepareSessionLog({ cwd, foldHome });
+
+        expect(prepared.path).toBe(path.join(foldHome, 'sessions', 'some-project', `${prepared.sessionId}.jsonl`));
+        expect(prepared.path).toBe(sessionLogPathFor(prepared.sessionId, { cwd, foldHome }));
+
+        // The directory exists: writing the log file needs no further setup.
+        yield* fs.writeFileString(prepared.path, '');
+        const listed = yield* listSessionLogs({ cwd, foldHome });
+        expect(Arr.map(listed, (ref) => ref.sessionId)).toEqual([prepared.sessionId]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect('a prepared log round-trips a session: the filename and session_started agree on the id', () =>
+    Effect.gen(function* () {
+        const foldHome = yield* tempDir;
+        const cwd = '/round/trip';
+        const prepared = yield* prepareSessionLog({ cwd, foldHome });
+
+        const model = customModel({
+            activeModel: {
+                providerId: 'scripted',
+                providerKind: 'openai-compatible',
+                modelId: 'scripted-model',
+                role: null,
+                requestedReasoningLevel: 'off',
+                reasoning: OpenAiReasoningDisabled.make({}),
+            },
+            make: LanguageModel.make({
+                generateText: () => Effect.die(new Error('unused')),
+                streamText: () => Stream.empty,
+            }),
+        });
+
+        const session = yield* Session.open({
+            agent: defineAgent({ model }),
+            sessionId: prepared.sessionId,
+            cwd,
+        }).pipe(Effect.provideContext(yield* Layer.build(layerJsonl(prepared.path).pipe(Layer.orDie))));
+
+        expect(session.sessionId).toBe(prepared.sessionId);
+
+        const entries = yield* session.entries;
+        const sessionStarted = Arr.findFirst(entries, (entry) => Predicate.isTagged(entry, 'session_started'));
+
+        if (Option.isNone(sessionStarted) || !Predicate.isTagged(sessionStarted.value, 'session_started')) {
+            throw new Error('expected session_started');
+        }
+
+        expect(sessionStarted.value.sessionId).toBe(prepared.sessionId);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer))),
+);
+
+it.effect('session summaries expose first-message titles, turns, and the active model', () =>
+    Effect.gen(function* () {
+        const foldHome = yield* tempDir;
+        const cwd = '/session/summaries';
+        const prepared = yield* prepareSessionLog({ cwd, foldHome });
+
+        const model = customModel({
+            activeModel: {
+                providerId: 'scripted',
+                providerKind: 'openai-compatible',
+                modelId: 'picker-model',
+                role: null,
+                requestedReasoningLevel: 'off',
+                reasoning: OpenAiReasoningDisabled.make({}),
+            },
+            make: LanguageModel.make({
+                generateText: () => Effect.die(new Error('unused')),
+                streamText: () => Stream.empty,
+            }),
+        });
+
+        const session = yield* Session.open({
+            agent: defineAgent({ model }),
+            sessionId: prepared.sessionId,
+            cwd,
+        }).pipe(Effect.provideContext(yield* Layer.build(layerJsonl(prepared.path).pipe(Layer.orDie))));
+
+        yield* session.send('  Fix   the flaky picker test  ');
+        yield* session.setTitle('Repair Flaky Picker');
+
+        const summaries = yield* listSessionSummaries({ cwd, foldHome });
+
+        expect(summaries).toHaveLength(1);
+        expect(summaries[0]).toMatchObject({
+            sessionId: prepared.sessionId,
+            title: 'Repair Flaky Picker',
+            status: 'ready',
+            turns: 1,
+            providerId: 'scripted',
+            modelId: 'picker-model',
+        });
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer))),
+);
+
+it.effect('session summary index is a full fast path and latest valid record wins', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const foldHome = yield* tempDir;
+        const cwd = '/summary/cache-fast-path';
+        const prepared = yield* prepareSessionLog({ cwd, foldHome });
+
+        const model = customModel({
+            activeModel: {
+                providerId: 'stub',
+                providerKind: 'openai-compatible',
+                modelId: 'picker',
+                role: null,
+                requestedReasoningLevel: 'off',
+                reasoning: OpenAiReasoningDisabled.make({}),
+            },
+            make: LanguageModel.make({ generateText: () => Effect.die('unused'), streamText: () => Stream.empty }),
+        });
+
+        const session = yield* Session.open({
+            agent: defineAgent({ model }),
+            sessionId: prepared.sessionId,
+            cwd,
+        }).pipe(Effect.provideContext(yield* Layer.build(layerJsonl(prepared.path).pipe(Layer.orDie))));
+
+        yield* session.send('Cache picker summaries');
+        const [built] = yield* listSessionSummaries({ cwd, foldHome });
+
+        if (built === undefined) throw new Error('expected summary');
+
+        const indexPath = path.join(sessionsDirFor({ cwd, foldHome }), 'index.jsonl');
+        const cached = yield* decodeIndexRow(Str.trim(yield* fs.readFileString(indexPath)));
+        const cachedSummary = yield* decodeJsonObject(cached['summary']);
+        const latestRow = yield* encodeIndexRow({ ...cached, summary: { ...cachedSummary, title: 'Latest Wins' } });
+        yield* fs.writeFileString(indexPath, `${latestRow}\n`, { flag: 'a' });
+        // Put back the time the cache recorded. Effect reads times in nanoseconds and drops the fraction of a
+        // millisecond, and `utimes` can store a time a hair early, so aim half a millisecond in.
+        const mtime = (built.mtimeMs + 0.5) / 1000;
+        const source = yield* fs.readFileString(prepared.path);
+        yield* fs.writeFileString(prepared.path, Str.repeat(source.length)('x'));
+        yield* fs.utimes(prepared.path, mtime, mtime);
+
+        const [fast] = yield* listSessionSummaries({ cwd, foldHome });
+        expect(fast?.title).toBe('Latest Wins');
+        expect(fast?.turns).toBe(1);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect('missing, corrupt, and stale summary records rebuild only their source logs', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const foldHome = yield* tempDir;
+        const cwd = '/summary/cache-recovery';
+        const prepared = yield* prepareSessionLog({ cwd, foldHome });
+
+        const model = customModel({
+            activeModel: {
+                providerId: 'stub',
+                providerKind: 'openai-compatible',
+                modelId: 'picker',
+                role: null,
+                requestedReasoningLevel: 'off',
+                reasoning: OpenAiReasoningDisabled.make({}),
+            },
+            make: LanguageModel.make({ generateText: () => Effect.die('unused'), streamText: () => Stream.empty }),
+        });
+
+        const session = yield* Session.open({
+            agent: defineAgent({ model }),
+            sessionId: prepared.sessionId,
+            cwd,
+        }).pipe(Effect.provideContext(yield* Layer.build(layerJsonl(prepared.path).pipe(Layer.orDie))));
+
+        yield* session.send('Original title');
+        const indexPath = path.join(sessionsDirFor({ cwd, foldHome }), 'index.jsonl');
+        yield* fs.writeFileString(indexPath, '{corrupt cache row\n');
+        expect((yield* listSessionSummaries({ cwd, foldHome }))[0]?.title).toBe('Original title');
+
+        yield* session.setTitle('Fresh From Authoritative Log');
+        expect((yield* listSessionSummaries({ cwd, foldHome }))[0]?.title).toBe('Fresh From Authoritative Log');
+        expect(yield* fs.readFileString(indexPath)).toContain('Fresh From Authoritative Log');
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect('deletion never returns cached summaries and appends a tombstone', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const foldHome = yield* tempDir;
+        const cwd = '/summary/cache-delete';
+        const prepared = yield* prepareSessionLog({ cwd, foldHome });
+        yield* fs.writeFileString(prepared.path, '');
+        yield* listSessionSummaries({ cwd, foldHome });
+        yield* deleteSession(prepared.sessionId, { cwd, foldHome });
+        expect(yield* listSessionSummaries({ cwd, foldHome })).toEqual([]);
+        expect(yield* fs.readFileString(path.join(sessionsDirFor({ cwd, foldHome }), 'index.jsonl'))).toContain(
+            '"_tag":"deleted"',
+        );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("discovery lists a project's logs newest-first and ignores foreign files", () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const foldHome = yield* tempDir;
+        const cwd = '/discover/me';
+        const directory = sessionsDirFor({ cwd, foldHome });
+
+        const older = yield* prepareSessionLog({ cwd, foldHome });
+        const newer = yield* prepareSessionLog({ cwd, foldHome });
+        yield* fs.writeFileString(older.path, '{}\n');
+        yield* fs.writeFileString(newer.path, '{}\n');
+        yield* fs.writeFileString(path.join(directory, 'notes.txt'), 'not a session');
+        yield* fs.writeFileString(path.join(directory, 'garbage.jsonl'), 'bad name');
+
+        // Pin distinct mtimes so newest-first ordering is deterministic.
+        yield* fs.utimes(older.path, 1_000, 1_000);
+        yield* fs.utimes(newer.path, 2_000, 2_000);
+
+        const listed = yield* listSessionLogs({ cwd, foldHome });
+        expect(Arr.map(listed, (ref) => ref.sessionId)).toEqual([newer.sessionId, older.sessionId]);
+
+        const latest = yield* latestSessionLog({ cwd, foldHome });
+        expect(latest?.sessionId).toBe(newer.sessionId);
+        expect(latest?.path).toBe(newer.path);
+
+        // A project with no sessions directory lists empty, latest null.
+        expect(yield* listSessionLogs({ cwd: '/never/used', foldHome })).toEqual([]);
+        expect(yield* latestSessionLog({ cwd: '/never/used', foldHome })).toBeNull();
+
+        // Ids parse back as branded SessionIds.
+        expect(SessionId.make(listed[0]?.sessionId ?? '')).toBe(newer.sessionId);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect('deleting a session removes its event log and full tool-output directory', () =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const foldHome = yield* tempDir;
+        const cwd = '/delete/me';
+        const prepared = yield* prepareSessionLog({ cwd, foldHome });
+        yield* fs.writeFileString(prepared.path, '');
+        const outputDirectory = toolOutputSessionDirFor({ sessionId: prepared.sessionId, foldHome });
+        yield* fs.makeDirectory(outputDirectory, { recursive: true });
+        yield* fs.writeFileString(path.join(outputDirectory, 'tool_call_test.txt'), 'full paginated output');
+
+        expect(yield* deleteSession(prepared.sessionId, { cwd, foldHome })).toEqual({
+            deleted: true,
+            outputRemoved: true,
+        });
+        expect(yield* fs.exists(prepared.path)).toBe(false);
+        expect(yield* fs.exists(outputDirectory)).toBe(false);
+        expect(yield* deleteSession(prepared.sessionId, { cwd, foldHome })).toEqual({
+            deleted: false,
+            outputRemoved: true,
+        });
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

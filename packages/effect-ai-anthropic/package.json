@@ -1,0 +1,61 @@
+{
+  "name": "@stegosaurus/effect-ai-anthropic",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "HumanLayer's vendored Anthropic provider for Effect AI SDK",
+  "sideEffects": [],
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./src/*.ts",
+      "default": "./src/*.ts"
+    },
+    "./internal/*": null,
+    "./index": null,
+    "./*/index": null
+  },
+  "scripts": {
+    "typecheck": "tsc && tsc -p tsconfig.build.json",
+    "test": "vp test test/HumanlayerFork.test.ts"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "effect": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "files": [
+    "dist",
+    "UPSTREAM.md"
+  ],
+  "publishConfig": {
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./*": {
+        "types": "./dist/*.d.ts",
+        "import": "./dist/*.js",
+        "default": "./dist/*.js"
+      },
+      "./internal/*": null,
+      "./index": null,
+      "./*/index": null
+    },
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

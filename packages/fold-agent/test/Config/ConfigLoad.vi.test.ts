@@ -1,0 +1,108 @@
+/**
+ * FoldConfig loading tests (D25): the string-aware JSONC stripper, schema decoding with unknown-key
+ * rejection and role/provider cross-reference validation, and filesystem loading over an in-memory
+ * FileSystem (never touches the real disk).
+ */
+import { expect, it } from '@effect/vitest';
+import { Effect, FileSystem, Predicate, Schema } from 'effect';
+
+import { loadFoldConfig, loadFoldConfigOrNull, parseFoldConfig, stripJsonc } from '../../src/index';
+import { memoryFileSystem } from '../TestHelpers';
+
+const validConfig = `{
+	// leading comment
+	"$schema": "./config.schema.json",
+	"providers": {
+		"anthropic": { "kind": "anthropic", "apiKeyEnv": "ANTHROPIC_API_KEY" }, /* block */
+		"codex": { "kind": "codex" },
+	},
+	"roles": {
+		"smart": { "provider": "anthropic", "model": "claude-opus-4-8", "reasoning": "medium" },
+		"fast": { "provider": "codex", "model": "gpt-5.5" },
+	},
+	"compaction": { "enabled": true, "thresholdTokens": 240000, "reserveTokens": 16000 },
+	"stopConditions": { "doomLoop": { "enabled": true, "repeatedToolCalls": 3 } },
+}
+`;
+
+const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+
+it.effect('stripJsonc removes comments and trailing commas without touching string contents', () =>
+    Effect.gen(function* () {
+        const input = '{ "url": "http://x//y", "arr": ["a,]", ], /* c */ "n": 1, }';
+        const stripped = stripJsonc(input);
+        const parsed = yield* decodeJsonText(stripped);
+
+        expect(parsed).toEqual({ url: 'http://x//y', arr: ['a,]'], n: 1 });
+    }),
+);
+
+it.effect('decodes a valid JSONC config (comments + trailing commas)', () =>
+    Effect.gen(function* () {
+        const config = yield* parseFoldConfig(validConfig, undefined);
+
+        expect(config.providers.anthropic?.kind).toBe('anthropic');
+        expect(config.providers.codex?.kind).toBe('codex');
+        expect(config.roles.smart.model).toBe('claude-opus-4-8');
+        expect(config.roles.smart.reasoning).toBe('medium');
+        expect(config.roles.fast.provider).toBe('codex');
+        expect(config.compaction?.enabled).toBe(true);
+        expect(config.stopConditions?.doomLoop?.enabled).toBe(true);
+    }),
+);
+
+it.effect('rejects an unknown top-level key (typo safety)', () =>
+    Effect.gen(function* () {
+        const text = `{ "providers": {}, "roles": { "smart": { "provider": "a", "model": "m" }, "fast": { "provider": "a", "model": "m" } }, "typo": true }`;
+        const error = yield* parseFoldConfig(text, undefined).pipe(Effect.flip);
+
+        expect(error._tag).toBe('ConfigDecodeError');
+    }),
+);
+
+it.effect('rejects a role that references an undeclared provider (cross-reference check)', () =>
+    Effect.gen(function* () {
+        const text = `{
+			"providers": { "anthropic": { "kind": "anthropic", "apiKeyEnv": "K" } },
+			"roles": {
+				"smart": { "provider": "anthropic", "model": "m" },
+				"fast": { "provider": "missing", "model": "m" }
+			}
+		}`;
+
+        const error = yield* parseFoldConfig(text, undefined).pipe(Effect.flip);
+
+        expect(error._tag).toBe('ConfigDecodeError');
+
+        if (Predicate.isTagged(error, 'ConfigDecodeError')) expect(error.message).toContain('missing');
+    }),
+);
+
+it.effect('fails with ConfigParseError on malformed JSON', () =>
+    Effect.gen(function* () {
+        const error = yield* parseFoldConfig('{ "providers": }', undefined).pipe(Effect.flip);
+        expect(error._tag).toBe('ConfigParseError');
+    }),
+);
+
+it.effect('loads and decodes the config file from the fold home', () => {
+    const fs = memoryFileSystem({ '/home/user/.fold/config.jsonc': validConfig });
+
+    return Effect.gen(function* () {
+        const config = yield* loadFoldConfig({ foldHome: '/home/user/.fold' });
+
+        expect(config.roles.smart.model).toBe('claude-opus-4-8');
+    }).pipe(Effect.provideService(FileSystem.FileSystem, fs));
+});
+
+it.effect('fails with ConfigFileNotFoundError when the file is absent; OrNull returns null', () => {
+    const fs = memoryFileSystem({});
+
+    return Effect.gen(function* () {
+        const error = yield* loadFoldConfig({ foldHome: '/home/user/.fold' }).pipe(Effect.flip);
+        expect(error._tag).toBe('ConfigFileNotFoundError');
+
+        const orNull = yield* loadFoldConfigOrNull({ foldHome: '/home/user/.fold' });
+        expect(orNull).toBeNull();
+    }).pipe(Effect.provideService(FileSystem.FileSystem, fs));
+});

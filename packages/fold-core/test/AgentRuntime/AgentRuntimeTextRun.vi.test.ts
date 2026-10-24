@@ -1,0 +1,95 @@
+import { expect, it } from '@effect/vitest';
+import { Array as Arr, Predicate, Effect, Option } from 'effect';
+
+import { AgentRuntime, type AssistantMessageLogEntry, type SystemMessageLogEntry } from '../../src/index';
+import { makeScriptedLanguageModel, textTurn } from '../TestLayers/ScriptedLanguageModel';
+import { layerEchoTool, makeEchoRecorder } from '../TestLayers/TestTools';
+import { collectEntries } from '../ToolRuntime/ToolRuntimeTestHelpers';
+import { agentRuntimeBaseLayer, runInput, startInput } from './AgentRuntimeTestHelpers';
+
+it.effect('completes a text-only run with the full log shape', () =>
+    Effect.gen(function* () {
+        const recorder = yield* makeEchoRecorder;
+        const scripted = yield* makeScriptedLanguageModel([textTurn('Hello!', undefined)]);
+        const layer = agentRuntimeBaseLayer(scripted.layer, layerEchoTool(recorder));
+
+        const result = yield* Effect.gen(function* () {
+            const runtime = yield* AgentRuntime;
+
+            const started = yield* runtime.start(startInput({}));
+            const finished = yield* runtime.run(runInput('hi there'));
+            const entries = yield* collectEntries;
+
+            return { started, finished, entries };
+        }).pipe(Effect.provide(layer));
+
+        expect(result.started._tag).toBe('agent_started');
+        expect(result.started.tools).toEqual(['echo']);
+
+        expect(result.finished.outcome).toBe('completed');
+        expect(result.finished.resultText).toBe('Hello!');
+
+        expect(Arr.map(result.entries, (entry) => entry._tag)).toEqual([
+            'agent_started',
+            'system-message',
+            'user-message',
+            'assistant-message',
+            'agent-finished',
+        ]);
+
+        const assistant = Option.getOrUndefined(
+            Arr.findFirst(result.entries, (entry): entry is AssistantMessageLogEntry =>
+                Predicate.isTagged(entry, 'assistant-message'),
+            ),
+        );
+
+        expect(assistant?.finish?.reason).toBe('stop');
+        expect(assistant?.finish?.usage.inputTokens?.total).toBe(10);
+        expect(assistant?.finish?.usage.outputTokens?.total).toBe(5);
+
+        expect(yield* scripted.remainingTurns).toBe(0);
+    }),
+);
+
+it.effect('persists a multi-block system prompt as one leading entry with one message per block', () =>
+    Effect.gen(function* () {
+        const recorder = yield* makeEchoRecorder;
+        const scripted = yield* makeScriptedLanguageModel([textTurn('Hello!', undefined)]);
+        const layer = agentRuntimeBaseLayer(scripted.layer, layerEchoTool(recorder));
+
+        const entries = yield* Effect.gen(function* () {
+            const runtime = yield* AgentRuntime;
+
+            yield* runtime.start(startInput({ systemPrompt: ['You are a test agent.', 'Stay terse.'] }));
+            yield* runtime.run(runInput('hi there'));
+
+            return yield* collectEntries;
+        }).pipe(Effect.provide(layer));
+
+        const systemEntries = Arr.filter(entries, (entry): entry is SystemMessageLogEntry =>
+            Predicate.isTagged(entry, 'system-message'),
+        );
+
+        expect(systemEntries).toHaveLength(1);
+        const systemEntry = systemEntries[0];
+        expect(systemEntry).toBeDefined();
+
+        if (systemEntry === undefined) return;
+
+        expect(systemEntry.placement).toBe('leading');
+        expect(Arr.map(systemEntry.messages, (message) => message.content)).toEqual([
+            'You are a test agent.',
+            'Stay terse.',
+        ]);
+        const firstMessage = systemEntry.messages[0];
+        const secondMessage = systemEntry.messages[1];
+        expect(secondMessage).toBeDefined();
+
+        if (secondMessage === undefined) return;
+
+        expect(firstMessage.options?.anthropic).toBeUndefined();
+        expect(secondMessage.options?.anthropic).toEqual({
+            cacheControl: { type: 'ephemeral' },
+        });
+    }),
+);

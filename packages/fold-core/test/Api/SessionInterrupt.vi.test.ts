@@ -1,0 +1,137 @@
+import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
+/**
+ * Slice-2 hard-interrupt tests (D10): `interrupt` cancels the live fiber tree, discards unfinished
+ * assistant output, writes the root `agent-finished{interrupted}` marker, and resolves the awaiting
+ * send with that honest outcome. A TARGETED interrupt of one running subagent folds into its dispatcher's
+ * tool result as an interrupted-outcome result while the dispatcher keeps running.
+ */
+import { expect, it } from '@effect/vitest';
+import { Array as Arr, Option, Predicate, Deferred, Effect, Fiber, Schema } from 'effect';
+
+import { defineAgent, defineSubagent, shortAgentId, Session, subagentTool } from '../../src/index';
+import { makeHangOnceModel } from '../Subagents/DriveHarness';
+import { textTurn, toolCallTurn } from '../TestLayers/ScriptedLanguageModel';
+import { claudeActiveModel, gptActiveModel, scriptedModel } from './ApiTestHelpers';
+import { makePartialHangModel } from './SessionControlHarness';
+
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+it.effect('interrupt discards partial assistant text, writes the root marker, and resumes coherently', () =>
+    Effect.gen(function* () {
+        const partialHang = yield* makePartialHangModel(gptActiveModel, 'I was thinking about the answer', [
+            textTurn('resumed cleanly', undefined),
+        ]);
+
+        const session = yield* Session.open({ agent: defineAgent({ model: partialHang.model }) });
+
+        const sendFiber = yield* Effect.forkScoped(session.send('go'));
+        yield* partialHang.firstRequestStreaming;
+        yield* session.interrupt();
+
+        // The awaiting send resolves with the honest interrupted outcome, not an error.
+        const finished = yield* Fiber.join(sendFiber);
+        expect(finished.outcome).toBe('interrupted');
+
+        const entries = yield* session.entries;
+
+        expect(yield* encodeJson(entries)).not.toContain('I was thinking about the answer');
+
+        const rootFinished = Option.getOrUndefined(
+            Arr.findLast(entries, (entry) => Predicate.isTagged(entry, 'agent-finished')),
+        );
+
+        if (rootFinished === undefined || !Predicate.isTagged(rootFinished, 'agent-finished')) {
+            throw new Error('expected the root terminal marker');
+        }
+
+        expect(rootFinished.outcome).toBe('interrupted');
+
+        // Resume over the same log without replaying text from the discarded response.
+        const resumed = yield* session.send('pick it back up');
+        expect(resumed.outcome).toBe('completed');
+        expect(resumed.resultText).toBe('resumed cleanly');
+
+        const prompts = yield* partialHang.prompts;
+        const resumedPrompt = yield* encodeJson(prompts[1]);
+        expect(resumedPrompt).not.toContain('I was thinking about the answer');
+        expect(resumedPrompt).toContain('pick it back up');
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+);
+
+it.effect('a targeted subagent interrupt folds into the dispatcher, which keeps running', () =>
+    Effect.gen(function* () {
+        const hangOnce = yield* makeHangOnceModel(claudeActiveModel, []);
+
+        const researcher = defineSubagent({
+            name: 'researcher',
+            description: 'explores',
+            model: hangOnce.model,
+        });
+
+        const rootScripted = yield* scriptedModel(gptActiveModel, [
+            toolCallTurn(
+                [
+                    {
+                        id: 'provider-call-1',
+                        name: 'subagent',
+                        params: { description: 'explore', prompt: 'long exploration', agent: 'researcher' },
+                    },
+                ],
+                undefined,
+            ),
+            textTurn('root synthesized after the interruption', undefined),
+        ]);
+
+        const session = yield* Session.open({
+            agent: defineAgent({ model: rootScripted.model, tools: [subagentTool([researcher], undefined)] }),
+        });
+
+        const sendFiber = yield* Effect.forkScoped(session.send('go'));
+        yield* Deferred.await(hangOnce.firstRequestStarted);
+
+        const midRun = yield* session.entries;
+
+        const childStarted = Option.getOrUndefined(
+            Arr.findFirst(
+                midRun,
+                (entry) => Predicate.isTagged(entry, 'agent_started') && entry.parentAgentId !== null,
+            ),
+        );
+
+        if (childStarted === undefined || !Predicate.isTagged(childStarted, 'agent_started')) {
+            throw new Error('expected the dispatched subagent to have started');
+        }
+
+        yield* session.interrupt({ agentId: childStarted.agentId });
+
+        // The ROOT keeps running: the dispatch call resolves with an interrupted-outcome RESULT (a
+        // normal durable tool result, not the synthetic interrupted-call marker) and the root completes.
+        const finished = yield* Fiber.join(sendFiber);
+        expect(finished.outcome).toBe('completed');
+        expect(finished.resultText).toBe('root synthesized after the interruption');
+
+        const entries = yield* session.entries;
+
+        const childFinished = Option.getOrUndefined(
+            Arr.findLast(
+                entries,
+                (entry) => Predicate.isTagged(entry, 'agent-finished') && entry.agentId === childStarted.agentId,
+            ),
+        );
+
+        if (childFinished === undefined || !Predicate.isTagged(childFinished, 'agent-finished')) {
+            throw new Error('expected the subagent terminal marker');
+        }
+
+        expect(childFinished.outcome).toBe('interrupted');
+
+        const toolResult = Option.getOrUndefined(
+            Arr.findFirst(entries, (entry) => Predicate.isTagged(entry, 'tool-result')),
+        );
+
+        const rendered = yield* encodeJson(toolResult);
+        expect(rendered).toContain(`agent_id: ${shortAgentId(childStarted.agentId)}`);
+        expect(rendered).toContain('This subagent was interrupted');
+        expect(rendered).not.toContain('The user interrupted the execution of this tool call.');
+    }).pipe(Effect.scoped, Effect.provide(NodeFileSystem.layer)),
+);

@@ -1,0 +1,74 @@
+{
+    "name": "@stegosaurus/fold-cli",
+    "version": "0.0.0",
+    "description": "Node.js CLI for the Fold agent runtime",
+    "license": "MIT",
+    "bin": {
+        "fold-cli": "dist/cli.js",
+        "foldcode": "dist/cli.js"
+    },
+    "files": [
+        "dist"
+    ],
+    "type": "module",
+    "module": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+        ".": {
+            "source": "./src/index.ts",
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "publishConfig": {
+        "bin": {
+            "fold-cli": "./dist/cli.js",
+            "foldcode": "./dist/cli.js"
+        },
+        "module": "./dist/index.js",
+        "types": "./dist/index.d.ts",
+        "exports": {
+            ".": {
+                "types": "./dist/index.d.ts",
+                "import": "./dist/index.js",
+                "default": "./dist/index.js"
+            }
+        }
+    },
+    "scripts": {
+        "typecheck": "tsc",
+        "test": "vp test",
+        "test:tui": "FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiModelSelectionTerminalControl.vi.test.ts && FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiSessionPickerTerminalControl.vi.test.ts && FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiCompactionTerminalControl.vi.test.ts && FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiToolInspectTerminalControl.vi.test.ts && FOLD_TUI_TERMINAL_TEST=1 vp test test/TuiTerminalControl.vi.test.ts"
+    },
+    "dependencies": {
+        "@opentui/core": "catalog:",
+        "@opentui/keymap": "catalog:",
+        "@opentui/solid": "catalog:",
+        "@silvia-odwyer/photon-node": "catalog:",
+        "@stegosaurus/fold-agent": "workspace:*",
+        "@stegosaurus/fold-codex": "workspace:*",
+        "@stegosaurus/fold-core": "workspace:*",
+        "@stegosaurus/fold-opencode": "workspace:*",
+        "@stegosaurus/fold-tui-theme": "workspace:*",
+        "@stegosaurus/fold-xai": "workspace:*",
+        "solid-js": "catalog:"
+    },
+    "devDependencies": {
+        "@effect/platform-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@kitlangton/terminal-control": "catalog:",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "effect": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+        "vitest": "catalog:"
+    },
+    "peerDependencies": {
+        "@effect/platform-node": "catalog:",
+        "effect": "catalog:"
+    },
+    "engines": {
+        "node": ">=20"
+    }
+}
