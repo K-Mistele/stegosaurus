@@ -24,7 +24,8 @@
         "release:tag-info": "bun packages/fold-cli/scripts/release/tag-info.ts",
         "release:prepare": "bun packages/fold-cli/scripts/release/prepare.ts",
         "release:validate": "bun packages/fold-cli/scripts/release/validate-manifest.ts",
-        "release:publish": "bun packages/fold-cli/scripts/release/publish.ts"
+        "release:publish": "bun packages/fold-cli/scripts/release/publish.ts",
+        "release:trust": "bun packages/fold-cli/scripts/release/trust.ts"
     },
     "dependencies": {
         "@alchemy.run/pkg": "catalog:",

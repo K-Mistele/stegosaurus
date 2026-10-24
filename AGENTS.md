@@ -21,6 +21,7 @@ pnpm build:binaries  # compile the native foldcode binary for all 12 targets int
 pnpm release:prepare --version x.y.z   # stage the npm release in .release/ (libraries, native packages, @stegosaurus/fold)
 pnpm release:validate --version x.y.z  # check the staged release, including fresh npm and pnpm consumer installs
 pnpm release:publish --version x.y.z   # npm publish each staged package (--dry-run to try it)
+pnpm release:trust     # point npm trusted publishing at release.yml for every published package (2FA)
 pnpm test:stack    # test/stack.test.ts: runs the alchemy stack in local workerd (Bun)
 pnpm test:conformance  # Durable Streams conformance suite against the Worker in local workerd
 pnpm alchemy:dev       # alchemy dev
@@ -66,7 +67,7 @@ pnpm alchemy:destroy   # alchemy destroy
 - `packages/effect-ai-{anthropic,openai,openai-compat}` - vendored Effect AI providers with fold's fixes. Each `UPSTREAM.md` lists the source and local changes. Their `typecheck` also writes `.d.ts` files to `dist/`, which consumers type against, so `vp run -r` must build them first.
 - `packages/fold-*` and `packages/effect-branded-id` - the fold agent runtime, from github.com/humanlayer/fold: `core` (agent loop, tools, event log), `agent` (coding tools, config, sessions), `codex`, `opencode` and `xai` (provider auth and models), `cli` (Node CLI and TUI), and `tui-theme` (the TUI's themes). The workspace imports their `src/`; published tarballs carry `dist/`, which `publishConfig` points at (built by `packages/fold-cli/scripts/build-packages.ts`, ported from fold).
 - `packages/fold` - the `@stegosaurus/fold` npm wrapper: its postinstall copies the matching native `foldcode` binary from one of the `@stegosaurus/fold-<os>-<cpu>` packages. Private in the workspace; `release:prepare` stages the public version.
-- Releases: pushing a `v*` tag runs `.github/workflows/release.yml`, which checks, tests, builds, stages, validates and publishes to npm, as fold does. The scripts live in `packages/fold-cli/scripts/` (ported from fold's `scripts/`). Publishing uses npm trusted publishing, which must be set up per package on npmjs.com.
+- Releases: pushing a `v*` tag runs `.github/workflows/release.yml`, which checks, tests, builds, stages, validates and publishes to npm, as fold does. The scripts live in `packages/fold-cli/scripts/` (ported from fold's `scripts/`). Publishing uses npm trusted publishing. A package must exist on npm before it can be trusted, so publish its first version from a logged-in machine (`pnpm release:publish --tag rc`), then run `pnpm release:trust`.
 - `tools/anti-slop` - vendored custom oxlint rules, loaded as JS plugins. Tests run with `vp test`.
 - `tools/automation` - vendored TypeOnce oxlint rules (Effect, React, xstate, UI), loaded as a JS plugin. See its `POLICY.md`.
 - `tools/typed-lint` - vendored type-aware rules oxlint can't express. Config in `typed-lint.config.json`.

@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -32,7 +33,9 @@ for (const name of skippedPackages)
     if (!publishablePackages.has(name)) throw new Error(`Cannot skip unknown package: ${name}`);
 
 async function alreadyPublished(name: string, version: string) {
+    // Run outside the repo: its devEngines (pnpm) makes npm refuse to run there.
     const child = Bun.spawn(['npm', 'view', `${name}@${version}`, 'version', '--json'], {
+        cwd: tmpdir(),
         stdout: 'pipe',
         stderr: 'ignore',
     });
