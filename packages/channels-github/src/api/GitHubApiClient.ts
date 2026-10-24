@@ -1,4 +1,4 @@
-import { Config, Context, Effect, Layer, Option, Predicate, Schema, Stream } from 'effect';
+import { Array as Arr, Config, Context, Effect, Layer, Option, Predicate, Schema, Stream, String as Str } from 'effect';
 import * as HttpClient from 'effect/http/HttpClient';
 import * as HttpClientRequest from 'effect/http/HttpClientRequest';
 import type * as HttpClientResponse from 'effect/http/HttpClientResponse';
@@ -64,7 +64,7 @@ export class GitHubApiClient extends Context.Service<
         ) => Effect.Effect<string, GitHubApiError>;
         readonly botUserId: Effect.Effect<GitHubId, GitHubApiError>;
     }
->()('@stegosaurus/channels-github/internal/GitHubApiClient', {
+>()('@stegosaurus/channels-github/api/GitHubApiClient', {
     make: Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient;
         const credentials = yield* GitHubAppCredentials;
@@ -188,11 +188,13 @@ export class GitHubApiClient extends Context.Service<
                     Effect.flatMap((request) =>
                         observeAndNarrow(
                             input.operation,
-                            client.execute(request).pipe(
-                                Effect.mapError(() => GitHubTransportError.make({ stage: 'transport' })),
-                                Effect.flatMap(inspectGitHubStatus),
-                                Effect.asVoid,
-                            ),
+                            Effect.gen(function* () {
+                                const response = yield* client
+                                    .execute(request)
+                                    .pipe(Effect.mapError(() => GitHubTransportError.make({ stage: 'transport' })));
+
+                                yield* inspectGitHubStatus(response);
+                            }),
                         ).pipe(
                             Effect.withSpan('github.api.request', {
                                 attributes: {
@@ -347,10 +349,10 @@ const parseNextLink = (response: HttpClientResponse.HttpClientResponse, apiOrigi
     const link = response.headers.link;
 
     if (Predicate.isUndefined(link)) return Effect.succeedNone;
-    const entry = link.split(',').find((candidate) => candidate.includes('rel="next"'));
+    const entry = Arr.findFirst(Str.split(',')(link), Str.includes('rel="next"'));
 
-    if (Predicate.isUndefined(entry)) return Effect.succeedNone;
-    const target = /<([^>]+)>/.exec(entry)?.[1];
+    if (Option.isNone(entry)) return Effect.succeedNone;
+    const target = /<([^>]+)>/.exec(entry.value)?.[1];
 
     if (Predicate.isUndefined(target)) return Effect.fail(GitHubTransportError.make({ stage: 'pagination' }));
 

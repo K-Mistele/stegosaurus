@@ -84,8 +84,8 @@ export const gitHubPortableReactions = {
 /** The reaction that shows a remote worker is working. */
 export const gitHubActivityReaction = GitHubReaction.make('eyes');
 
-const failed = (safeCode: string, retryable: boolean, retryAfterMs?: number) =>
-    new DeliveryOutputFailed(
+const failed = (safeCode: string, retryable: boolean, retryAfterMs: number | undefined) =>
+    DeliveryOutputFailed.make(
         Predicate.isUndefined(retryAfterMs)
             ? { provider: 'github', retryable, safeCode }
             : { provider: 'github', retryable, safeCode, retryAfterMs },
@@ -108,7 +108,7 @@ const reportUnreadable =
     <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         effect.pipe(
             Effect.tapError((error) => Effect.logWarning(message, error)),
-            Effect.mapError(() => failed(safeCode, false)),
+            Effect.mapError(() => failed(safeCode, false, undefined)),
         );
 
 /**
@@ -131,7 +131,11 @@ const outcomeMarkdown = (outcome: DeliveryOutcome, markdown: string) =>
         Match.tag('AwaitingInput', ({ options }) =>
             Arr.match(options ?? [], {
                 onEmpty: () => markdown,
-                onNonEmpty: (listed) => `${markdown}\n\n${listed.map((option) => `- ${option}`).join('\n')}`,
+                onNonEmpty: (listed) =>
+                    `${markdown}\n\n${Arr.join(
+                        Arr.map(listed, (option) => `- ${option}`),
+                        '\n',
+                    )}`,
             }),
         ),
         Match.orElse(() => markdown),
@@ -282,7 +286,7 @@ const setActivityReaction = Effect.fn('github.output.set_activity_reaction')(fun
     working: boolean,
 ) {
     const target = yield* Effect.fromOption(activationTarget).pipe(
-        Effect.mapError(() => failed('activation_target_missing', false)),
+        Effect.mapError(() => failed('activation_target_missing', false, undefined)),
     );
 
     yield* working ? addActivityReaction(target) : removeActivityReaction(target);
@@ -298,7 +302,7 @@ const portableReactionTarget = (
     ProviderReactionTarget.match(target, {
         ActivationTarget: () =>
             Effect.fromOption(activationTarget).pipe(
-                Effect.mapError(() => failed('activation_target_missing', false)),
+                Effect.mapError(() => failed('activation_target_missing', false, undefined)),
                 Effect.map(activationReactionTarget),
             ),
         MessageTarget: ({ reference }) =>
@@ -364,7 +368,7 @@ export const makeGitHubOutputProcessor = Effect.fn('github.make_output_processor
     const process = Effect.fn('github.process_delivery_output')(
         function* (attempt: ProviderOutputAttempt) {
             if (attempt.prepared.presentationVersion !== gitHubPresentationVersion) {
-                return yield* failed('unsupported_presentation_version', false);
+                return yield* failed('unsupported_presentation_version', false, undefined);
             }
 
             const destination = yield* Schema.decodeEffect(GitHubDeliveryDestinationJson)(

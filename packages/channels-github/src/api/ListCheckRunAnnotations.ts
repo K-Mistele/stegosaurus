@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Array as Arr, Effect } from 'effect';
 
 import type { GitHubCheckRunRequest } from '../GitHubApiContract';
 import { GitHubApiClient } from './GitHubApiClient';
@@ -17,5 +17,5 @@ export const listCheckRunAnnotations = Effect.fn('github.api.list_check_run_anno
         schema: CheckAnnotation,
     });
 
-    return values.map(checkAnnotation);
+    return Arr.map(values, checkAnnotation);
 });

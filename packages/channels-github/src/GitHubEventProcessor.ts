@@ -16,7 +16,7 @@ import {
     PreparedDeliveryInvocation,
     type ProviderDeliveryExecution,
 } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Array as Arr, Data, Effect, Match, Option, Predicate, Schema } from 'effect';
+import { Array as Arr, Data, Effect, Match, Option, Predicate, Schema, String as Str } from 'effect';
 
 import { reviewComment } from './api/GitHubApiProjections';
 import { GitHubApi } from './GitHubApi';
@@ -73,8 +73,8 @@ import {
     GitHubCallbackName,
     type GitHubCallbackHandlers,
     type GitHubCallbackOperations,
-    makeGitHubCallbacks,
 } from './GitHubCallbacks';
+import * as GitHubCallbacks from './GitHubCallbacks';
 import {
     GitHubActivationTarget,
     GitHubActivationTargetJson,
@@ -163,7 +163,7 @@ const decodeGitHubWebhook = (admission: DeliveryAdmission) =>
 
 const parseResourceAddress = (resourceId: string) =>
     Effect.gen(function* () {
-        const parts = resourceId.split(':');
+        const parts = Str.split(':')(resourceId);
 
         if (parts.length !== 5 || parts[0] !== 'github' || parts[1] !== 'v1') return yield* identityMismatch();
         const repository = parts[2];
@@ -242,12 +242,12 @@ const webhookAddress = (
         })),
     );
 
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegExp = (value: string) => Str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')(value);
 
 const mentionsBot = (body: string | null, mentionNames: ReadonlyArray<string>): boolean => {
     if (body === null) return false;
 
-    return mentionNames.some((name) =>
+    return Arr.some(mentionNames, (name) =>
         new RegExp(`(^|[^A-Za-z0-9_])@${escapeRegExp(name)}(?![A-Za-z0-9_-])`, 'i').test(body),
     );
 };
@@ -565,7 +565,7 @@ const normalizeWebhook = (
 
             const thread = GitHubReviewThread.make({
                 nodeId: payload.thread.node_id,
-                comments: payload.thread.comments.map((comment) =>
+                comments: Arr.map(payload.thread.comments, (comment) =>
                     GitHubReviewCommentRef.make({ pullRequest: ref, id: comment.id }),
                 ),
             });
@@ -583,16 +583,19 @@ const normalizeWebhook = (
             return { kind: 'pull-request', event, mentionsBot: false };
         }),
         Match.when({ event: 'check_run' }, ({ payload }): NormalizedEvent | null => {
-            const association = payload.check_run.pull_requests.find(({ number }) => number === address.number);
+            const association = Arr.findFirst(
+                payload.check_run.pull_requests,
+                ({ number }) => number === address.number,
+            );
 
-            if (association === undefined) return null;
+            if (Option.isNone(association)) return null;
 
             const ref = GitHubPullRequestRef.make({
                 installationId: payload.installation.id,
                 repositoryId: payload.repository.id,
                 owner: payload.repository.owner.login,
                 repository: payload.repository.name,
-                number: association.number,
+                number: association.value.number,
             });
 
             const pullRequest = GitHubPullRequest.make({ ref, mailboxKey });
@@ -654,7 +657,7 @@ const decodeGitHubBatch = Effect.fn('github.decode_event_batch')(function* (
 
         if (
             webhook.event === 'check_run' &&
-            !webhook.payload.check_run.pull_requests.some(({ number }) => number === address.number)
+            !Arr.some(webhook.payload.check_run.pull_requests, ({ number }) => number === address.number)
         ) {
             return yield* invalidPayload();
         }
@@ -712,9 +715,7 @@ const isPrOpened = Schema.is(GitHubPrOpened);
 const buildSubscribedIssueEvents = (issueEvents: ReadonlyArray<NormalizedIssueEvent>) => {
     const issue = issueEvents[0]?.event.issue;
 
-    const events = issueEvents
-        .map(({ event }) => event)
-        .filter((event): event is GitHubIssueEvent => !isIssueOpened(event));
+    const events = Arr.flatMap(issueEvents, ({ event }) => (isIssueOpened(event) ? [] : [event]));
 
     const firstEvent = events[0];
 
@@ -727,27 +728,36 @@ const buildSubscribedIssueEvents = (issueEvents: ReadonlyArray<NormalizedIssueEv
     );
 };
 
+/** Where a mention's event list starts: the mention, or the earlier opening event when `includeOpened`. */
+const mentionStart = (mentionIndex: number, openedIndex: Option.Option<number>) =>
+    Option.match(openedIndex, {
+        onNone: () => mentionIndex,
+        onSome: (opened) => Math.min(opened, mentionIndex),
+    });
+
 /**
  * A mention starts at the mentioning event, or at the opening event before it when `onIssueCreated` is
  * configured, so the callback sees how the issue began.
  */
 const buildIssueMention = (issueEvents: ReadonlyArray<NormalizedIssueEvent>, includeOpened: boolean) => {
     const issue = issueEvents[0]?.event.issue;
-    const mentionIndex = issueEvents.findIndex(({ mentionsBot: mentioned }) => mentioned);
-    const trigger = issueEvents[mentionIndex];
+    const mention = Arr.findFirstWithIndex(issueEvents, ({ mentionsBot: mentioned }) => mentioned);
 
-    if (issue === undefined || trigger === undefined || !isIssueMentionTrigger(trigger.event)) {
-        return Option.none<GitHubInvocation>();
-    }
+    if (issue === undefined || Option.isNone(mention)) return Option.none<GitHubInvocation>();
 
-    const openedIndex = includeOpened ? issueEvents.findIndex(({ event }) => isIssueOpened(event)) : -1;
+    const [trigger, mentionIndex] = mention.value;
 
-    const start = openedIndex >= 0 ? Math.min(openedIndex, mentionIndex) : mentionIndex;
+    if (!isIssueMentionTrigger(trigger.event)) return Option.none<GitHubInvocation>();
 
-    const events = issueEvents
-        .slice(start)
-        .filter((_, index) => start + index !== mentionIndex)
-        .map(({ event }) => event);
+    const openedIndex = includeOpened
+        ? Arr.findFirstIndex(issueEvents, ({ event }) => isIssueOpened(event))
+        : Option.none<number>();
+
+    const start = mentionStart(mentionIndex, openedIndex);
+
+    const events = Arr.flatMap(issueEvents.slice(start), ({ event }, index) =>
+        start + index === mentionIndex ? [] : [event],
+    );
 
     return Option.some(
         GitHubInvocation.Mentioned({
@@ -758,21 +768,21 @@ const buildIssueMention = (issueEvents: ReadonlyArray<NormalizedIssueEvent>, inc
 
 const buildIssueCreated = (issueEvents: ReadonlyArray<NormalizedIssueEvent>) => {
     const issue = issueEvents[0]?.event.issue;
-    const openedIndex = issueEvents.findIndex(({ event }) => isIssueOpened(event));
-    const trigger = issueEvents[openedIndex];
+    const opened = Arr.findFirstWithIndex(issueEvents, ({ event }) => isIssueOpened(event));
 
-    if (issue === undefined || trigger === undefined || !isIssueOpened(trigger.event)) {
-        return Option.none<GitHubInvocation>();
-    }
+    if (issue === undefined || Option.isNone(opened)) return Option.none<GitHubInvocation>();
 
-    const events = issueEvents
-        .slice(openedIndex + 1)
-        .map(({ event }) => event)
-        .filter((event): event is GitHubIssueEvent => !isIssueOpened(event));
+    const [{ event: trigger }, openedIndex] = opened.value;
+
+    if (!isIssueOpened(trigger)) return Option.none<GitHubInvocation>();
+
+    const events = Arr.flatMap(issueEvents.slice(openedIndex + 1), ({ event }) =>
+        isIssueOpened(event) ? [] : [event],
+    );
 
     return Option.some(
         GitHubInvocation.IssueCreated({
-            event: GitHubIssueCreated.make({ issue, trigger: trigger.event, events }),
+            event: GitHubIssueCreated.make({ issue, trigger, events }),
         }),
     );
 };
@@ -780,7 +790,7 @@ const buildIssueCreated = (issueEvents: ReadonlyArray<NormalizedIssueEvent>) => 
 const buildSubscribedPrEvents = (prEvents: ReadonlyArray<NormalizedPrEvent>) => {
     const pullRequest = prEvents[0]?.event.pullRequest;
 
-    const events = prEvents.map(({ event }) => event).filter((event): event is GitHubPrEvent => !isPrOpened(event));
+    const events = Arr.flatMap(prEvents, ({ event }) => (isPrOpened(event) ? [] : [event]));
 
     const firstEvent = events[0];
 
@@ -799,20 +809,23 @@ const buildSubscribedPrEvents = (prEvents: ReadonlyArray<NormalizedPrEvent>) => 
 /** Like {@link buildIssueMention}, for a pull request and `onPrCreated`. */
 const buildPrMention = (prEvents: ReadonlyArray<NormalizedPrEvent>, includeOpened: boolean) => {
     const pullRequest = prEvents[0]?.event.pullRequest;
-    const mentionIndex = prEvents.findIndex(({ mentionsBot: mentioned }) => mentioned);
-    const trigger = prEvents[mentionIndex];
+    const mention = Arr.findFirstWithIndex(prEvents, ({ mentionsBot: mentioned }) => mentioned);
 
-    if (pullRequest === undefined || trigger === undefined || !isPrMentionTrigger(trigger.event)) {
-        return Option.none<GitHubInvocation>();
-    }
+    if (pullRequest === undefined || Option.isNone(mention)) return Option.none<GitHubInvocation>();
 
-    const openedIndex = includeOpened ? prEvents.findIndex(({ event }) => isPrOpened(event)) : -1;
-    const start = openedIndex >= 0 ? Math.min(openedIndex, mentionIndex) : mentionIndex;
+    const [trigger, mentionIndex] = mention.value;
 
-    const events = prEvents
-        .slice(start)
-        .filter((_, index) => start + index !== mentionIndex)
-        .map(({ event }) => event);
+    if (!isPrMentionTrigger(trigger.event)) return Option.none<GitHubInvocation>();
+
+    const openedIndex = includeOpened
+        ? Arr.findFirstIndex(prEvents, ({ event }) => isPrOpened(event))
+        : Option.none<number>();
+
+    const start = mentionStart(mentionIndex, openedIndex);
+
+    const events = Arr.flatMap(prEvents.slice(start), ({ event }, index) =>
+        start + index === mentionIndex ? [] : [event],
+    );
 
     return Option.some(
         GitHubInvocation.Mentioned({
@@ -823,21 +836,19 @@ const buildPrMention = (prEvents: ReadonlyArray<NormalizedPrEvent>, includeOpene
 
 const buildPrCreated = (prEvents: ReadonlyArray<NormalizedPrEvent>) => {
     const pullRequest = prEvents[0]?.event.pullRequest;
-    const openedIndex = prEvents.findIndex(({ event }) => isPrOpened(event));
-    const trigger = prEvents[openedIndex];
+    const opened = Arr.findFirstWithIndex(prEvents, ({ event }) => isPrOpened(event));
 
-    if (pullRequest === undefined || trigger === undefined || !isPrOpened(trigger.event)) {
-        return Option.none<GitHubInvocation>();
-    }
+    if (pullRequest === undefined || Option.isNone(opened)) return Option.none<GitHubInvocation>();
 
-    const events = prEvents
-        .slice(openedIndex + 1)
-        .map(({ event }) => event)
-        .filter((event): event is GitHubPrEvent => !isPrOpened(event));
+    const [{ event: trigger }, openedIndex] = opened.value;
+
+    if (!isPrOpened(trigger)) return Option.none<GitHubInvocation>();
+
+    const events = Arr.flatMap(prEvents.slice(openedIndex + 1), ({ event }) => (isPrOpened(event) ? [] : [event]));
 
     return Option.some(
         GitHubInvocation.PrCreated({
-            event: GitHubPrCreated.make({ pullRequest, trigger: trigger.event, events }),
+            event: GitHubPrCreated.make({ pullRequest, trigger, events }),
         }),
     );
 };
@@ -896,8 +907,8 @@ const selectInvocation = <R>(input: {
     return GitHubBatchEvents.$match(input.batch, {
         Issue: ({ events }) => {
             if (Arr.isReadonlyArrayEmpty(events)) return ignored('no_relevant_event');
-            const mentioned = events.some(({ mentionsBot: mention }) => mention);
-            const opened = events.some(({ event }) => isIssueOpened(event));
+            const mentioned = Arr.some(events, ({ mentionsBot: mention }) => mention);
+            const opened = Arr.some(events, ({ event }) => isIssueOpened(event));
 
             const creation = Predicate.isNotUndefined(callbacks.onIssueCreated)
                 ? Option.toArray(buildIssueCreated(events))
@@ -921,8 +932,8 @@ const selectInvocation = <R>(input: {
         },
         PullRequest: ({ events }) => {
             if (Arr.isReadonlyArrayEmpty(events)) return ignored('no_relevant_event');
-            const mentioned = events.some(({ mentionsBot: mention }) => mention);
-            const opened = events.some(({ event }) => isPrOpened(event));
+            const mentioned = Arr.some(events, ({ mentionsBot: mention }) => mention);
+            const opened = Arr.some(events, ({ event }) => isPrOpened(event));
 
             const creation = Predicate.isNotUndefined(callbacks.onPrCreated)
                 ? Option.toArray(buildPrCreated(events))
@@ -1033,7 +1044,7 @@ const prepareInvocation = Effect.fn('github.prepare_delivery')(function* (
             Effect.logError('GitHub delivery preparation failed', error).pipe(
                 Effect.annotateLogs({
                     deliveryId: execution.deliveryId,
-                    callbacks: steps.map(({ name }) => name),
+                    callbacks: Arr.map(steps, ({ name }) => name),
                 }),
             ),
         ),
@@ -1102,7 +1113,8 @@ const runPreparedInvocation = Effect.fn('github.run_prepared_invocation')(functi
         return yield* nonRetryableFailure('prepared_callback_missing');
     }
 
-    const includeOpened = input.prepared.callbacks.some(
+    const includeOpened = Arr.some(
+        input.prepared.callbacks,
         ({ name }) => name === 'onIssueCreated' || name === 'onPrCreated',
     );
 
@@ -1128,23 +1140,27 @@ const processGitHubBatch = <R>(options: GitHubEventProcessorOptions, callbacks: 
         const { first, address, webhooks } = yield* decodeGitHubBatch(options, admissions);
         const mailboxKey = deliveryMailboxKey(first);
 
-        const normalized = webhooks
-            .map((webhook, index) => {
+        const normalized = Arr.filter(
+            Arr.map(webhooks, (webhook, index) => {
                 const admission = admissions[index];
 
                 return admission === undefined
                     ? null
                     : normalizeWebhook(webhook, admission, address, mailboxKey, options.bot);
-            })
-            .filter(Predicate.isNotNullish);
+            }),
+            Predicate.isNotNullish,
+        );
 
         const batch =
             address.kind === 'issue'
                 ? GitHubBatchEvents.Issue({
-                      events: normalized.filter((entry): entry is NormalizedIssueEvent => entry.kind === 'issue'),
+                      events: Arr.filter(normalized, (entry): entry is NormalizedIssueEvent => entry.kind === 'issue'),
                   })
                 : GitHubBatchEvents.PullRequest({
-                      events: normalized.filter((entry): entry is NormalizedPrEvent => entry.kind === 'pull-request'),
+                      events: Arr.filter(
+                          normalized,
+                          (entry): entry is NormalizedPrEvent => entry.kind === 'pull-request',
+                      ),
                   });
 
         if (Option.isSome(execution.prepared)) {
@@ -1192,5 +1208,5 @@ export const makeGitHubEventProcessor = <E, R>(
 ): ProviderEventProcessor<GitHubApi | MailboxSubscriptions | R> => ({
     namespace: options.namespace,
     providerName: 'github',
-    process: processGitHubBatch(options, makeGitHubCallbacks(options.handlers)),
+    process: processGitHubBatch(options, GitHubCallbacks.makeGitHubCallbacks(options.handlers)),
 });

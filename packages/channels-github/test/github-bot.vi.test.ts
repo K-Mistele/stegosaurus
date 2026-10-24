@@ -64,10 +64,8 @@ describe('GitHubBot.make', () => {
                                             )(event).pipe(Effect.orDie);
 
                                             expect(issueMention.issue.ref.number).toBe(42);
-                                            expect(issueMention.trigger).toMatchObject({
-                                                _tag: 'GitHubIssueOpened',
-                                                body,
-                                            });
+                                            expect(issueMention.trigger._tag).toBe('GitHubIssueOpened');
+                                            expect(issueMention.trigger).toMatchObject({ body });
                                             expect(issueMention.events).toEqual([]);
                                             expect(yield* issueMention.issue.isSubscribed()).toBe(true);
                                             yield* Queue.offer(calls, 'mentioned');

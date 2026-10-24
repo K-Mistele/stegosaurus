@@ -110,7 +110,7 @@ const makeGitHubWebhookEvent = (
                 });
 
             const first = makeAdmission(pullRequest);
-            const rest = payload.check_run.pull_requests.slice(1).map(makeAdmission);
+            const rest = Arr.map(payload.check_run.pull_requests.slice(1), makeAdmission);
 
             return Arr.isReadonlyArrayEmpty(rest)
                 ? ProviderWebhookEvent.make({ event: first })

@@ -2,7 +2,7 @@
  * What every request to GitHub's REST API shares: its standard headers, and how a response's status
  * becomes a `GitHubTransportError`.
  */
-import { Clock, Effect, Predicate, Schema, type Types } from 'effect';
+import { Clock, Effect, Predicate, Schema, String as Str, type Types } from 'effect';
 import * as HttpClientRequest from 'effect/http/HttpClientRequest';
 import type * as HttpClientResponse from 'effect/http/HttpClientResponse';
 
@@ -57,7 +57,7 @@ export const inspectGitHubStatus = Effect.fn('github.api.inspect_status')(functi
     const body = yield* response.text.pipe(Effect.orElseSucceed(() => ''));
 
     const decoded = yield* Schema.decodeEffect(Schema.fromJsonString(ErrorBody))(body).pipe(
-        Effect.map((value) => value.message.trim().slice(0, 1_024)),
+        Effect.map((value) => Str.slice(0, 1_024)(Str.trim(value.message))),
         Effect.orElseSucceed(() => undefined),
     );
 
@@ -66,7 +66,7 @@ export const inspectGitHubStatus = Effect.fn('github.api.inspect_status')(functi
         (response.status === 403 &&
             (response.headers['x-ratelimit-remaining'] === '0' ||
                 Predicate.isNotUndefined(retryAfterHeaderMs) ||
-                (decoded?.toLowerCase().includes('rate limit') ?? false)));
+                (Predicate.isNotUndefined(decoded) && Str.includes('rate limit')(Str.toLowerCase(decoded)))));
 
     const now = yield* Clock.currentTimeMillis;
     let retryAfterMs = retryAfterHeaderMs;

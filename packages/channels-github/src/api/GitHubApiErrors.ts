@@ -11,7 +11,7 @@ export const GitHubTransportErrorFields = Schema.Struct({
     retryAfterMs: Schema.optionalKey(Schema.Int),
 });
 
-export class GitHubTransportError extends Schema.TaggedError<GitHubTransportError>()(
+export class GitHubTransportError extends Schema.TaggedError<GitHubTransportError, { readonly brand: unique symbol }>()(
     'GitHubTransportError',
     GitHubTransportErrorFields.fields,
 ) {}

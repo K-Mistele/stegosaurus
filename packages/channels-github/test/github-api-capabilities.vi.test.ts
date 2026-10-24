@@ -1,8 +1,9 @@
 import { describe, it } from '@effect/vitest';
-import { ConfigProvider, Effect, Layer, Queue, Ref } from 'effect';
+import { Array as Arr, ConfigProvider, Effect, Layer, Queue, Ref, String as Str } from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 
 import { GitHubApi } from '../src/GitHubApi';
+import { GitHubApiError } from '../src/GitHubApiContract';
 import { GitHubApiLiveBase, GitHubAppSigner } from '../src/GitHubApiLive';
 import { GitHubId } from '../src/GitHubIdentity';
 import {
@@ -12,6 +13,7 @@ import {
     GitHubIssueRef,
     GitHubPullRequestRef,
     GitHubRepositoryRef,
+    GitHubReviewCommentLocation,
 } from '../src/GitHubModels';
 
 const issue = GitHubIssueRef.make({
@@ -256,7 +258,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -286,7 +288,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -317,8 +319,8 @@ describe('GitHubApiLive agent capabilities', () => {
                     Effect.flip,
                 );
 
+                expect(error).toBeInstanceOf(GitHubApiError);
                 expect(error).toMatchObject({
-                    _tag: 'GitHubApiError',
                     operation: 'list_repository_labels',
                     ...scenario,
                 });
@@ -337,13 +339,13 @@ describe('GitHubApiLive agent capabilities', () => {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                     const url = new URL(web.url);
 
-                    if (url.pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
                     yield* Queue.offer(calls, yield* observeRequest(web));
 
-                    if (url.pathname.endsWith('/files')) {
+                    if (Str.endsWith('/files')(url.pathname)) {
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json([
@@ -371,28 +373,31 @@ describe('GitHubApiLive agent capabilities', () => {
                                     raw_url: 'https://github.test/raw/file-sha-2/assets/removed.png',
                                     contents_url: 'https://api.github.test/contents/assets/removed.png',
                                 },
-                                ...['added', 'modified', 'copied', 'changed', 'unchanged'].map((status, index) => ({
-                                    sha: status === 'copied' ? null : `file-sha-${index + 3}`,
-                                    filename: `src/status-${status}.ts`,
-                                    status,
-                                    additions: 1,
-                                    deletions: 0,
-                                    changes: 1,
-                                    blob_url:
-                                        status === 'copied'
-                                            ? null
-                                            : `https://github.test/blob/file-sha-${index + 3}/src/status-${status}.ts`,
-                                    raw_url:
-                                        status === 'copied'
-                                            ? null
-                                            : `https://github.test/raw/file-sha-${index + 3}/src/status-${status}.ts`,
-                                    contents_url: `https://api.github.test/contents/src/status-${status}.ts`,
-                                })),
+                                ...Arr.map(
+                                    ['added', 'modified', 'copied', 'changed', 'unchanged'],
+                                    (status, index) => ({
+                                        sha: status === 'copied' ? null : `file-sha-${index + 3}`,
+                                        filename: `src/status-${status}.ts`,
+                                        status,
+                                        additions: 1,
+                                        deletions: 0,
+                                        changes: 1,
+                                        blob_url:
+                                            status === 'copied'
+                                                ? null
+                                                : `https://github.test/blob/file-sha-${index + 3}/src/status-${status}.ts`,
+                                        raw_url:
+                                            status === 'copied'
+                                                ? null
+                                                : `https://github.test/raw/file-sha-${index + 3}/src/status-${status}.ts`,
+                                        contents_url: `https://api.github.test/contents/src/status-${status}.ts`,
+                                    }),
+                                ),
                             ]),
                         );
                     }
 
-                    if (url.pathname.endsWith('/commits')) {
+                    if (Str.endsWith('/commits')(url.pathname)) {
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json([
@@ -436,7 +441,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 status: 'renamed',
                 patch: '@@ -1 +1 @@',
             });
-            expect(result.files.map(({ status }) => status)).toEqual([
+            expect(Arr.map(result.files, ({ status }) => status)).toEqual([
                 'renamed',
                 'deleted',
                 'added',
@@ -494,13 +499,13 @@ describe('GitHubApiLive agent capabilities', () => {
                         const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                         const url = new URL(web.url);
 
-                        if (url.pathname.startsWith('/app/installations/')) {
+                        if (Str.startsWith('/app/installations/')(url.pathname)) {
                             return HttpClientResponse.fromWeb(request, tokenResponse());
                         }
 
                         yield* Queue.offer(calls, yield* observeRequest(web));
 
-                        if (web.method === 'DELETE' && url.pathname.endsWith('/labels')) {
+                        if (web.method === 'DELETE' && Str.endsWith('/labels')(url.pathname)) {
                             return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }));
                         }
 
@@ -537,7 +542,7 @@ describe('GitHubApiLive agent capabilities', () => {
 
                 for (const result of results) expect(result[0]?.name).toBe('bug');
                 const observed = Array.from(yield* Queue.takeAll(calls));
-                expect(observed.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+                expect(Arr.map(observed, ({ method, path, body }) => ({ method, path, body }))).toEqual([
                     { method: 'GET', path: '/repos/humanlayer/channels/issues/42/labels', body: '' },
                     {
                         method: 'POST',
@@ -586,7 +591,7 @@ describe('GitHubApiLive agent capabilities', () => {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                     const url = new URL(web.url);
 
-                    if (url.pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -607,28 +612,33 @@ describe('GitHubApiLive agent capabilities', () => {
                         content,
                         commitId: 'head-sha',
                         path: 'src/index.ts',
-                        location: { _tag: 'Line', line: 10, side: 'RIGHT' },
+                        location: GitHubReviewCommentLocation.cases.Line.make({ line: 10, side: 'RIGHT' }),
                     }),
                     yield* api.postPullRequestReviewComment({
                         pullRequest,
                         content,
                         commitId: 'head-sha',
                         path: 'src/index.ts',
-                        location: { _tag: 'Range', startLine: 5, startSide: 'LEFT', line: 10, side: 'RIGHT' },
+                        location: GitHubReviewCommentLocation.cases.Range.make({
+                            startLine: 5,
+                            startSide: 'LEFT',
+                            line: 10,
+                            side: 'RIGHT',
+                        }),
                     }),
                     yield* api.postPullRequestReviewComment({
                         pullRequest,
                         content,
                         commitId: 'head-sha',
                         path: 'src/index.ts',
-                        location: { _tag: 'File' },
+                        location: GitHubReviewCommentLocation.cases.File.make({}),
                     }),
                 ];
             }).pipe(Effect.provide(makeLayer(httpClient)));
 
-            expect(comments.map(({ body }) => body)).toEqual(['review-501', 'review-502', 'review-503']);
+            expect(Arr.map(comments, ({ body }) => body)).toEqual(['review-501', 'review-502', 'review-503']);
             const observed = Array.from(yield* Queue.takeAll(calls));
-            expect(observed.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+            expect(Arr.map(observed, ({ method, path, body }) => ({ method, path, body }))).toEqual([
                 {
                     method: 'POST',
                     path: '/repos/humanlayer/channels/pulls/43/comments',
@@ -657,7 +667,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -696,12 +706,12 @@ describe('GitHubApiLive agent capabilities', () => {
                 return { open, created };
             }).pipe(Effect.provide(makeLayer(httpClient)));
 
-            expect(result.open.map((info) => [info.ref.number, info.headRef, info.headRepository])).toEqual([
+            expect(Arr.map(result.open, (info) => [info.ref.number, info.headRef, info.headRepository])).toEqual([
                 [43, 'humanlayer/issue-42', { repositoryId: 200, owner: 'humanlayer', repository: 'channels' }],
             ]);
             expect(result.created.ref).toEqual(pullRequest);
             const observed = Array.from(yield* Queue.takeAll(calls));
-            expect(observed.map(({ method, path, search, body }) => ({ method, path, search, body }))).toEqual([
+            expect(Arr.map(observed, ({ method, path, search, body }) => ({ method, path, search, body }))).toEqual([
                 {
                     method: 'GET',
                     path: '/repos/humanlayer/channels/pulls',
@@ -727,14 +737,14 @@ describe('GitHubApiLive agent capabilities', () => {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                     const url = new URL(web.url);
 
-                    if (url.pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
                     const observed = yield* observeRequest(web);
                     yield* Queue.offer(calls, observed);
 
-                    if (url.pathname.endsWith('/merge')) {
+                    if (Str.endsWith('/merge')(url.pathname)) {
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json({
@@ -745,16 +755,16 @@ describe('GitHubApiLive agent capabilities', () => {
                         );
                     }
 
-                    if (url.pathname.includes('/pulls/')) {
+                    if (Str.includes('/pulls/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(
                             request,
-                            Response.json(pullRequestJson(observed.body.includes('closed') ? 'closed' : 'open')),
+                            Response.json(pullRequestJson(Str.includes('closed')(observed.body) ? 'closed' : 'open')),
                         );
                     }
 
                     return HttpClientResponse.fromWeb(
                         request,
-                        Response.json(issueJson(observed.body.includes('closed') ? 'closed' : 'open')),
+                        Response.json(issueJson(Str.includes('closed')(observed.body) ? 'closed' : 'open')),
                     );
                 }),
             );
@@ -796,7 +806,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 message: 'Pull Request successfully merged',
             });
             const observed = Array.from(yield* Queue.takeAll(calls));
-            expect(observed.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+            expect(Arr.map(observed, ({ method, path, body }) => ({ method, path, body }))).toEqual([
                 {
                     method: 'PATCH',
                     path: '/repos/humanlayer/channels/issues/42',
@@ -840,13 +850,13 @@ describe('GitHubApiLive agent capabilities', () => {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                     const url = new URL(web.url);
 
-                    if (url.pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
                     yield* Queue.offer(calls, yield* observeRequest(web));
 
-                    if (url.pathname.endsWith('/annotations')) {
+                    if (Str.endsWith('/annotations')(url.pathname)) {
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json([
@@ -866,7 +876,7 @@ describe('GitHubApiLive agent capabilities', () => {
                         );
                     }
 
-                    if (url.pathname.includes('/commits/')) {
+                    if (Str.includes('/commits/')(url.pathname)) {
                         expect(url.searchParams.get('per_page')).toBe('100');
                         expect(url.searchParams.get('filter')).toBe('all');
 
@@ -931,7 +941,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 }),
             ]);
             const observed = Array.from(yield* Queue.takeAll(calls));
-            expect(observed.map(({ path, search }) => `${path}${search}`)).toEqual([
+            expect(Arr.map(observed, ({ path, search }) => `${path}${search}`)).toEqual([
                 '/repos/humanlayer/channels/commits/feature%2Fhead/check-runs?per_page=100&filter=all',
                 '/repos/humanlayer/channels/commits/feature%2Fhead/check-runs?per_page=100&filter=all&page=2',
                 '/repos/humanlayer/channels/check-runs/700',
@@ -946,7 +956,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -987,20 +997,20 @@ describe('GitHubApiLive agent capabilities', () => {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                     const url = new URL(web.url);
 
-                    if (url.pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
                     yield* Queue.offer(calls, yield* observeRequest(web));
 
-                    if (url.pathname.endsWith('/actions/runs')) {
+                    if (Str.endsWith('/actions/runs')(url.pathname)) {
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json({ total_count: 2, workflow_runs: [{ id: 850 }, { id: 851 }] }),
                         );
                     }
 
-                    if (url.pathname.endsWith('/actions/runs/850/jobs')) {
+                    if (Str.endsWith('/actions/runs/850/jobs')(url.pathname)) {
                         expect(url.searchParams.get('per_page')).toBe('100');
                         expect(url.searchParams.get('filter')).toBe('all');
 
@@ -1021,7 +1031,7 @@ describe('GitHubApiLive agent capabilities', () => {
                         );
                     }
 
-                    if (url.pathname.endsWith('/actions/runs/851/jobs')) {
+                    if (Str.endsWith('/actions/runs/851/jobs')(url.pathname)) {
                         expect(url.searchParams.get('per_page')).toBe('100');
                         expect(url.searchParams.get('filter')).toBe('all');
                         const matching = actionsJobJson();
@@ -1035,7 +1045,7 @@ describe('GitHubApiLive agent capabilities', () => {
                         );
                     }
 
-                    if (url.pathname.endsWith('/actions/jobs/900')) {
+                    if (Str.endsWith('/actions/jobs/900')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, Response.json(actionsJobJson()));
                     }
 
@@ -1072,7 +1082,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 ],
             });
             const observed = Array.from(yield* Queue.takeAll(calls));
-            expect(observed.map(({ path, search }) => `${path}${search}`)).toEqual([
+            expect(Arr.map(observed, ({ path, search }) => `${path}${search}`)).toEqual([
                 '/repos/humanlayer/channels/check-runs/700',
                 '/repos/humanlayer/channels/actions/runs?per_page=100&check_suite_id=800',
                 '/repos/humanlayer/channels/actions/runs/850/jobs?per_page=100&filter=all',
@@ -1089,7 +1099,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -1114,11 +1124,11 @@ describe('GitHubApiLive agent capabilities', () => {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                     const path = new URL(web.url).pathname;
 
-                    if (path.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(path)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
-                    if (path.endsWith('/files')) {
+                    if (Str.endsWith('/files')(path)) {
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json([
@@ -1137,7 +1147,7 @@ describe('GitHubApiLive agent capabilities', () => {
                         );
                     }
 
-                    if (path.endsWith('/annotations')) {
+                    if (Str.endsWith('/annotations')(path)) {
                         const mode = yield* Ref.get(annotationMode);
 
                         return HttpClientResponse.fromWeb(
@@ -1159,7 +1169,7 @@ describe('GitHubApiLive agent capabilities', () => {
                         );
                     }
 
-                    if (path.endsWith('/check-runs/700')) {
+                    if (Str.endsWith('/check-runs/700')(path)) {
                         const value = checkRunJson();
 
                         return HttpClientResponse.fromWeb(
@@ -1168,14 +1178,14 @@ describe('GitHubApiLive agent capabilities', () => {
                         );
                     }
 
-                    if (path.endsWith('/actions/jobs/900')) {
+                    if (Str.endsWith('/actions/jobs/900')(path)) {
                         const value = actionsJobJson();
 
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json({
                                 ...value,
-                                steps: value.steps.map((step) => ({ ...step, number: 0 })),
+                                steps: Arr.map(value.steps, (step) => ({ ...step, number: 0 })),
                             }),
                         );
                     }
@@ -1196,7 +1206,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 return [fileCount, annotationLine, annotationColumn, annotationCount, stepNumber];
             }).pipe(Effect.provide(makeLayer(httpClient)));
 
-            expect(errors.map(({ operation, reason }) => ({ operation, reason }))).toEqual([
+            expect(Arr.map(errors, ({ operation, reason }) => ({ operation, reason }))).toEqual([
                 { operation: 'list_pull_request_files', reason: 'invalid_response' },
                 { operation: 'list_check_run_annotations', reason: 'invalid_response' },
                 { operation: 'list_check_run_annotations', reason: 'invalid_response' },
@@ -1215,7 +1225,7 @@ describe('GitHubApiLive agent capabilities', () => {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                     const url = new URL(web.url);
 
-                    if (url.pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -1269,7 +1279,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -1342,7 +1352,7 @@ describe('GitHubApiLive agent capabilities', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 

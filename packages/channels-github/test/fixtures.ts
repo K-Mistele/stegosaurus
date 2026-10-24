@@ -1,5 +1,4 @@
 import { createHmac } from 'node:crypto';
-import * as NodeHttp from 'node:http';
 
 import { NodeCrypto, NodeHttpServer } from '@effect/platform-node';
 import { createServer } from '@emulators/core';
@@ -10,7 +9,7 @@ import {
     type ProviderEventProcessor,
 } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import { DeliveryAdmission, DeliveryReceipt, MailboxDelivery } from '@stegosaurus/channels-delivery/MailboxDelivery';
-import { Context, Effect, Layer, Match, Predicate, Queue, Redacted, Schema } from 'effect';
+import { Array as Arr, Context, Effect, Layer, Match, Predicate, Queue, Redacted, Result, Schema } from 'effect';
 import {
     FetchHttpClient,
     Headers,
@@ -24,7 +23,7 @@ import {
 } from 'effect/http';
 import { NetAddress } from 'effect/net';
 
-import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution';
+import * as DeliveryExecution from '../../channels-delivery/test/delivery-execution';
 import { AddIssueLabelsBody } from '../src/api/AddIssueLabels';
 import { CloseIssueBody } from '../src/api/CloseIssue';
 import { ClosePullRequestBody } from '../src/api/ClosePullRequest';
@@ -35,7 +34,7 @@ import { ReopenIssueBody } from '../src/api/ReopenIssue';
 import { ReopenPullRequestBody } from '../src/api/ReopenPullRequest';
 import { UpdateCommentBody } from '../src/api/UpdateComment';
 import { GitHubId } from '../src/GitHubIdentity';
-import { makeGitHubWebhookProvider } from '../src/GitHubWebhookProvider';
+import * as GitHubWebhookProvider from '../src/GitHubWebhookProvider';
 
 export const githubWebhookSecret = 'github-test-secret';
 
@@ -44,9 +43,13 @@ export const githubEmulatorAliceToken = 'github-alice-token';
 export const githubEmulatorReviewerToken = 'github-reviewer-token';
 
 const inMemoryMailboxKey = (admission: DeliveryAdmission) =>
-    [admission.namespace, admission.provider, admission.installationId, admission.resourceId]
-        .map((segment) => `${segment.length}:${segment}`)
-        .join('|');
+    Arr.join(
+        Arr.map(
+            [admission.namespace, admission.provider, admission.installationId, admission.resourceId],
+            (segment) => `${segment.length}:${segment}`,
+        ),
+        '|',
+    );
 
 /** Test-only keyed mailbox that stores admissions until the test explicitly processes one. */
 export const makeInMemoryMailboxFixture = <R>(processors: ReadonlyArray<ProviderEventProcessor<R>>) =>
@@ -82,7 +85,7 @@ export const makeInMemoryMailboxFixture = <R>(processors: ReadonlyArray<Provider
                     ? Effect.die(new Error(`In-memory mailbox not found: ${mailboxKey}`))
                     : Queue.take(mailbox).pipe(
                           Effect.flatMap((admission) =>
-                              Effect.flatMap(makeTestDeliveryExecution(mailboxKey), ({ execution }) =>
+                              Effect.flatMap(DeliveryExecution.makeTestDeliveryExecution(mailboxKey), ({ execution }) =>
                                   processProviderEvent(processors)([admission], execution),
                               ),
                           ),
@@ -109,14 +112,16 @@ export const issuePayload = (action: string) => ({
     sender: { id: 401, login: 'bob', type: 'User' },
 });
 
-export const issueCommentPayload = (input?: {
-    readonly action?: string;
-    readonly issueNumber?: number;
-    readonly pullRequest?: boolean;
-}) => {
+export const issueCommentPayload = (
+    input: {
+        readonly action?: string;
+        readonly issueNumber?: number;
+        readonly pullRequest?: boolean;
+    } = {},
+) => {
     const issue = {
         id: 300,
-        number: input?.issueNumber ?? 42,
+        number: input.issueNumber ?? 42,
         title: 'Test discussion',
         body: 'Issue body',
         state: 'open',
@@ -125,11 +130,11 @@ export const issueCommentPayload = (input?: {
     };
 
     return {
-        action: input?.action ?? 'created',
+        action: input.action ?? 'created',
         installation: { id: 100 },
         repository: { id: 200, name: 'project', owner: { login: 'alice' } },
         issue:
-            input?.pullRequest === true
+            input.pullRequest === true
                 ? { ...issue, pull_request: { url: 'https://api.github.com/repos/alice/project/pulls/42' } }
                 : issue,
         comment: {
@@ -216,7 +221,7 @@ export const checkRunPayload = (pullRequestNumbers: ReadonlyArray<number> = [42]
         check_suite: { id: 901 },
         started_at: '2025-01-01T00:00:00Z',
         completed_at: '2025-01-01T00:01:00Z',
-        pull_requests: pullRequestNumbers.map((number) => ({ number })),
+        pull_requests: Arr.map(pullRequestNumbers, (number) => ({ number })),
     },
 });
 
@@ -242,7 +247,7 @@ export const pullRequestIssueCommentPayload = () => {
 };
 
 export const makeGitHubTestProvider = (namespace: string) => {
-    const provider = makeGitHubWebhookProvider({
+    const provider = GitHubWebhookProvider.makeGitHubWebhookProvider({
         namespace,
         webhookSecret: Redacted.make(githubWebhookSecret),
     });
@@ -439,16 +444,14 @@ export type GitHubEmulatorCall<Params, Body extends Schema.Codec<unknown, unknow
     readonly body: Body['Type'];
 };
 
-export class GitHubEmulatorSeedError extends Schema.TaggedError<GitHubEmulatorSeedError>()(
-    'GitHubEmulatorSeedError',
-    {},
-) {}
+export class GitHubEmulatorSeedError extends Schema.TaggedError<
+    GitHubEmulatorSeedError,
+    { readonly brand: unique symbol }
+>()('GitHubEmulatorSeedError', {}) {}
 
-const serveOnLoopback = <E, R>(app: Layer.Layer<never, E, R>) =>
+const serveLocally = <E, R>(app: Layer.Layer<never, E, R>) =>
     Effect.gen(function* () {
-        const context = yield* Layer.build(
-            app.pipe(Layer.provideMerge(NodeHttpServer.layer(NodeHttp.createServer, { port: 0, host: '127.0.0.1' }))),
-        );
+        const context = yield* Layer.build(app.pipe(Layer.provideMerge(NodeHttpServer.layerTest)));
 
         const address = Context.get(context, HttpServer.HttpServer).address;
 
@@ -463,12 +466,12 @@ export type GitHubEmulatorFixtureOptions = {
 
 export const makeGitHubEmulatorFixture = (options: GitHubEmulatorFixtureOptions) =>
     Effect.gen(function* () {
-        const provider = makeGitHubWebhookProvider({
+        const provider = GitHubWebhookProvider.makeGitHubWebhookProvider({
             namespace: 'github-emulator-test',
             webhookSecret: Redacted.make(githubWebhookSecret),
         });
 
-        const callbackUrl = yield* serveOnLoopback(
+        const callbackUrl = yield* serveLocally(
             HttpRouter.serve(
                 webhookRoutes([provider], {}).pipe(
                     HttpRouter.provideRequest(
@@ -519,7 +522,7 @@ export const makeGitHubEmulatorFixture = (options: GitHubEmulatorFixtureOptions)
 
         seedFromConfig(emulator.store, emulator.baseUrl, seed);
 
-        const emulatorUrl = yield* serveOnLoopback(HttpServer.serve(HttpEffect.fromWebHandler(emulator.app.fetch)));
+        const emulatorUrl = yield* serveLocally(HttpServer.serve(HttpEffect.fromWebHandler(emulator.app.fetch)));
 
         const store = getGitHubStore(emulator.store);
         const alice = store.users.findOneBy('login', 'alice');
@@ -591,8 +594,11 @@ export const makeGitHubEmulatorFixture = (options: GitHubEmulatorFixtureOptions)
         };
     }).pipe(Effect.provide(FetchHttpClient.layer));
 
+const encodeJsonPayload = (payload: Schema.Json): string =>
+    Result.getOrThrow(Schema.encodeResult(Schema.fromJsonString(Schema.Json))(payload));
+
 export const signedGitHubInput = (event: string, payload: Schema.Json, deliveryId = 'delivery-1'): RawWebhookInput =>
-    signedGitHubBody(event, new TextEncoder().encode(JSON.stringify(payload)), deliveryId);
+    signedGitHubBody(event, new TextEncoder().encode(encodeJsonPayload(payload)), deliveryId);
 
 export const signedGitHubBody = (event: string, body: Uint8Array, deliveryId = 'delivery-1'): RawWebhookInput => {
     const signature = createHmac('sha256', githubWebhookSecret).update(body).digest('hex');

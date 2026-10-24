@@ -6,7 +6,7 @@ import {
     WebhookPayloadInvalidError,
 } from '@stegosaurus/channels-delivery/ProviderWebhooks';
 import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
-import { Effect } from 'effect';
+import { Effect, String as Str } from 'effect';
 import { Headers } from 'effect/http';
 
 import { issueCommentPayload, makeGitHubTestProvider, signedGitHubBody, signedGitHubInput } from './fixtures';
@@ -79,7 +79,7 @@ describe('GitHub issue comment admission', () => {
             const error = yield* Effect.flip(
                 provider.handle({
                     ...input,
-                    headers: Headers.set(input.headers, 'x-hub-signature-256', `sha256=${'0'.repeat(64)}`),
+                    headers: Headers.set(input.headers, 'x-hub-signature-256', `sha256=${Str.repeat(64)('0')}`),
                 }),
             );
 

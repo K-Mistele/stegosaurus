@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Array as Arr, Effect } from 'effect';
 
 import type { GitHubListCheckRunsForRef } from '../GitHubApiContract';
 import { GitHubApiClient } from './GitHubApiClient';
@@ -19,5 +19,5 @@ export const listCheckRunsForRef = Effect.fn('github.api.list_check_runs_for_ref
         items: (page) => page.check_runs,
     });
 
-    return values.map((value) => checkRun(input.pullRequest, value));
+    return Arr.map(values, (value) => checkRun(input.pullRequest, value));
 });

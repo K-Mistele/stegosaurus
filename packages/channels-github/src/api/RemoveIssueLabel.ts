@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect';
+import { Array as Arr, Effect, Schema } from 'effect';
 
 import type { GitHubRemoveIssueLabel } from '../GitHubApiContract';
 import { GitHubApiClient } from './GitHubApiClient';
@@ -18,5 +18,5 @@ export const removeIssueLabel = Effect.fn('github.api.remove_issue_label')(funct
         schema: Schema.Array(Label),
     });
 
-    return values.map(label);
+    return Arr.map(values, label);
 });

@@ -1,5 +1,5 @@
 import type { DeliveryCallbackResult, DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Cause, Effect, Option, Predicate, Schema } from 'effect';
+import { Array as Arr, Cause, Effect, Option, Predicate, Schema } from 'effect';
 
 import type {
     GitHubIssueCreated,
@@ -27,11 +27,14 @@ export interface GitHubCallbackRetryability extends Schema.Schema.Type<typeof Gi
 
 const GitHubCallbackRetryableFlag = Schema.Struct({ retryable: Schema.Boolean });
 
-export class GitHubCallbackError extends Schema.TaggedError<GitHubCallbackError>()('GitHubCallbackError', {
-    callback: GitHubCallbackName,
-    retryable: Schema.Boolean,
-    reason: Schema.Literals(['failed', 'unexpected']),
-}) {}
+export class GitHubCallbackError extends Schema.TaggedError<GitHubCallbackError, { readonly brand: unique symbol }>()(
+    'GitHubCallbackError',
+    {
+        callback: GitHubCallbackName,
+        retryable: Schema.Boolean,
+        reason: Schema.Literals(['failed', 'unexpected']),
+    },
+) {}
 
 /**
  * One application callback. `delivery` names the delivery and can hand it to a remote worker; a callback
@@ -67,7 +70,8 @@ const narrowGitHubCallbackCause = (input: {
     readonly cause: Cause.Cause<unknown>;
 }) => {
     if (Cause.hasInterrupts(input.cause)) {
-        const preservedReasons = input.cause.reasons.filter(
+        const preservedReasons = Arr.filter(
+            input.cause.reasons,
             (reason) => Cause.isInterruptReason(reason) || Cause.isDieReason(reason),
         );
 

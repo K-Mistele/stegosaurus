@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Array as Arr, Effect } from 'effect';
 
 import type { GitHubPullRequestRequest } from '../GitHubApiContract';
 import { GitHubApiClient } from './GitHubApiClient';
@@ -17,5 +17,5 @@ export const listPullRequestLabels = Effect.fn('github.api.list_pull_request_lab
         schema: Label,
     });
 
-    return values.map(label);
+    return Arr.map(values, label);
 });

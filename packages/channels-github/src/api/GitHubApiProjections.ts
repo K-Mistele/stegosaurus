@@ -1,4 +1,4 @@
-import { Match, Predicate, Schema, Struct, type Types } from 'effect';
+import { Array as Arr, Match, Predicate, Schema, String as Str, Struct, type Types } from 'effect';
 
 import type { GitHubPostPullRequestReviewComment } from '../GitHubApiContract';
 import {
@@ -91,7 +91,7 @@ export const issueComment = (discussion: GitHubIssueCommentRef['discussion'], va
     });
 
 export const reviewState = (state: string): GitHubReviewState =>
-    Match.value(state.toLowerCase()).pipe(
+    Match.value(Str.toLowerCase(state)).pipe(
         Match.when('approved', () => 'approved' as const),
         Match.when('changes_requested', () => 'changes_requested' as const),
         Match.when('commented', () => 'commented' as const),
@@ -227,7 +227,7 @@ export const actionsJobInfo = (ref: GitHubActionsJobRef, value: typeof Api.Actio
         startedAt: value.started_at,
         completedAt: value.completed_at,
         checkRunUrl: value.check_run_url,
-        steps: (value.steps ?? []).map((step) => ({
+        steps: Arr.map(value.steps ?? [], (step) => ({
             name: step.name,
             status: step.status,
             conclusion: step.conclusion,
@@ -254,7 +254,7 @@ export const actionsJob = (repository: GitHubRepositoryRef, value: typeof Api.Ac
         },
     });
 
-export const sameUrl = (left: string, right: string) => left.replace(/\/$/, '') === right.replace(/\/$/, '');
+export const sameUrl = (left: string, right: string) => Str.replace(/\/$/, '')(left) === Str.replace(/\/$/, '')(right);
 
 export const reviewCommentLocationBody = (location: GitHubPostPullRequestReviewComment['location']) =>
     Match.value(location).pipe(

@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect';
+import { Array as Arr, Effect, Schema } from 'effect';
 
 import type { GitHubRemovePullRequestLabel } from '../GitHubApiContract';
 import { GitHubApiClient } from './GitHubApiClient';
@@ -20,5 +20,5 @@ export const removePullRequestLabel = Effect.fn('github.api.remove_pull_request_
         schema: Schema.Array(Label),
     });
 
-    return values.map(label);
+    return Arr.map(values, label);
 });

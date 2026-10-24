@@ -282,16 +282,19 @@ export const GitHubApiErrorReason = Schema.Literals([
 
 export type GitHubApiErrorReason = typeof GitHubApiErrorReason.Type;
 
-export class GitHubApiError extends Schema.TaggedError<GitHubApiError>()('GitHubApiError', {
-    operation: GitHubApiOperation,
-    reason: GitHubApiErrorReason,
-    retryable: Schema.Boolean,
-    status: Schema.optionalKey(Schema.Int),
-    message: Schema.optionalKey(Schema.String),
-    retryAfterMs: Schema.optionalKey(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
-    ),
-}) {}
+export class GitHubApiError extends Schema.TaggedError<GitHubApiError, { readonly brand: unique symbol }>()(
+    'GitHubApiError',
+    {
+        operation: GitHubApiOperation,
+        reason: GitHubApiErrorReason,
+        retryable: Schema.Boolean,
+        status: Schema.optionalKey(Schema.Int),
+        message: Schema.optionalKey(Schema.String),
+        retryAfterMs: Schema.optionalKey(
+            Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
+        ),
+    },
+) {}
 
 /** Application-wide GitHub operations. Transport, credentials, pagination, and decoding stay behind this service. */
 export type GitHubApiOperations = {

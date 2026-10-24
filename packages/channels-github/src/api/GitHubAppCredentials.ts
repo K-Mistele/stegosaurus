@@ -38,7 +38,11 @@ const TOKEN_EXPIRY_MARGIN_MILLIS = 60_000;
 
 const TOKEN_MAX_TTL_MILLIS = 3_540_000;
 
-const cacheKey = (ref: GitHubRepositoryRef) => JSON.stringify([ref.installationId, ref.repositoryId]);
+/** Tokens are cached per installation and repository, under the JSON of that pair. */
+const CacheKeyJson = Schema.fromJsonString(Schema.Tuple([GitHubId, GitHubId]));
+
+const cacheKey = (ref: GitHubRepositoryRef) =>
+    Schema.encodeEffect(CacheKeyJson)([ref.installationId, ref.repositoryId]);
 
 export class GitHubAppCredentials extends Context.Service<
     GitHubAppCredentials,
@@ -52,7 +56,7 @@ export class GitHubAppCredentials extends Context.Service<
         /** Forget the repository's cached token, after GitHub refused it. */
         readonly invalidateInstallationToken: (repository: GitHubRepositoryRef) => Effect.Effect<void>;
     }
->()('@stegosaurus/channels-github/internal/GitHubAppCredentials', {
+>()('@stegosaurus/channels-github/api/GitHubAppCredentials', {
     make: Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient;
         const signer = yield* GitHubAppSigner;
@@ -85,9 +89,9 @@ export class GitHubAppCredentials extends Context.Service<
         const tokenCache = yield* Cache.makeWith(
             (key: string) =>
                 Effect.gen(function* () {
-                    const [installationId, repositoryId] = yield* Schema.decodeEffect(
-                        Schema.fromJsonString(Schema.Tuple([GitHubId, GitHubId])),
-                    )(key).pipe(Effect.mapError(() => GitHubTransportError.make({ stage: 'decode' })));
+                    const [installationId, repositoryId] = yield* Schema.decodeEffect(CacheKeyJson)(key).pipe(
+                        Effect.mapError(() => GitHubTransportError.make({ stage: 'decode' })),
+                    );
 
                     const jwt = yield* appJwt;
 
@@ -133,11 +137,17 @@ export class GitHubAppCredentials extends Context.Service<
         return {
             appJwt,
             installationToken: (repository) =>
-                Cache.get(tokenCache, cacheKey(repository)).pipe(
+                cacheKey(repository).pipe(
+                    Effect.mapError(() => GitHubTransportError.make({ stage: 'decode' })),
+                    Effect.flatMap((key) => Cache.get(tokenCache, key)),
                     Effect.map(({ token }) => token),
                     Effect.withSpan('github.api.installation_token'),
                 ),
-            invalidateInstallationToken: (repository) => Cache.invalidate(tokenCache, cacheKey(repository)),
+            invalidateInstallationToken: (repository) =>
+                cacheKey(repository).pipe(
+                    Effect.flatMap((key) => Cache.invalidate(tokenCache, key)),
+                    Effect.orDie,
+                ),
         };
     }),
 }) {

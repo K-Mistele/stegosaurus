@@ -1,4 +1,4 @@
-import { Effect, Predicate } from 'effect';
+import { Array as Arr, Effect, Option } from 'effect';
 
 import type { GitHubCheckRunRequest } from '../GitHubApiContract';
 import { fetchCheckRun } from './FetchCheckRun';
@@ -31,9 +31,9 @@ export const resolveActionsJob = Effect.fn('github.api.resolve_actions_job')(fun
             items: (page) => page.jobs,
         });
 
-        const job = jobs.find((candidate) => sameUrl(candidate.check_run_url, check.apiUrl));
+        const job = Arr.findFirst(jobs, (candidate) => sameUrl(candidate.check_run_url, check.apiUrl));
 
-        if (Predicate.isNotUndefined(job)) return actionsJob(input.checkRun, job);
+        if (Option.isSome(job)) return actionsJob(input.checkRun, job.value);
     }
 
     return null;

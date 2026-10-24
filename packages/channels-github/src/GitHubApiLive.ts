@@ -19,7 +19,4 @@ export const GitHubApiLiveBase = Layer.merge(
 ).pipe(Layer.provide(GitHubAppCredentials.layer));
 
 /** GitHub API and git credentials with Web Crypto signing and the standard Fetch transport. */
-export const GitHubApiLive = GitHubApiLiveBase.pipe(
-    Layer.provide(GitHubAppSigner.layer),
-    Layer.provide(FetchHttpClient.layer),
-);
+export const GitHubApiLive = GitHubApiLiveBase.pipe(Layer.provide([GitHubAppSigner.layer, FetchHttpClient.layer]));

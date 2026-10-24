@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Array as Arr, Effect } from 'effect';
 
 import type { GitHubPullRequestRequest } from '../GitHubApiContract';
 import { GitHubApiClient } from './GitHubApiClient';
@@ -17,5 +17,5 @@ export const listPullRequestReviews = Effect.fn('github.api.list_pull_request_re
         schema: Review,
     });
 
-    return values.map((value) => review(input.pullRequest, value));
+    return Arr.map(values, (value) => review(input.pullRequest, value));
 });

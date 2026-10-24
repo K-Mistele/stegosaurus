@@ -14,7 +14,21 @@ import { type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryCon
 import { DeliveryActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
 import * as Channels from '@stegosaurus/channels-delivery/Channels';
 import * as ChannelsMemory from '@stegosaurus/channels-delivery/ChannelsMemory';
-import { Config, Data, Effect, Layer, Match, Predicate, Queue, Redacted, Ref, Schedule, Schema } from 'effect';
+import {
+    Array as Arr,
+    Config,
+    Data,
+    Effect,
+    Layer,
+    Match,
+    Predicate,
+    Queue,
+    Redacted,
+    Ref,
+    Schedule,
+    Schema,
+    String as Str,
+} from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 import { expect } from 'vite-plus/test';
 
@@ -26,7 +40,7 @@ import {
     GitHubIssueCommentRecord,
     GitHubReviewCommentRef,
     type GitHubCommentRef,
-    type GitHubDiscussionRef,
+    GitHubDiscussionRef,
     type GitHubReactionTarget,
 } from '../src';
 import { githubWebhookSecret, issueCommentPayload, signedGitHubInput } from './fixtures';
@@ -89,25 +103,25 @@ const makeFakeGitHub = (options: FakeGitHubOptions = {}) =>
             });
 
         const react = (reaction: string, target: string, active: boolean) =>
-            Ref.modify(reactions, (current) => {
-                const key = `${reaction} on ${target}`;
-                const next = new Set(current);
+            Effect.gen(function* () {
+                const changed = yield* Ref.modify(reactions, (current) => {
+                    const key = `${reaction} on ${target}`;
+                    const next = new Set(current);
 
-                if (active) next.add(key);
-                else next.delete(key);
+                    if (active) next.add(key);
+                    else next.delete(key);
 
-                return [current.has(key) !== active, next] as const;
-            }).pipe(
-                Effect.flatMap((changed) =>
-                    changed ? Queue.offer(shown, `${reaction} ${active ? 'on' : 'off'} ${target}`) : Effect.void,
-                ),
-                Effect.asVoid,
-            );
+                    return [current.has(key) !== active, next] as const;
+                });
+
+                if (changed) yield* Queue.offer(shown, `${reaction} ${active ? 'on' : 'off'} ${target}`);
+            });
 
         const api = Layer.mock(GitHubApi, {
-            postIssueComment: ({ issue, content }) => post({ _tag: 'Issue', ref: issue }, content.markdown),
+            postIssueComment: ({ issue, content }) =>
+                post(GitHubDiscussionRef.cases.Issue.make({ ref: issue }), content.markdown),
             postPullRequestComment: ({ pullRequest, content }) =>
-                post({ _tag: 'PullRequest', ref: pullRequest }, content.markdown),
+                post(GitHubDiscussionRef.cases.PullRequest.make({ ref: pullRequest }), content.markdown),
             updateComment: ({ comment, content }) =>
                 Schema.is(GitHubReviewCommentRef)(comment)
                     ? Effect.die(new Error('the delivery never edits review comments'))
@@ -122,7 +136,7 @@ const makeFakeGitHub = (options: FakeGitHubOptions = {}) =>
                           ),
                       ),
             deleteComment: ({ comment }) =>
-                Queue.offer(shown, `delete ${describeComment(comment)}`).pipe(Effect.asVoid),
+                Queue.offer(shown, `delete ${describeComment(comment)}`).pipe(Effect.andThen(Effect.void)),
             addReaction: ({ target, reaction }) => react(reaction, describeReactionTarget(target), true),
             removeReaction: ({ target, reaction }) => react(reaction, describeReactionTarget(target), false),
         });
@@ -180,8 +194,11 @@ const startBot = (api: Layer.Layer<GitHubApi>) =>
                                     Match.orElse(() => ''),
                                 );
 
-                                if (text.includes('subscribe'))
-                                    return yield* discussion.subscribe().pipe(Effect.orDie, Effect.asVoid);
+                                if (Str.includes('subscribe')(text)) {
+                                    yield* discussion.subscribe().pipe(Effect.orDie);
+
+                                    return;
+                                }
 
                                 return yield* delivery.handoff();
                             }),
@@ -308,7 +325,7 @@ describe('GitHub remote delivery: issue and pull request', () => {
                 ]);
 
                 const retired = yield* awaitRetired(client, delivery);
-                expect(retired.output.map(({ kind, state }) => `${kind}:${state}`)).toEqual([
+                expect(Arr.map(retired.output, ({ kind, state }) => `${kind}:${state}`)).toEqual([
                     'SetActivity:Delivered',
                     'SetActivity:Delivered',
                     'CreateMessage:Delivered',
@@ -362,7 +379,7 @@ describe('GitHub remote delivery: issue and pull request', () => {
 
                 yield* client.complete(target);
                 const retired = yield* awaitRetired(client, delivery);
-                expect(retired.output.map(({ kind, messageId }) => [kind, messageId])).toEqual([
+                expect(Arr.map(retired.output, ({ kind, messageId }) => [kind, messageId])).toEqual([
                     ['SetMessageReaction', undefined],
                     ['CreateMessage', 'summary'],
                     ['SetMessageReaction', 'summary'],
@@ -371,7 +388,9 @@ describe('GitHub remote delivery: issue and pull request', () => {
                 ]);
                 /** The delivery ID holds a random batch ID, so only the rest of the status is checked for GitHub IDs. */
                 const { deliveryId: _, ...rest } = retired;
-                expect(JSON.stringify(rest)).not.toMatch(/500|901|alice|project/);
+                expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(rest)).not.toMatch(
+                    /500|901|alice|project/,
+                );
                 expect(yield* Ref.get(github.reactions)).toEqual(new Set(['hooray on comment 901']));
                 expect(yield* Queue.size(github.shown)).toBe(0);
             }),
@@ -438,10 +457,8 @@ describe('GitHub remote delivery: issue and pull request', () => {
 
             const refused = yield* client.activity.set({ ...target, activity: working('x') }).pipe(Effect.flip);
 
-            expect(refused).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'SetActivity',
-            });
+            expect(refused._tag).toBe('DeliveryOperationUnsupported');
+            expect(refused).toMatchObject({ operation: 'SetActivity' });
             yield* client.complete({ ...target, payload: { markdown: 'Noted.' } });
             expect(yield* Queue.take(github.shown)).toBe('post issue 42: Noted.');
             yield* awaitRetired(client, subscribed.delivery);
@@ -488,7 +505,7 @@ describe('GitHub remote delivery: output accepted while an earlier GitHub output
                 ]);
                 expect(yield* Ref.get(accepted)).toEqual(['accepted', 'accepted']);
                 const retired = yield* awaitRetired(client, delivery);
-                expect(retired.output.map(({ kind }) => kind)).toEqual([
+                expect(Arr.map(retired.output, ({ kind }) => kind)).toEqual([
                     'SetActivity',
                     'CreateMessage',
                     'SetActivity',

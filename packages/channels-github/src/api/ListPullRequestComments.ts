@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Array as Arr, Effect } from 'effect';
 
 import type { GitHubPullRequestRequest } from '../GitHubApiContract';
 import { GitHubDiscussionRef } from '../GitHubModels';
@@ -20,5 +20,5 @@ export const listPullRequestComments = Effect.fn('github.api.list_pull_request_c
 
     const discussion = GitHubDiscussionRef.cases.PullRequest.make({ ref: input.pullRequest });
 
-    return values.map((value) => issueComment(discussion, value));
+    return Arr.map(values, (value) => issueComment(discussion, value));
 });

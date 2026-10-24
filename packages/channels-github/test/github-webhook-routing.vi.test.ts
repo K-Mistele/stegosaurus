@@ -3,7 +3,7 @@ import { ProviderEventHandled } from '@stegosaurus/channels-delivery/ProviderEve
 import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
 import { DeliveryReceipt, type DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Deferred, Effect, Layer } from 'effect';
+import { Array as Arr, Deferred, Effect, Layer } from 'effect';
 import { vi } from 'vite-plus/test';
 
 import { GitHubApi } from '../src/GitHubApi';
@@ -55,13 +55,11 @@ describe('GitHub webhook routing', () => {
                 ProviderEventHandled.make({}),
             );
             expect(onIssueCreated).toHaveBeenCalledOnce();
+            expect(onIssueCreated.mock.calls[0]?.[0]._tag).toBe('GitHubIssueCreated');
+            expect(onIssueCreated.mock.calls[0]?.[0].trigger._tag).toBe('GitHubIssueOpened');
             expect(onIssueCreated).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    _tag: 'GitHubIssueCreated',
-                    trigger: expect.objectContaining({
-                        _tag: 'GitHubIssueOpened',
-                        title: 'Process this issue',
-                    }),
+                    trigger: expect.objectContaining({ title: 'Process this issue' }),
                     issue: expect.objectContaining({
                         ref: expect.objectContaining({ number: issueNumber }),
                     }),
@@ -230,8 +228,10 @@ describe('GitHub webhook routing', () => {
             expect(admissions).toHaveLength(21);
             const issueResourceId = `github:v1:${fixture.repositoryId}:issue:${issueNumber}`;
             const pullRequestResourceId = `github:v1:${fixture.repositoryId}:pull-request:${pull.number}`;
-            expect(admissions.filter((admission) => admission.resourceId === issueResourceId)).toHaveLength(11);
-            expect(admissions.filter((admission) => admission.resourceId === pullRequestResourceId)).toHaveLength(10);
+            expect(Arr.filter(admissions, (admission) => admission.resourceId === issueResourceId)).toHaveLength(11);
+            expect(Arr.filter(admissions, (admission) => admission.resourceId === pullRequestResourceId)).toHaveLength(
+                10,
+            );
         }),
     );
 });

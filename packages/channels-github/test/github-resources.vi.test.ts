@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { Effect, Layer, Queue } from 'effect';
+import { Array as Arr, Effect, Layer, Queue } from 'effect';
 
 import { GitHubApi } from '../src/GitHubApi';
 import { GitHubId } from '../src/GitHubIdentity';
@@ -20,6 +20,7 @@ import {
     GitHubPullRequestFile,
     GitHubPullRequestInfo,
     GitHubPullRequestRef,
+    GitHubReviewCommentLocation,
     GitHubReviewCommentRecord,
 } from '../src/GitHubModels';
 import {
@@ -202,7 +203,7 @@ describe('GitHub resource capability delegation', () => {
                 removeIssueLabel: (input) =>
                     Queue.offer(calls, { operation: 'removeIssueLabel', input }).pipe(Effect.as(labels)),
                 removeAllIssueLabels: (input) =>
-                    Queue.offer(calls, { operation: 'removeAllIssueLabels', input }).pipe(Effect.asVoid),
+                    Queue.offer(calls, { operation: 'removeAllIssueLabels', input }).pipe(Effect.andThen(Effect.void)),
             });
 
             const issue = GitHubIssue.make({ ref: issueRef, mailboxKey: 'issue-mailbox' });
@@ -262,7 +263,9 @@ describe('GitHub resource capability delegation', () => {
                 removePullRequestLabel: (input) =>
                     Queue.offer(calls, { operation: 'removePullRequestLabel', input }).pipe(Effect.as(labels)),
                 removeAllPullRequestLabels: (input) =>
-                    Queue.offer(calls, { operation: 'removeAllPullRequestLabels', input }).pipe(Effect.asVoid),
+                    Queue.offer(calls, { operation: 'removeAllPullRequestLabels', input }).pipe(
+                        Effect.andThen(Effect.void),
+                    ),
                 fetchPullRequest: (input) =>
                     Queue.offer(calls, { operation: 'fetchPullRequest', input }).pipe(Effect.as(pullRequestInfo)),
                 listCheckRunsForRef: (input) =>
@@ -288,7 +291,12 @@ describe('GitHub resource capability delegation', () => {
                         content,
                         commitId: 'head-sha',
                         path: 'src/index.ts',
-                        location: { _tag: 'Range', startLine: 5, startSide: 'LEFT', line: 10, side: 'RIGHT' },
+                        location: GitHubReviewCommentLocation.cases.Range.make({
+                            startLine: 5,
+                            startSide: 'LEFT',
+                            line: 10,
+                            side: 'RIGHT',
+                        }),
                     }),
                     files: yield* pullRequest.listFiles(),
                     diff: yield* pullRequest.fetchDiff(),
@@ -311,7 +319,7 @@ describe('GitHub resource capability delegation', () => {
                 };
             }).pipe(Effect.provide(layer));
 
-            const checkRuns = checkRunRecords.map((record) => GitHubCheckRun.make(record));
+            const checkRuns = Arr.map(checkRunRecords, (record) => GitHubCheckRun.make(record));
             expect(results.reviewComment).toBeInstanceOf(GitHubReviewComment);
             expect(results.currentChecks[0]).toBeInstanceOf(GitHubCheckRun);
             expect(results.exactChecks[0]).toBeInstanceOf(GitHubCheckRun);
@@ -339,7 +347,12 @@ describe('GitHub resource capability delegation', () => {
                         content,
                         commitId: 'head-sha',
                         path: 'src/index.ts',
-                        location: { _tag: 'Range', startLine: 5, startSide: 'LEFT', line: 10, side: 'RIGHT' },
+                        location: GitHubReviewCommentLocation.cases.Range.make({
+                            startLine: 5,
+                            startSide: 'LEFT',
+                            line: 10,
+                            side: 'RIGHT',
+                        }),
                     },
                 },
                 { operation: 'listPullRequestFiles', input: { pullRequest: pullRequestRef } },

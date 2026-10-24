@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect';
+import { Array as Arr, Effect, Schema } from 'effect';
 
 import { GitHubLabels, type GitHubPullRequestLabelsRequest } from '../GitHubApiContract';
 import { GitHubApiClient } from './GitHubApiClient';
@@ -21,5 +21,5 @@ export const setPullRequestLabels = Effect.fn('github.api.set_pull_request_label
         body: { schema: SetPullRequestLabelsBody, value: { labels: input.labels } },
     });
 
-    return values.map(label);
+    return Arr.map(values, label);
 });

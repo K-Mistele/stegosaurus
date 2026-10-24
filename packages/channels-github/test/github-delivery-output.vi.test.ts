@@ -23,7 +23,7 @@ import { DeliveryOperationId } from '@stegosaurus/channels-delivery/DeliveryOper
 import { CreateMessage, MessageId } from '@stegosaurus/channels-delivery/DeliveryMessage';
 import { PreparedDeliveryCallback } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { DeliveryActivity, SetActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
-import { Effect, Layer, Match, Option, Ref, Result, Schema } from 'effect';
+import { Array as Arr, Effect, Layer, Match, Option, pipe, Ref, Result, Schema, String as Str } from 'effect';
 
 import {
     commentOutputScenarios,
@@ -38,6 +38,7 @@ import {
     GitHubApiError,
     GitHubDeliveryDestination,
     GitHubDeliveryDestinationJson,
+    GitHubDiscussionRef,
     GitHubId,
     GitHubIssueCommentRecord,
     GitHubIssueCommentRef,
@@ -65,7 +66,7 @@ const issue = GitHubIssueRef.make({
 const pullRequest = GitHubPullRequestRef.make({ ...issue, number: GitHubId.make(43) });
 
 const mentionComment = GitHubIssueCommentRef.make({
-    discussion: { _tag: 'Issue', ref: issue },
+    discussion: GitHubDiscussionRef.cases.Issue.make({ ref: issue }),
     id: GitHubId.make(500),
 });
 
@@ -79,22 +80,30 @@ const prepared = (input: {
     readonly destination?: GitHubDeliveryDestination;
     readonly activationTarget?: GitHubActivationTarget;
     readonly presentationVersion?: number;
-}) => {
-    const target = Option.fromUndefinedOr(input.activationTarget);
+}) =>
+    Effect.gen(function* () {
+        const target = Option.fromUndefinedOr(input.activationTarget);
 
-    return PreparedDeliveryCallback.make({
-        name: 'onMentioned',
-        presentationVersion: input.presentationVersion ?? gitHubPresentationVersion,
-        destination: Schema.encodeSync(GitHubDeliveryDestinationJson)(input.destination ?? issueDestination),
-        ...Option.match(target, {
-            onNone: () => ({}),
-            onSome: (value) => ({
-                activationTarget: Schema.encodeSync(GitHubActivationTargetJson)(value),
-            }),
-        }),
-        supportedOperations: gitHubSupportedOperations(target),
-    });
-};
+        const destination = yield* Schema.encodeEffect(GitHubDeliveryDestinationJson)(
+            input.destination ?? issueDestination,
+        );
+
+        const activationTarget = yield* Option.match(target, {
+            onNone: () => Effect.succeed({}),
+            onSome: (value) =>
+                Effect.map(Schema.encodeEffect(GitHubActivationTargetJson)(value), (encoded) => ({
+                    activationTarget: encoded,
+                })),
+        });
+
+        return PreparedDeliveryCallback.make({
+            name: 'onMentioned',
+            presentationVersion: input.presentationVersion ?? gitHubPresentationVersion,
+            destination,
+            ...activationTarget,
+            supportedOperations: gitHubSupportedOperations(target),
+        });
+    }).pipe(Effect.orDie);
 
 const attempt = (operation: ProviderOutputOperation, invocation: PreparedDeliveryCallback) =>
     ProviderOutputAttempt.make({
@@ -126,7 +135,7 @@ const sharedFaultReasons = {
 const run = (
     operation: ProviderOutputOperation,
     invocation: PreparedDeliveryCallback,
-    failWith?: GitHubApiErrorReason,
+    failWith: GitHubApiErrorReason | undefined,
 ) =>
     Effect.gen(function* () {
         const calls = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -166,11 +175,11 @@ const run = (
         const api = Layer.mock(GitHubApi, {
             postIssueComment: ({ issue: target, content }) =>
                 record(`post issue ${target.number}: ${content.markdown}`).pipe(
-                    Effect.as(commentOn({ _tag: 'Issue', ref: target }, content.markdown)),
+                    Effect.as(commentOn(GitHubDiscussionRef.cases.Issue.make({ ref: target }), content.markdown)),
                 ),
             postPullRequestComment: ({ pullRequest: target, content }) =>
                 record(`post pull-request ${target.number}: ${content.markdown}`).pipe(
-                    Effect.as(commentOn({ _tag: 'PullRequest', ref: target }, content.markdown)),
+                    Effect.as(commentOn(GitHubDiscussionRef.cases.PullRequest.make({ ref: target }), content.markdown)),
                 ),
             updateComment: ({ comment, content }) =>
                 record(`edit ${commentTarget(comment)}: ${content.markdown}`).pipe(
@@ -194,20 +203,21 @@ const gitHubIssueHarness: CommentOutputHarness = {
     provider: 'GitHub issue',
     optionBullet: '- ',
     run: (operation, options = {}) =>
-        run(
-            operation,
-            prepared({
-                presentationVersion: options.futureVersion === true ? gitHubPresentationVersion + 1 : undefined,
-            }),
-            options.fault === undefined ? undefined : sharedFaultReasons[options.fault],
-        ).pipe(
+        prepared({
+            presentationVersion: options.futureVersion === true ? gitHubPresentationVersion + 1 : undefined,
+        }).pipe(
+            Effect.flatMap((invocation) =>
+                run(operation, invocation, options.fault === undefined ? undefined : sharedFaultReasons[options.fault]),
+            ),
             Effect.map(({ result, calls }) => ({
                 result,
-                shown: calls.map((line) =>
-                    line
-                        .replace(/^post issue 42: /, 'post: ')
-                        .replace(/^edit issue-comment 900: /, 'edit: ')
-                        .replace(/^delete issue-comment 900$/, 'delete'),
+                shown: Arr.map(calls, (line) =>
+                    pipe(
+                        line,
+                        Str.replace(/^post issue 42: /, 'post: '),
+                        Str.replace(/^edit issue-comment 900: /, 'edit: '),
+                        Str.replace(/^delete issue-comment 900$/, 'delete'),
+                    ),
                 ),
             })),
         ),
@@ -247,7 +257,10 @@ describe('GitHub delivery output', () => {
                     Ref.update(calls, (all) => [...all, 'post']).pipe(
                         Effect.as(
                             GitHubIssueCommentRecord.make({
-                                ref: { discussion: { _tag: 'Issue', ref: target }, id: GitHubId.make(901) },
+                                ref: {
+                                    discussion: GitHubDiscussionRef.cases.Issue.make({ ref: target }),
+                                    id: GitHubId.make(901),
+                                },
                                 body: content.markdown,
                                 url: 'https://github.com/alice/project/issues/42#issuecomment-901',
                                 author: null,
@@ -266,7 +279,7 @@ describe('GitHub delivery output', () => {
                 ],
             });
 
-            const deleted = Schema.encodeSync(GitHubOutputReceiptJson)(
+            const deleted = yield* Schema.encodeEffect(GitHubOutputReceiptJson)(
                 GitHubOutputReceipt.make({ comment: mentionComment }),
             );
 
@@ -284,7 +297,7 @@ describe('GitHub delivery output', () => {
                                 presentation: deleted,
                             }),
                         }),
-                        prepared({}),
+                        yield* prepared({}),
                     ),
                 )
                 .pipe(Effect.provide(api));
@@ -299,7 +312,8 @@ describe('GitHub delivery output', () => {
         Effect.gen(function* () {
             const { result, calls } = yield* run(
                 CreateMessage.make({ messageId: MessageId.make('summary'), markdown: 'Summary' }),
-                prepared({ destination: pullRequestDestination }),
+                yield* prepared({ destination: pullRequestDestination }),
+                undefined,
             );
 
             expect(calls).toEqual(['post pull-request 43: Summary']);
@@ -311,7 +325,7 @@ describe('GitHub delivery output', () => {
             expect(receipt).toEqual(
                 GitHubOutputReceipt.make({
                     comment: {
-                        discussion: { _tag: 'PullRequest', ref: pullRequest },
+                        discussion: GitHubDiscussionRef.cases.PullRequest.make({ ref: pullRequest }),
                         id: GitHubId.make(900),
                     },
                 }),
@@ -337,11 +351,11 @@ describe('GitHub delivery output', () => {
             ] as const;
 
             for (const [activationTarget, shown] of targets) {
-                const invocation = prepared({ activationTarget });
-                const set = yield* run(working, invocation);
+                const invocation = yield* prepared({ activationTarget });
+                const set = yield* run(working, invocation, undefined);
                 expect(Result.isSuccess(set.result)).toBe(true);
                 expect(set.calls).toEqual([`react + eyes on ${shown}`]);
-                const cleared = yield* run(idle, invocation);
+                const cleared = yield* run(idle, invocation, undefined);
                 expect(Result.isSuccess(cleared.result)).toBe(true);
                 expect(cleared.calls).toEqual([`react - eyes on ${shown}`]);
             }
@@ -350,7 +364,7 @@ describe('GitHub delivery output', () => {
 
     it.effect('a result clears eyes before it comments, and only when the worker was working', ({ expect }) =>
         Effect.gen(function* () {
-            const invocation = prepared({
+            const invocation = yield* prepared({
                 activationTarget: GitHubActivationTarget.cases.GitHubIssueComment.make({
                     comment: mentionComment,
                 }),
@@ -363,6 +377,7 @@ describe('GitHub delivery output', () => {
                     markdown: 'Done.',
                 }),
                 invocation,
+                undefined,
             );
 
             expect(posted.calls).toEqual(['react - eyes on issue-comment 500', 'post issue 42: Done.']);
@@ -370,6 +385,7 @@ describe('GitHub delivery output', () => {
             const silent = yield* run(
                 ProviderPresentOutcome.make({ clearActivity: true, outcome: completed }),
                 invocation,
+                undefined,
             );
 
             expect(silent.calls).toEqual(['react - eyes on issue-comment 500']);
@@ -378,6 +394,7 @@ describe('GitHub delivery output', () => {
             const neverWorking = yield* run(
                 ProviderPresentOutcome.make({ clearActivity: false, outcome: completed }),
                 invocation,
+                undefined,
             );
 
             expect(neverWorking.calls).toEqual([]);
@@ -386,7 +403,7 @@ describe('GitHub delivery output', () => {
 
     it.effect('counts eyes already removed, or a target already gone, as cleared', ({ expect }) =>
         Effect.gen(function* () {
-            const invocation = prepared({
+            const invocation = yield* prepared({
                 activationTarget: GitHubActivationTarget.cases.GitHubIssue.make({ issue }),
             });
 
@@ -407,7 +424,7 @@ describe('GitHub delivery output', () => {
 
     it.effect('sorts reaction failures into retryable and final', ({ expect }) =>
         Effect.gen(function* () {
-            const invocation = prepared({
+            const invocation = yield* prepared({
                 activationTarget: GitHubActivationTarget.cases.GitHubIssue.make({ issue }),
             });
 
@@ -444,7 +461,7 @@ describe('GitHub delivery output', () => {
             expect(
                 gitHubSupportedOperations(Option.some(GitHubActivationTarget.cases.GitHubIssue.make({ issue }))),
             ).toContain('SetActivity');
-            const refused = yield* run(working, prepared({}));
+            const refused = yield* run(working, yield* prepared({}), undefined);
 
             if (!Result.isFailure(refused.result)) return expect.unreachable();
             expect(refused.result.failure).toMatchObject({
@@ -484,9 +501,9 @@ describe('GitHub delivery output', () => {
                     ] as const;
 
                     for (const [activationTarget, shown] of targets) {
-                        const invocation = prepared({ activationTarget });
-                        const added = yield* run(react(onActivation, 'thumbs_up', true), invocation);
-                        const removed = yield* run(react(onActivation, 'thumbs_down', false), invocation);
+                        const invocation = yield* prepared({ activationTarget });
+                        const added = yield* run(react(onActivation, 'thumbs_up', true), invocation, undefined);
+                        const removed = yield* run(react(onActivation, 'thumbs_down', false), invocation, undefined);
                         expect(Result.isSuccess(added.result) && Result.isSuccess(removed.result)).toBe(true);
                         expect([...added.calls, ...removed.calls]).toEqual([
                             `react + +1 on ${shown}`,
@@ -498,10 +515,10 @@ describe('GitHub delivery output', () => {
 
         it.effect('reacts on a comment the delivery posted, through its receipt', ({ expect }) =>
             Effect.gen(function* () {
-                const posted = Schema.encodeSync(GitHubOutputReceiptJson)(
+                const posted = yield* Schema.encodeEffect(GitHubOutputReceiptJson)(
                     GitHubOutputReceipt.make({
                         comment: GitHubIssueCommentRef.make({
-                            discussion: { _tag: 'PullRequest', ref: pullRequest },
+                            discussion: GitHubDiscussionRef.cases.PullRequest.make({ ref: pullRequest }),
                             id: GitHubId.make(900),
                         }),
                     }),
@@ -514,7 +531,8 @@ describe('GitHub delivery output', () => {
 
                 const { result, calls } = yield* run(
                     react(target, 'rocket', true),
-                    prepared({ destination: pullRequestDestination }),
+                    yield* prepared({ destination: pullRequestDestination }),
+                    undefined,
                 );
 
                 expect(Result.isSuccess(result)).toBe(true);
@@ -524,7 +542,7 @@ describe('GitHub delivery output', () => {
 
         it.effect('counts a target already gone as removed, and sorts other failures', ({ expect }) =>
             Effect.gen(function* () {
-                const invocation = prepared({
+                const invocation = yield* prepared({
                     activationTarget: GitHubActivationTarget.cases.GitHubIssue.make({ issue }),
                 });
 
@@ -532,7 +550,7 @@ describe('GitHub delivery output', () => {
                 expect(Result.isSuccess(removed.result)).toBe(true);
                 const outage = yield* run(react(onActivation, 'heart', true), invocation, 'unavailable');
                 const forbidden = yield* run(react(onActivation, 'heart', true), invocation, 'forbidden');
-                const noTarget = yield* run(react(onActivation, 'heart', true), prepared({}));
+                const noTarget = yield* run(react(onActivation, 'heart', true), yield* prepared({}), undefined);
 
                 if (
                     !Result.isFailure(outage.result) ||

@@ -1,5 +1,5 @@
 import { WebhookAuthenticationError } from '@stegosaurus/channels-delivery/ProviderWebhooks';
-import { Crypto, Effect, Redacted, Schema } from 'effect';
+import { Crypto, Effect, Redacted, Schema, String as Str } from 'effect';
 
 const GitHubSignatureInput = Schema.Struct({
     body: Schema.Uint8Array,
@@ -45,13 +45,13 @@ const hmacSha256 = Effect.fn('github.crypto.hmac_sha256')(function* (secret: Red
 });
 
 const decodeSignature = (signature: string) => {
-    if (!signature.startsWith('sha256=')) return undefined;
-    const hexadecimalSignature = signature.slice(7);
+    if (!Str.startsWith('sha256=')(signature)) return undefined;
+    const hexadecimalSignature = Str.slice(7)(signature);
 
     if (hexadecimalSignature.length !== 64 || !hexadecimal.test(hexadecimalSignature)) return undefined;
 
     return Uint8Array.from({ length: 32 }, (_, index) =>
-        Number.parseInt(hexadecimalSignature.slice(index * 2, index * 2 + 2), 16),
+        Number.parseInt(Str.slice(index * 2, index * 2 + 2)(hexadecimalSignature), 16),
     );
 };
 

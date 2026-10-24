@@ -1,9 +1,23 @@
 import { describe, it } from '@effect/vitest';
-import { Array as Arr, Clock, ConfigProvider, Effect, Layer, Logger, Match, Queue, Redacted, Ref } from 'effect';
+import {
+    Array as Arr,
+    Clock,
+    ConfigProvider,
+    Effect,
+    Layer,
+    Logger,
+    Match,
+    Queue,
+    Redacted,
+    Ref,
+    Schema,
+    String as Str,
+} from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 import { TestClock } from 'effect/testing';
 
 import { GitHubApi } from '../src/GitHubApi';
+import { GitHubApiError } from '../src/GitHubApiContract';
 import { GitHubApiLiveBase, GitHubAppSigner } from '../src/GitHubApiLive';
 import { GitHubGitCredentials } from '../src/GitHubGitCredentials';
 import { GitHubId } from '../src/GitHubIdentity';
@@ -11,9 +25,11 @@ import {
     GitHubAccessLevel,
     GitHubAccessLevelOrder,
     GitHubContent,
+    GitHubDiscussionRef,
     GitHubIssueCommentRef,
     GitHubIssueRef,
     GitHubPullRequestRef,
+    GitHubReactionTarget,
     hasGitHubAccess,
 } from '../src/GitHubModels';
 
@@ -97,11 +113,11 @@ describe('GitHubApiLive', () => {
                     expect(web.headers.get('authorization')).toBe('Bearer installation-token-never-log');
                     yield* Queue.offer(apiRequests, `${url.pathname}${url.search}`);
 
-                    if (url.pathname.endsWith('/comments') && url.searchParams.get('page') === '2') {
+                    if (Str.endsWith('/comments')(url.pathname) && url.searchParams.get('page') === '2') {
                         return HttpClientResponse.fromWeb(request, Response.json([issueCommentJson(2, 'second')]));
                     }
 
-                    if (url.pathname.endsWith('/comments')) {
+                    if (Str.endsWith('/comments')(url.pathname)) {
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json([issueCommentJson(1, 'first', null)], {
@@ -136,7 +152,7 @@ describe('GitHubApiLive', () => {
                 return [comments, info] as const;
             }).pipe(Effect.provide(layer));
 
-            expect(comments.map((comment) => comment.body)).toEqual(['first', 'second']);
+            expect(Arr.map(comments, (comment) => comment.body)).toEqual(['first', 'second']);
             expect(comments[0]?.author).toBeNull();
             expect(info.title).toBe('Adapter');
             expect(yield* Ref.get(tokenRequests)).toBe(1);
@@ -152,9 +168,7 @@ describe('GitHubApiLive', () => {
         Effect.gen(function* () {
             const logs: Array<string> = [];
 
-            const logger = Logger.layer([
-                Logger.make((entry) => logs.push(JSON.stringify(Logger.formatStructured.log(entry)))),
-            ]);
+            const logger = Logger.layer([Logger.make((entry) => logs.push(Logger.formatJson.log(entry)))]);
 
             const httpClient = HttpClient.make((request) =>
                 Effect.succeed(
@@ -163,13 +177,12 @@ describe('GitHubApiLive', () => {
             );
 
             const error = yield* Effect.flatMap(GitHubApi, (api) => api.fetchIssue({ issue })).pipe(
-                Effect.provide(makeLayer(httpClient)),
-                Effect.provide(logger),
+                Effect.provide(makeLayer(httpClient).pipe(Layer.provideMerge(logger))),
                 Effect.flip,
             );
 
             expect(error).toMatchObject({ reason: 'authentication', retryable: false });
-            const output = logs.join('\n');
+            const output = Arr.join(logs, '\n');
             expect(output).toContain('GitHub rejected the app credentials; check GITHUB_APP_ID and GITHUB_PRIVATE_KEY');
             expect(output).toContain('"level":"ERROR"');
             expect(output).not.toContain('private-key-never-log');
@@ -185,7 +198,7 @@ describe('GitHubApiLive', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         const count = yield* Ref.updateAndGet(tokenRequests, (value) => value + 1);
 
                         return HttpClientResponse.fromWeb(
@@ -274,7 +287,9 @@ describe('GitHubApiLive', () => {
             }).pipe(Effect.provide(makeLayer(httpClient)));
 
             expect(Redacted.value(authorization)).toBe(`Basic ${btoa('x-access-token:installation-token-never-log')}`);
-            expect(JSON.stringify(authorization)).not.toContain('installation-token-never-log');
+            expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(authorization)).not.toContain(
+                'installation-token-never-log',
+            );
             expect(yield* Ref.get(tokenRequests)).toBe(1);
             expect(refused).toMatchObject({
                 operation: 'create_git_credentials',
@@ -297,7 +312,7 @@ describe('GitHubApiLive', () => {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                     const url = new URL(web.url);
 
-                    if (url.pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -309,18 +324,18 @@ describe('GitHubApiLive', () => {
                     if (web.method === 'DELETE')
                         return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }));
 
-                    if (url.pathname.endsWith('/reactions') && web.method === 'GET') {
+                    if (Str.endsWith('/reactions')(url.pathname) && web.method === 'GET') {
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json([{ id: 700, content: 'eyes', user: participant }]),
                         );
                     }
 
-                    if (url.pathname.includes('/pulls/42/comments/500/replies')) {
+                    if (Str.includes('/pulls/42/comments/500/replies')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, Response.json(reviewCommentJson(501, 'reply')));
                     }
 
-                    if (url.pathname.endsWith('/reactions')) {
+                    if (Str.endsWith('/reactions')(url.pathname)) {
                         return HttpClientResponse.fromWeb(
                             request,
                             Response.json({ id: 700, content: 'eyes', user: participant }, { status: 201 }),
@@ -338,7 +353,7 @@ describe('GitHubApiLive', () => {
             const content = GitHubContent.make({ markdown: 'hello' });
 
             const issueComment = GitHubIssueCommentRef.make({
-                discussion: { _tag: 'Issue', ref: issue },
+                discussion: GitHubDiscussionRef.cases.Issue.make({ ref: issue }),
                 id: GitHubId.make(400),
             });
 
@@ -353,11 +368,11 @@ describe('GitHubApiLive', () => {
                     content,
                 });
                 yield* api.addReaction({
-                    target: { _tag: 'Comment', comment: issueComment },
+                    target: GitHubReactionTarget.cases.Comment.make({ comment: issueComment }),
                     reaction: 'eyes',
                 });
                 yield* api.removeReaction({
-                    target: { _tag: 'Comment', comment: issueComment },
+                    target: GitHubReactionTarget.cases.Comment.make({ comment: issueComment }),
                     reaction: 'eyes',
                 });
             }).pipe(Effect.provide(layer));
@@ -397,7 +412,7 @@ describe('GitHubApiLive', () => {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                     const url = new URL(web.url);
 
-                    if (url.pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -429,19 +444,27 @@ describe('GitHubApiLive', () => {
             yield* Effect.gen(function* () {
                 const api = yield* GitHubApi;
                 yield* api.addReaction({
-                    target: { _tag: 'Discussion', discussion: { _tag: 'Issue', ref: issue } },
+                    target: GitHubReactionTarget.cases.Discussion.make({
+                        discussion: GitHubDiscussionRef.cases.Issue.make({ ref: issue }),
+                    }),
                     reaction: 'eyes',
                 });
                 yield* api.addReaction({
-                    target: { _tag: 'Discussion', discussion: { _tag: 'PullRequest', ref: pullRequest } },
+                    target: GitHubReactionTarget.cases.Discussion.make({
+                        discussion: GitHubDiscussionRef.cases.PullRequest.make({ ref: pullRequest }),
+                    }),
                     reaction: 'eyes',
                 });
                 yield* api.removeReaction({
-                    target: { _tag: 'Discussion', discussion: { _tag: 'PullRequest', ref: pullRequest } },
+                    target: GitHubReactionTarget.cases.Discussion.make({
+                        discussion: GitHubDiscussionRef.cases.PullRequest.make({ ref: pullRequest }),
+                    }),
                     reaction: 'eyes',
                 });
                 yield* api.removeReaction({
-                    target: { _tag: 'Discussion', discussion: { _tag: 'Issue', ref: issue } },
+                    target: GitHubReactionTarget.cases.Discussion.make({
+                        discussion: GitHubDiscussionRef.cases.Issue.make({ ref: issue }),
+                    }),
                     reaction: 'rocket',
                 });
             }).pipe(Effect.provide(makeLayer(httpClient)));
@@ -491,7 +514,7 @@ describe('GitHubApiLive', () => {
                         return HttpClientResponse.fromWeb(request, Response.json(participant));
                     }
 
-                    if (url.pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(url.pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -507,21 +530,29 @@ describe('GitHubApiLive', () => {
             );
 
             const comment = GitHubIssueCommentRef.make({
-                discussion: { _tag: 'Issue', ref: issue },
+                discussion: GitHubDiscussionRef.cases.Issue.make({ ref: issue }),
                 id: GitHubId.make(400),
             });
 
             yield* Effect.gen(function* () {
                 const api = yield* GitHubApi;
-                yield* api.removeReaction({ target: { _tag: 'Comment', comment }, reaction: 'eyes' });
-                yield* api.removeReaction({ target: { _tag: 'Comment', comment }, reaction: 'eyes' });
+                yield* api.removeReaction({
+                    target: GitHubReactionTarget.cases.Comment.make({ comment }),
+                    reaction: 'eyes',
+                });
+                yield* api.removeReaction({
+                    target: GitHubReactionTarget.cases.Comment.make({ comment }),
+                    reaction: 'eyes',
+                });
             }).pipe(Effect.provide(makeLayer(httpClient, null)));
 
             const observed = yield* Queue.takeAll(calls);
-            expect(observed.filter(({ path }) => path === '/app')).toHaveLength(1);
-            expect(observed.filter(({ path }) => path === '/users/agent%5Bbot%5D')).toHaveLength(1);
-            expect(observed.some(({ method, path }) => method === 'POST' && path.endsWith('/reactions'))).toBe(false);
-            expect(observed.filter(({ method }) => method === 'DELETE')).toHaveLength(2);
+            expect(Arr.filter(observed, ({ path }) => path === '/app')).toHaveLength(1);
+            expect(Arr.filter(observed, ({ path }) => path === '/users/agent%5Bbot%5D')).toHaveLength(1);
+            expect(
+                Arr.some(observed, ({ method, path }) => method === 'POST' && Str.endsWith('/reactions')(path)),
+            ).toBe(false);
+            expect(Arr.filter(observed, ({ method }) => method === 'DELETE')).toHaveLength(2);
         }),
     );
 
@@ -533,7 +564,7 @@ describe('GitHubApiLive', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -559,8 +590,8 @@ describe('GitHubApiLive', () => {
                 Effect.flatMap(GitHubApi, (api) => api.fetchIssue({ issue })).pipe(Effect.provide(layer)),
             );
 
+            expect(rateLimited).toBeInstanceOf(GitHubApiError);
             expect(rateLimited).toMatchObject({
-                _tag: 'GitHubApiError',
                 operation: 'fetch_issue',
                 reason: 'rate_limited',
                 retryable: true,
@@ -573,8 +604,8 @@ describe('GitHubApiLive', () => {
                 Effect.flatMap(GitHubApi, (api) => api.fetchIssue({ issue })).pipe(Effect.provide(layer)),
             );
 
+            expect(malformed).toBeInstanceOf(GitHubApiError);
             expect(malformed).toMatchObject({
-                _tag: 'GitHubApiError',
                 operation: 'fetch_issue',
                 reason: 'invalid_response',
                 retryable: false,
@@ -586,8 +617,8 @@ describe('GitHubApiLive', () => {
                 Effect.flatMap(GitHubApi, (api) => api.fetchIssue({ issue })).pipe(Effect.provide(layer)),
             );
 
+            expect(validation).toBeInstanceOf(GitHubApiError);
             expect(validation).toMatchObject({
-                _tag: 'GitHubApiError',
                 operation: 'fetch_issue',
                 retryable: false,
             });
@@ -605,7 +636,7 @@ describe('GitHubApiLive', () => {
                 Effect.gen(function* () {
                     const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
 
-                    if (new URL(web.url).pathname.startsWith('/app/installations/')) {
+                    if (Str.startsWith('/app/installations/')(new URL(web.url).pathname)) {
                         return HttpClientResponse.fromWeb(request, tokenResponse());
                     }
 
@@ -656,12 +687,12 @@ describe('GitHub user access', () => {
                 const web = yield* HttpClientRequest.toWeb(request).pipe(Effect.orDie);
                 const url = new URL(web.url);
 
-                if (url.pathname.startsWith('/app/installations/')) {
+                if (Str.startsWith('/app/installations/')(url.pathname)) {
                     return HttpClientResponse.fromWeb(request, tokenResponse());
                 }
 
                 yield* Queue.offer(requests, { method: web.method, path: url.pathname });
-                const login = decodeURIComponent(url.pathname.split('/').at(-2) ?? '');
+                const login = decodeURIComponent(Str.split('/')(url.pathname).at(-2) ?? '');
                 const answer = answers.get(login);
 
                 if (answer === undefined)
@@ -730,9 +761,9 @@ describe('GitHub user access', () => {
                 Effect.flatMap(GitHubApi, (api) => api.fetchUserAccess({ repository: issue, login })).pipe(Effect.flip),
             ).pipe(Effect.provide(makeLayer(permissionClient(requests, answers))));
 
+            expect(errors[0]).toBeInstanceOf(GitHubApiError);
             expect(errors).toMatchObject([
                 {
-                    _tag: 'GitHubApiError',
                     operation: 'fetch_user_access',
                     reason: 'not_found',
                     retryable: false,
@@ -754,7 +785,7 @@ describe('GitHub user access', () => {
                 GitHubAccessLevel.literals,
             );
             expect(
-                GitHubAccessLevel.literals.filter((access) => hasGitHubAccess({ access, minimum: 'write' })),
+                Arr.filter(GitHubAccessLevel.literals, (access) => hasGitHubAccess({ access, minimum: 'write' })),
             ).toEqual(['write', 'maintain', 'admin']);
         }),
     );

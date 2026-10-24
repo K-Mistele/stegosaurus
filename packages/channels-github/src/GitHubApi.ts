@@ -1,50 +1,48 @@
 import { Context, Effect, Layer } from 'effect';
 
 import { GitHubApiClient } from './api/GitHubApiClient';
-import {
-    addIssueLabels,
-    addPullRequestLabels,
-    addReaction,
-    closeIssue,
-    closePullRequest,
-    deleteComment,
-    downloadActionsJobLog,
-    fetchActionsJob,
-    fetchCheckRun,
-    fetchIssue,
-    fetchPullRequest,
-    fetchPullRequestDiff,
-    fetchUserAccess,
-    listCheckRunAnnotations,
-    listCheckRunsForRef,
-    listIssueComments,
-    listIssueLabels,
-    listPullRequestComments,
-    listPullRequestCommits,
-    listPullRequestFiles,
-    listPullRequestLabels,
-    listPullRequestReviewComments,
-    listPullRequestReviews,
-    listRepositoryLabels,
-    mergePullRequest,
-    listPullRequestsForBranch,
-    createPullRequest,
-    postIssueComment,
-    postPullRequestComment,
-    postPullRequestReviewComment,
-    removeAllIssueLabels,
-    removeAllPullRequestLabels,
-    removeIssueLabel,
-    removePullRequestLabel,
-    removeReaction,
-    reopenIssue,
-    reopenPullRequest,
-    replyToReviewComment,
-    resolveActionsJob,
-    setIssueLabels,
-    setPullRequestLabels,
-    updateComment,
-} from './api/Operations';
+import { addIssueLabels } from './api/AddIssueLabels';
+import { addPullRequestLabels } from './api/AddPullRequestLabels';
+import { addReaction } from './api/AddReaction';
+import { closeIssue } from './api/CloseIssue';
+import { closePullRequest } from './api/ClosePullRequest';
+import { createPullRequest } from './api/CreatePullRequest';
+import { deleteComment } from './api/DeleteComment';
+import { downloadActionsJobLog } from './api/DownloadActionsJobLog';
+import { fetchActionsJob } from './api/FetchActionsJob';
+import { fetchCheckRun } from './api/FetchCheckRun';
+import { fetchIssue } from './api/FetchIssue';
+import { fetchPullRequest } from './api/FetchPullRequest';
+import { fetchPullRequestDiff } from './api/FetchPullRequestDiff';
+import { fetchUserAccess } from './api/FetchUserAccess';
+import { listCheckRunAnnotations } from './api/ListCheckRunAnnotations';
+import { listCheckRunsForRef } from './api/ListCheckRunsForRef';
+import { listIssueComments } from './api/ListIssueComments';
+import { listIssueLabels } from './api/ListIssueLabels';
+import { listPullRequestComments } from './api/ListPullRequestComments';
+import { listPullRequestCommits } from './api/ListPullRequestCommits';
+import { listPullRequestFiles } from './api/ListPullRequestFiles';
+import { listPullRequestLabels } from './api/ListPullRequestLabels';
+import { listPullRequestReviewComments } from './api/ListPullRequestReviewComments';
+import { listPullRequestReviews } from './api/ListPullRequestReviews';
+import { listPullRequestsForBranch } from './api/ListPullRequestsForBranch';
+import { listRepositoryLabels } from './api/ListRepositoryLabels';
+import { mergePullRequest } from './api/MergePullRequest';
+import { postIssueComment } from './api/PostIssueComment';
+import { postPullRequestComment } from './api/PostPullRequestComment';
+import { postPullRequestReviewComment } from './api/PostPullRequestReviewComment';
+import { removeAllIssueLabels } from './api/RemoveAllIssueLabels';
+import { removeAllPullRequestLabels } from './api/RemoveAllPullRequestLabels';
+import { removeIssueLabel } from './api/RemoveIssueLabel';
+import { removePullRequestLabel } from './api/RemovePullRequestLabel';
+import { removeReaction } from './api/RemoveReaction';
+import { reopenIssue } from './api/ReopenIssue';
+import { reopenPullRequest } from './api/ReopenPullRequest';
+import { replyToReviewComment } from './api/ReplyToReviewComment';
+import { resolveActionsJob } from './api/ResolveActionsJob';
+import { setIssueLabels } from './api/SetIssueLabels';
+import { setPullRequestLabels } from './api/SetPullRequestLabels';
+import { updateComment } from './api/UpdateComment';
 import type { GitHubApiOperations } from './GitHubApiContract';
 
 export * from './GitHubApiContract';
@@ -54,10 +52,9 @@ export class GitHubApi extends Context.Service<GitHubApi, GitHubApiOperations>()
     '@stegosaurus/channels-github/GitHubApi',
     {
         make: Effect.gen(function* () {
-            const client = yield* GitHubApiClient;
+            const services = yield* Effect.context<GitHubApiClient>();
 
-            const run = <A, E>(effect: Effect.Effect<A, E, GitHubApiClient>) =>
-                Effect.provideService(effect, GitHubApiClient, client);
+            const run = <A, E>(effect: Effect.Effect<A, E, GitHubApiClient>) => Effect.provide(effect, services);
 
             return {
                 addIssueLabels: (input) => run(addIssueLabels(input)),

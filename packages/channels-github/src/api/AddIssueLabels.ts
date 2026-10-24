@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect';
+import { Array as Arr, Effect, Schema } from 'effect';
 
 import { GitHubLabels, type GitHubIssueLabelsRequest } from '../GitHubApiContract';
 import { GitHubApiClient } from './GitHubApiClient';
@@ -19,5 +19,5 @@ export const addIssueLabels = Effect.fn('github.api.add_issue_labels')(function*
         body: { schema: AddIssueLabelsBody, value: { labels: input.labels } },
     });
 
-    return values.map(label);
+    return Arr.map(values, label);
 });

@@ -17,15 +17,22 @@ import {
     PreparedDeliveryInvocation,
     ProviderDeliveryExecution,
 } from '@stegosaurus/channels-delivery/DeliveryContext';
-import { Cause, Context, Effect, Exit, Layer, Match, Option, Ref } from 'effect';
+import { Array as Arr, Cause, Context, Effect, Exit, Layer, Match, Option, Ref, Schema } from 'effect';
 import { vi } from 'vite-plus/test';
 
 import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution';
 import { GitHubApi } from '../src/GitHubApi';
 import type { GitHubMentioned } from '../src/GitHubCallbackEvents';
 import type { GitHubCallbackHandler, GitHubCallbackHandlers } from '../src/GitHubCallbacks';
+import {
+    GitHubActivationTarget,
+    GitHubActivationTargetJson,
+    GitHubDeliveryDestination,
+    GitHubDeliveryDestinationJson,
+} from '../src/GitHubDeliveryDestination';
 import { GitHubBotConfiguration, makeGitHubEventProcessor } from '../src/GitHubEventProcessor';
 import { GitHubId } from '../src/GitHubIdentity';
+import { GitHubDiscussionRef, GitHubIssueCommentRef, GitHubIssueRef, GitHubPullRequestRef } from '../src/GitHubModels';
 import {
     checkRunPayload,
     issueCommentPayload,
@@ -76,7 +83,7 @@ const pullRequestAdmission = (
 
 /** The handlers one test runs. `layer` and `sharedLayer` supply them; `processor` reads them for each batch. */
 class TestHandlers extends Context.Service<TestHandlers, GitHubCallbackHandlers<unknown, MailboxSubscriptions>>()(
-    'test/GitHubTestHandlers',
+    '@stegosaurus/channels-github/test/github-event-processing.vi.test/TestHandlers',
 ) {}
 
 const layer = <E>(handlers: GitHubCallbackHandlers<E, MailboxSubscriptions>, subscribed: boolean) =>
@@ -120,7 +127,7 @@ describe('GitHub event batch processing', () => {
             ).toEqual(ProviderEventHandled.make({}));
             expect(onIssueCreated).toHaveBeenCalledOnce();
             expect(onIssueCreated.mock.calls[0]?.[0].trigger._tag).toBe('GitHubIssueOpened');
-            expect(onIssueCreated.mock.calls[0]?.[0].events.map((event) => event._tag)).toEqual([
+            expect(Arr.map(onIssueCreated.mock.calls[0]?.[0].events, (event) => event._tag)).toEqual([
                 'GitHubIssueCommentCreated',
             ]);
             expect(onMentioned).not.toHaveBeenCalled();
@@ -142,7 +149,7 @@ describe('GitHub event batch processing', () => {
                 ),
             ).toEqual(ProviderEventHandled.make({}));
             expect(onSubscribedPrEvents).toHaveBeenCalledOnce();
-            expect(onSubscribedPrEvents.mock.calls[0]?.[0].events.map((event) => event._tag)).toEqual([
+            expect(Arr.map(onSubscribedPrEvents.mock.calls[0]?.[0].events, (event) => event._tag)).toEqual([
                 'GitHubPrEdited',
                 'GitHubPrCommentCreated',
                 'GitHubPrClosed',
@@ -160,9 +167,9 @@ describe('GitHub event batch processing', () => {
                     true,
                 ),
             ).toEqual(ProviderEventHandled.make({}));
+            expect(onSubscribedPrEvents.mock.calls[0]?.[0].events[0]?._tag).toBe('GitHubPrCheckCompleted');
             expect(onSubscribedPrEvents.mock.calls[0]?.[0].events[0]).toEqual(
                 expect.objectContaining({
-                    _tag: 'GitHubPrCheckCompleted',
                     checkRunId: 900,
                     name: 'build',
                     conclusion: 'success',
@@ -288,13 +295,61 @@ const pullRequestFrom = (action: string) => ({
 const prMentionAdmission = () =>
     pullRequestAdmission('issue_comment', issueCommentPayload({ pullRequest: true }), 'mention');
 
-const issueRef = {
-    installationId: 100,
-    repositoryId: 200,
+const issueRef = GitHubIssueRef.make({
+    installationId: GitHubId.make(100),
+    repositoryId: GitHubId.make(200),
     owner: 'alice',
     repository: 'project',
-    number: 42,
+    number: GitHubId.make(42),
+});
+
+const pullRequestRef = GitHubPullRequestRef.make(issueRef);
+
+const discussions = {
+    issue: GitHubDiscussionRef.cases.Issue.make({ ref: issueRef }),
+    'pull-request': GitHubDiscussionRef.cases.PullRequest.make({ ref: pullRequestRef }),
 };
+
+const destinations = {
+    issue: GitHubDeliveryDestination.cases.GitHubIssue.make({ issue: issueRef }),
+    'pull-request': GitHubDeliveryDestination.cases.GitHubPullRequest.make({ pullRequest: pullRequestRef }),
+};
+
+const activationTargets = {
+    issue: GitHubActivationTarget.cases.GitHubIssue.make({ issue: issueRef }),
+    'pull-request': GitHubActivationTarget.cases.GitHubPullRequest.make({ pullRequest: pullRequestRef }),
+};
+
+const mentionCommentTarget = (kind: keyof typeof discussions) =>
+    GitHubActivationTarget.cases.GitHubIssueComment.make({
+        comment: GitHubIssueCommentRef.make({ discussion: discussions[kind], id: GitHubId.make(500) }),
+    });
+
+/** The JSON a prepared callback saves for its destination and activation target. */
+const encodeDestination = Schema.encodeEffect(GitHubDeliveryDestinationJson);
+
+const encodeActivationTarget = Schema.encodeEffect(GitHubActivationTargetJson);
+
+/** A copy of `execution` with some fields replaced. */
+const copyExecution = (
+    execution: ProviderDeliveryExecution,
+    changes: Partial<ConstructorParameters<typeof ProviderDeliveryExecution>[0]>,
+) =>
+    new ProviderDeliveryExecution({
+        deliveryId: execution.deliveryId,
+        callbackIndex: execution.callbackIndex,
+        idempotencyKey: execution.idempotencyKey,
+        prepared: execution.prepared,
+        prepare: execution.prepare,
+        context: execution.context,
+        ...changes,
+    });
+
+/** The callback each route chooses, by discussion kind. */
+const routeCallbacks = {
+    issue: { creation: 'onIssueCreated', mention: 'onMentioned', subscribed: 'onSubscribedIssueEvents' },
+    'pull-request': { creation: 'onPrCreated', mention: 'onMentioned', subscribed: 'onSubscribedPrEvents' },
+} as const;
 
 const singleCallbackPlan = (callback: PreparedDeliveryCallback) =>
     PreparedDeliveryInvocation.make({ callbacks: [callback] });
@@ -380,25 +435,14 @@ describe('GitHub delivery preparation', () => {
                             const saved = (yield* Ref.get(first.preparations))[0];
 
                             if (saved === undefined) return expect.unreachable();
-                            expect(saved.callbacks.map(({ name }) => name)).toEqual([creationName, 'onMentioned']);
+                            expect(Arr.map(saved.callbacks, ({ name }) => name)).toEqual([creationName, 'onMentioned']);
 
-                            const destination =
-                                kind === 'issue'
-                                    ? { _tag: 'GitHubIssue', issue: issueRef }
-                                    : { _tag: 'GitHubPullRequest', pullRequest: issueRef };
+                            const destination = yield* encodeDestination(destinations[kind]);
+                            const activationTarget = yield* encodeActivationTarget(activationTargets[kind]);
 
                             const mentionTarget = bodyMention
-                                ? destination
-                                : {
-                                      _tag: 'GitHubIssueComment',
-                                      comment: {
-                                          discussion: {
-                                              _tag: kind === 'issue' ? 'Issue' : 'PullRequest',
-                                              ref: issueRef,
-                                          },
-                                          id: 500,
-                                      },
-                                  };
+                                ? activationTarget
+                                : yield* encodeActivationTarget(mentionCommentTarget(kind));
 
                             expect(saved).toEqual(
                                 PreparedDeliveryInvocation.make({
@@ -407,7 +451,7 @@ describe('GitHub delivery preparation', () => {
                                             name: creationName,
                                             presentationVersion: 1,
                                             destination,
-                                            activationTarget: destination,
+                                            activationTarget,
                                             supportedOperations: activatedSupportedOperations,
                                             reactionTargets: ['ActivationTarget', 'MessageTarget'],
                                         }),
@@ -429,8 +473,7 @@ describe('GitHub delivery preparation', () => {
                             const replay = yield* first.retry;
                             expect(replay.execution.callbackIndex).toBe(0);
 
-                            const execution = new ProviderDeliveryExecution({
-                                ...replay.execution,
+                            const execution = copyExecution(replay.execution, {
                                 callbackIndex: 1,
                                 prepared: Option.some(saved),
                             });
@@ -448,7 +491,7 @@ describe('GitHub delivery preparation', () => {
                                       ? 'GitHubPrOpened'
                                       : 'GitHubPrCommentCreated',
                             );
-                            expect(event?.events.map(({ _tag }) => _tag)).toEqual(
+                            expect(Arr.map(event?.events, ({ _tag }) => _tag)).toEqual(
                                 bodyMention ? [] : [kind === 'issue' ? 'GitHubIssueOpened' : 'GitHubPrOpened'],
                             );
                         }).pipe(Effect.provide(sharedLayer(handlers)));
@@ -492,7 +535,7 @@ describe('GitHub delivery preparation', () => {
                 const saved = (yield* Ref.get(first.preparations))[0];
 
                 if (saved === undefined) return expect.unreachable();
-                expect(saved.callbacks.map(({ name }) => name)).toEqual(
+                expect(Arr.map(saved.callbacks, ({ name }) => name)).toEqual(
                     kind === 'issue' ? ['onIssueCreated', 'onMentioned'] : ['onPrCreated', 'onMentioned'],
                 );
                 expect(saved.callbacks[1]).toMatchObject({
@@ -501,8 +544,7 @@ describe('GitHub delivery preparation', () => {
                 });
                 const replay = yield* first.retry;
 
-                const execution = new ProviderDeliveryExecution({
-                    ...replay.execution,
+                const execution = copyExecution(replay.execution, {
                     callbackIndex: 1,
                     prepared: Option.some(saved),
                 });
@@ -565,22 +607,13 @@ describe('GitHub delivery preparation', () => {
                         expect(yield* Ref.get(test.preparations)).toEqual([]);
                         expect(calls).toEqual([]);
                     } else {
-                        const name =
-                            route === 'mention'
-                                ? 'onMentioned'
-                                : route === 'creation'
-                                  ? kind === 'issue'
-                                      ? 'onIssueCreated'
-                                      : 'onPrCreated'
-                                  : kind === 'issue'
-                                    ? 'onSubscribedIssueEvents'
-                                    : 'onSubscribedPrEvents';
+                        const name = routeCallbacks[kind][route];
 
                         expect(result).toEqual(ProviderEventHandled.make({}));
                         expect(calls).toEqual([name]);
                         expect(
-                            (yield* Ref.get(test.preparations)).map(({ callbacks }) =>
-                                callbacks.map(({ name }) => name),
+                            Arr.map(yield* Ref.get(test.preparations), ({ callbacks }) =>
+                                Arr.map(callbacks, ({ name }) => name),
                             ),
                         ).toEqual([[name]]);
                     }
@@ -604,8 +637,7 @@ describe('GitHub delivery preparation', () => {
             );
 
             for (const callbackIndex of [-1, 1, 0.5, Number.NaN]) {
-                const execution = new ProviderDeliveryExecution({
-                    ...test.execution,
+                const execution = copyExecution(test.execution, {
                     callbackIndex,
                     prepared: Option.some(saved),
                 });
@@ -645,8 +677,7 @@ describe('GitHub delivery preparation', () => {
             if (saved === undefined) return expect.unreachable();
             const replay = yield* first.retry;
 
-            const execution = new ProviderDeliveryExecution({
-                ...replay.execution,
+            const execution = copyExecution(replay.execution, {
                 callbackIndex: 1,
                 prepared: Option.some(saved),
             });
@@ -696,11 +727,8 @@ describe('GitHub delivery preparation', () => {
                     PreparedDeliveryCallback.make({
                         name: 'onMentioned',
                         presentationVersion: 1,
-                        destination: { _tag: 'GitHubIssue', issue: issueRef },
-                        activationTarget: {
-                            _tag: 'GitHubIssueComment',
-                            comment: { discussion: { _tag: 'Issue', ref: issueRef }, id: 500 },
-                        },
+                        destination: yield* encodeDestination(destinations.issue),
+                        activationTarget: yield* encodeActivationTarget(mentionCommentTarget('issue')),
                         supportedOperations: activatedSupportedOperations,
                         reactionTargets: ['ActivationTarget', 'MessageTarget'],
                     }),
@@ -720,8 +748,8 @@ describe('GitHub delivery preparation', () => {
                     PreparedDeliveryCallback.make({
                         name: 'onIssueCreated',
                         presentationVersion: 1,
-                        destination: { _tag: 'GitHubIssue', issue: issueRef },
-                        activationTarget: { _tag: 'GitHubIssue', issue: issueRef },
+                        destination: yield* encodeDestination(destinations.issue),
+                        activationTarget: yield* encodeActivationTarget(activationTargets.issue),
                         supportedOperations: activatedSupportedOperations,
                         reactionTargets: ['ActivationTarget', 'MessageTarget'],
                     }),
@@ -740,8 +768,8 @@ describe('GitHub delivery preparation', () => {
                     PreparedDeliveryCallback.make({
                         name: 'onPrCreated',
                         presentationVersion: 1,
-                        destination: { _tag: 'GitHubPullRequest', pullRequest: issueRef },
-                        activationTarget: { _tag: 'GitHubPullRequest', pullRequest: issueRef },
+                        destination: yield* encodeDestination(destinations['pull-request']),
+                        activationTarget: yield* encodeActivationTarget(activationTargets['pull-request']),
                         supportedOperations: activatedSupportedOperations,
                         reactionTargets: ['ActivationTarget', 'MessageTarget'],
                     }),
@@ -760,7 +788,7 @@ describe('GitHub delivery preparation', () => {
                     PreparedDeliveryCallback.make({
                         name: 'onSubscribedPrEvents',
                         presentationVersion: 1,
-                        destination: { _tag: 'GitHubPullRequest', pullRequest: issueRef },
+                        destination: yield* encodeDestination(destinations['pull-request']),
                         supportedOperations: discussionSupportedOperations,
                         reactionTargets: ['MessageTarget'],
                     }),
@@ -855,7 +883,7 @@ describe('GitHub delivery preparation', () => {
             const test = yield* makeTestDeliveryExecution();
 
             const withPrepare = (prepare: ProviderDeliveryExecution['prepare']) =>
-                new ProviderDeliveryExecution({ ...test.execution, prepare });
+                copyExecution(test.execution, { prepare });
 
             const conflict = yield* processor
                 .process(
@@ -900,8 +928,7 @@ describe('GitHub delivery preparation', () => {
             const test = yield* makeTestDeliveryExecution();
 
             const withPrepared = (callback: string) =>
-                new ProviderDeliveryExecution({
-                    ...test.execution,
+                copyExecution(test.execution, {
                     prepared: Option.some(
                         singleCallbackPlan(
                             PreparedDeliveryCallback.make({

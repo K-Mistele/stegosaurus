@@ -1,4 +1,4 @@
-import { Schema } from 'effect';
+import { Array as Arr, Schema } from 'effect';
 
 export const GitHubId = Schema.Int.check(
     Schema.isGreaterThan(0),
@@ -11,4 +11,8 @@ export const githubDiscussionResourceId = (input: {
     readonly repositoryId: GitHubId;
     readonly kind: 'issue' | 'pull-request';
     readonly number: GitHubId;
-}) => ['github', 'v1', String(input.repositoryId), input.kind, String(input.number)].map(encodeURIComponent).join(':');
+}) =>
+    Arr.join(
+        Arr.map(['github', 'v1', String(input.repositoryId), input.kind, String(input.number)], encodeURIComponent),
+        ':',
+    );

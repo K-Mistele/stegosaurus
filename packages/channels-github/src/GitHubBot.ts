@@ -8,9 +8,10 @@ import type { Config, Redacted } from 'effect';
 
 import type { GitHubApi } from './GitHubApi';
 import { type GitHubCallbackHandlers } from './GitHubCallbacks';
-import { makeGitHubOutputProcessor } from './GitHubDeliveryOutput';
-import { GitHubBotConfiguration, makeGitHubEventProcessor } from './GitHubEventProcessor';
-import { makeGitHubWebhookProvider } from './GitHubWebhookProvider';
+import * as GitHubDeliveryOutput from './GitHubDeliveryOutput';
+import * as GitHubEventProcessor from './GitHubEventProcessor';
+import { GitHubBotConfiguration } from './GitHubEventProcessor';
+import * as GitHubWebhookProvider from './GitHubWebhookProvider';
 
 /**
  * @property webhookSecret - read when the bot is built, so the bot itself can be declared at the top of a module
@@ -48,14 +49,14 @@ export const make = <E, R>(
              */
             yield* readBotConfiguration;
 
-            return makeGitHubWebhookProvider({ namespace, webhookSecret });
+            return GitHubWebhookProvider.makeGitHubWebhookProvider({ namespace, webhookSecret });
         }),
         eventProcessor: Effect.fn('github.bot.build_event_processor')(function* ({ namespace }) {
             const bot = yield* readBotConfiguration;
 
-            return makeGitHubEventProcessor({ namespace, bot, handlers: options.handlers });
+            return GitHubEventProcessor.makeGitHubEventProcessor({ namespace, bot, handlers: options.handlers });
         }),
         /** Sends a handed-off delivery's output: comments, and the `eyes` reaction while it works. */
-        outputProcessor: ({ namespace }) => makeGitHubOutputProcessor({ namespace }),
+        outputProcessor: ({ namespace }) => GitHubDeliveryOutput.makeGitHubOutputProcessor({ namespace }),
     };
 };

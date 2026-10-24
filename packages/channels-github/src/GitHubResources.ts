@@ -3,7 +3,7 @@ import {
     type MailboxSubscriptionResult,
     MailboxSubscriptions,
 } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
-import { Effect, Schema } from 'effect';
+import { Array as Arr, Effect, Schema, Struct } from 'effect';
 
 import type {
     GitHubApiError,
@@ -63,7 +63,7 @@ const actionsJobSpanAttributes = (ref: GitHubActionsJobRef) => ({
     'github.actions_job_id': ref.id,
 });
 
-export class GitHubIssue extends Schema.TaggedClass<GitHubIssue>()('GitHubIssue', {
+export class GitHubIssue extends Schema.TaggedClass<GitHubIssue, { readonly brand: unique symbol }>()('GitHubIssue', {
     ref: GitHubIssueRef,
     mailboxKey: Schema.NonEmptyString,
 }) {
@@ -159,10 +159,13 @@ export class GitHubIssue extends Schema.TaggedClass<GitHubIssue>()('GitHubIssue'
     }
 }
 
-export class GitHubPullRequest extends Schema.TaggedClass<GitHubPullRequest>()('GitHubPullRequest', {
-    ref: GitHubPullRequestRef,
-    mailboxKey: Schema.NonEmptyString,
-}) {
+export class GitHubPullRequest extends Schema.TaggedClass<GitHubPullRequest, { readonly brand: unique symbol }>()(
+    'GitHubPullRequest',
+    {
+        ref: GitHubPullRequestRef,
+        mailboxKey: Schema.NonEmptyString,
+    },
+) {
     subscribe(): Effect.Effect<MailboxSubscriptionResult, MailboxSubscriptionError, MailboxSubscriptions> {
         return Effect.flatMap(MailboxSubscriptions, (subscriptions) =>
             subscriptions.subscribe({ mailboxKey: this.mailboxKey }),
@@ -365,7 +368,12 @@ export class GitHubPullRequest extends Schema.TaggedClass<GitHubPullRequest>()('
     }
 
     merge(options: GitHubMergeOptions): Effect.Effect<GitHubMergeResult, GitHubApiError, GitHubApi> {
-        return Effect.flatMap(GitHubApi, (api) => api.mergePullRequest({ pullRequest: this.ref, ...options })).pipe(
+        return Effect.flatMap(GitHubApi, (api) =>
+            api.mergePullRequest({
+                pullRequest: this.ref,
+                ...Struct.pick(options, ['method', 'expectedHeadSha', 'commitTitle', 'commitMessage']),
+            }),
+        ).pipe(
             Effect.withSpan('github.pull_request.merge', {
                 attributes: pullRequestSpanAttributes(this.ref),
             }),
@@ -382,7 +390,7 @@ export class GitHubPullRequest extends Schema.TaggedClass<GitHubPullRequest>()('
     }
 }
 
-export class GitHubCheckRun extends Schema.TaggedClass<GitHubCheckRun>()(
+export class GitHubCheckRun extends Schema.TaggedClass<GitHubCheckRun, { readonly brand: unique symbol }>()(
     'GitHubCheckRun',
     GitHubCheckRunRecord.fields,
 ) {
@@ -412,7 +420,7 @@ export class GitHubCheckRun extends Schema.TaggedClass<GitHubCheckRun>()(
     }
 }
 
-export class GitHubActionsJob extends Schema.TaggedClass<GitHubActionsJob>()(
+export class GitHubActionsJob extends Schema.TaggedClass<GitHubActionsJob, { readonly brand: unique symbol }>()(
     'GitHubActionsJob',
     GitHubActionsJobRecord.fields,
 ) {
@@ -433,7 +441,7 @@ export class GitHubActionsJob extends Schema.TaggedClass<GitHubActionsJob>()(
     }
 }
 
-export class GitHubIssueComment extends Schema.TaggedClass<GitHubIssueComment>()(
+export class GitHubIssueComment extends Schema.TaggedClass<GitHubIssueComment, { readonly brand: unique symbol }>()(
     'GitHubIssueComment',
     GitHubIssueCommentRecord.fields,
 ) {
@@ -469,7 +477,7 @@ export class GitHubIssueComment extends Schema.TaggedClass<GitHubIssueComment>()
     }
 }
 
-export class GitHubReviewComment extends Schema.TaggedClass<GitHubReviewComment>()(
+export class GitHubReviewComment extends Schema.TaggedClass<GitHubReviewComment, { readonly brand: unique symbol }>()(
     'GitHubReviewComment',
     GitHubReviewCommentRecord.fields,
 ) {
@@ -531,13 +539,13 @@ export const GitHubCheckRuns = Schema.Array(GitHubCheckRun);
 export type GitHubCheckRuns = typeof GitHubCheckRuns.Type;
 
 const issueComments = (records: ReadonlyArray<GitHubIssueCommentRecord>): GitHubIssueComments =>
-    records.map((record) => GitHubIssueComment.make(record));
+    Arr.map(records, (record) => GitHubIssueComment.make(record));
 
 const reviewComments = (records: ReadonlyArray<GitHubReviewCommentRecord>): GitHubReviewComments =>
-    records.map((record) => GitHubReviewComment.make(record));
+    Arr.map(records, (record) => GitHubReviewComment.make(record));
 
 const checkRuns = (records: ReadonlyArray<GitHubCheckRunRecord>): GitHubCheckRuns =>
-    records.map((record) => GitHubCheckRun.make(record));
+    Arr.map(records, (record) => GitHubCheckRun.make(record));
 
 /** The comment object for a comment `GitHubApi` returned. */
 const commentFromRecord = (record: GitHubCommentRecord): GitHubComment =>

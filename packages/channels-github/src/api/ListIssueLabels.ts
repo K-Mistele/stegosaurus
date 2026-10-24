@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Array as Arr, Effect } from 'effect';
 
 import type { GitHubIssueRequest } from '../GitHubApiContract';
 import { GitHubApiClient } from './GitHubApiClient';
@@ -15,5 +15,5 @@ export const listIssueLabels = Effect.fn('github.api.list_issue_labels')(functio
         schema: Label,
     });
 
-    return values.map(label);
+    return Arr.map(values, label);
 });

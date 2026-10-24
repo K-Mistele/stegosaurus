@@ -1,7 +1,10 @@
-import { Context, Effect, Layer, Redacted, Result, Schema } from 'effect';
+import { Context, Effect, Layer, pipe, Redacted, Result, Schema, String as Str } from 'effect';
 import { Base64, Base64Url } from 'effect/encoding';
 
-export class GitHubSigningError extends Schema.TaggedError<GitHubSigningError>()('GitHubSigningError', {}) {}
+export class GitHubSigningError extends Schema.TaggedError<GitHubSigningError, { readonly brand: unique symbol }>()(
+    'GitHubSigningError',
+    {},
+) {}
 
 /** Package-private signing seam. `layer` signs with Web Crypto; tests replace it with their own Layer. */
 export class GitHubAppSigner extends Context.Service<
@@ -12,7 +15,7 @@ export class GitHubAppSigner extends Context.Service<
             readonly data: string;
         }) => Effect.Effect<string, GitHubSigningError>;
     }
->()('@stegosaurus/channels-github/internal/GitHubAppSigner', {
+>()('@stegosaurus/channels-github/api/GitHubAppSigner', {
     make: Effect.sync(() => {
         const encoder = new TextEncoder();
 
@@ -58,17 +61,22 @@ const der = (tag: number, bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
 };
 
 const privateKeyBytes = (pem: string): Effect.Effect<Uint8Array<ArrayBuffer>, GitHubSigningError> => {
-    const pkcs1 = pem.startsWith('-----BEGIN RSA PRIVATE KEY-----');
+    const pkcs1 = Str.startsWith('-----BEGIN RSA PRIVATE KEY-----')(pem);
     let label = 'PRIVATE KEY';
 
     if (pkcs1) label = 'RSA PRIVATE KEY';
 
-    if (!pem.startsWith(`-----BEGIN ${label}-----`) || !pem.trimEnd().endsWith(`-----END ${label}-----`)) {
+    if (!Str.startsWith(`-----BEGIN ${label}-----`)(pem) || !Str.endsWith(`-----END ${label}-----`)(Str.trimEnd(pem))) {
         return Effect.fail(GitHubSigningError.make({}));
     }
 
     return Base64.decode(
-        pem.replace(`-----BEGIN ${label}-----`, '').replace(`-----END ${label}-----`, '').replace(pemWhitespace, ''),
+        pipe(
+            pem,
+            Str.replace(`-----BEGIN ${label}-----`, ''),
+            Str.replace(`-----END ${label}-----`, ''),
+            Str.replace(pemWhitespace, ''),
+        ),
     ).pipe(
         Result.map((bytes) => (pkcs1 ? pkcs1ToPkcs8(bytes) : new Uint8Array(bytes))),
         Result.mapError(() => GitHubSigningError.make({})),
