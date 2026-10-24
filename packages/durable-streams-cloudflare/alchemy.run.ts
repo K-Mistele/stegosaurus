@@ -9,6 +9,6 @@ export default Alchemy.Stack(
     Effect.gen(function* () {
         const worker = yield* DurableStreamsWorker;
 
-        return { url: worker.url };
+        return { url: worker.url, workerName: worker.workerName };
     }),
 );
