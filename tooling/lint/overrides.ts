@@ -79,4 +79,25 @@ export const overrides = [
             'effecttsgo/strict-effect-provide': 'off',
         },
     },
+    {
+        // RS256 signing for GitHub App JWTs: Effect's Crypto has no RSA signing, and this service is the Web Crypto seam tests replace.
+        files: ['packages/channels-github/src/api/GitHubAppSigner.ts'],
+        rules: {
+            'automation/no-ambient-nondeterminism': 'off',
+        },
+    },
+    {
+        // Test webhooks are signed with node:crypto HMAC, independent of the packages' own HMAC under test.
+        files: ['packages/channels-github/test/fixtures.ts', 'packages/channels-linear/test/fixtures.ts'],
+        rules: {
+            'effecttsgo/node-builtin-import': 'off',
+        },
+    },
+    {
+        // Effect types `HttpRouter.asHttpEffect()` with an `unknown` error; the router renders its own error responses.
+        files: ['packages/channels-delivery/src/Channels.ts'],
+        rules: {
+            'effecttsgo/any-unknown-in-error-context': 'off',
+        },
+    },
 ] satisfies OxlintOverride[];

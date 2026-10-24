@@ -108,6 +108,9 @@ Ask before turning off any other rule.
 - `automation/no-reexport-only-modules` in the fold and channels packages' `src/index.ts`: they are the public entry points.
 - `effecttsgo/node-builtin-import` and `effecttsgo/new-promise` in fold-codex's and fold-xai's `OAuthFlows.ts`, and `effecttsgo/strict-effect-provide` in their `CodexAuth.ts`/`XaiAuth.ts` and fold-agent's `TitleGenerator.ts`: fixing them is a redesign (an Effect `HttpServer` OAuth callback, a shared title-model client), left for later.
 - `effecttsgo/node-builtin-import` in the fold files listed in `tooling/lint/overrides.ts`: they keep plain synchronous `node:path` helpers that callers use outside Effect. Their Effect code uses `Path.Path`.
+- `automation/no-ambient-nondeterminism` in channels-github's `GitHubAppSigner.ts`: RS256 signing needs Web Crypto, and Effect's `Crypto` has no RSA signing. The service is the seam tests replace.
+- `effecttsgo/node-builtin-import` in channels-github's and channels-linear's `test/fixtures.ts`: they sign test webhooks with `node:crypto` HMAC, an independent check on the packages' own HMAC.
+- `effecttsgo/any-unknown-in-error-context` in channels-delivery's `Channels.ts`: Effect types `HttpRouter.asHttpEffect()` with an `unknown` error. Narrowing it means changing `start`'s signature or turning the router's 4xx responses into 500s.
 - `automation/no-service-option` in test files: test fakes check whether a service was provided.
 - `vitest/valid-expect` allows a second argument (`maxArgs: 2`): Vitest takes a failure message there.
 - Built-ins set to `off` in `tooling/lint/builtin.ts` (`require-yield`, `no-shadow`, and others): kept from the TypeOnce policy; see `tools/automation/POLICY.md`.
