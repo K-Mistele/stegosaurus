@@ -33,5 +33,30 @@
     "effect": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
+  },
+  "files": [
+    "dist",
+    "UPSTREAM.md",
+    "UPSTREAM.sha256"
+  ],
+  "publishConfig": {
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./*": {
+        "types": "./dist/*.d.ts",
+        "import": "./dist/*.js",
+        "default": "./dist/*.js"
+      },
+      "./internal/*": null,
+      "./index": null,
+      "./*/index": null
+    },
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

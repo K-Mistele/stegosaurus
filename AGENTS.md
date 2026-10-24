@@ -16,6 +16,7 @@ pnpm lint:fix
 pnpm typecheck     # tsc at the root, then `vp run -r typecheck`: every package's `typecheck` script, 4 at a time
 pnpm typed:check   # typed-lint: TypeScript-API rules from typed-lint.config.json (Bun)
 pnpm test          # `vp run -r test`: every package's `test` script
+pnpm build:packages  # build the fold packages' publishable dist/ (Bun); preview-packages runs it before pkg pack
 pnpm test:stack    # test/stack.test.ts: runs the alchemy stack in local workerd (Bun)
 pnpm test:conformance  # Durable Streams conformance suite against the Worker in local workerd
 pnpm alchemy:dev       # alchemy dev
@@ -59,7 +60,7 @@ pnpm alchemy:destroy   # alchemy destroy
 - `patches/` - pnpm patches, listed under `patchedDependencies` in `pnpm-workspace.yaml`. Edit one with `pnpm patch <pkg>@<version>`, then `pnpm patch-commit <dir>`. The conformance-suite patch lets its SSE tests accept `data: ` (upstream PR #285).
 - `packages/alchemy-test` - vendored copy of alchemy's test harness. Runs on Bun. See its `VENDORED.md`.
 - `packages/effect-ai-{anthropic,openai,openai-compat}` - vendored Effect AI providers with fold's fixes. Each `UPSTREAM.md` lists the source and local changes. Their `typecheck` also writes `.d.ts` files to `dist/`, which consumers type against, so `vp run -r` must build them first.
-- `packages/fold-*` and `packages/effect-branded-id` - the fold agent runtime, from github.com/humanlayer/fold: `core` (agent loop, tools, event log), `agent` (coding tools, config, sessions), `codex`, `opencode` and `xai` (provider auth and models), `cli` (Node CLI and TUI), and `tui-theme` (the TUI's themes).
+- `packages/fold-*` and `packages/effect-branded-id` - the fold agent runtime, from github.com/humanlayer/fold: `core` (agent loop, tools, event log), `agent` (coding tools, config, sessions), `codex`, `opencode` and `xai` (provider auth and models), `cli` (Node CLI and TUI), and `tui-theme` (the TUI's themes). The workspace imports their `src/`; published tarballs carry `dist/`, which `publishConfig` points at (built by `packages/fold-cli/scripts/build-packages.ts`, ported from fold).
 - `tools/anti-slop` - vendored custom oxlint rules, loaded as JS plugins. Tests run with `vp test`.
 - `tools/automation` - vendored TypeOnce oxlint rules (Effect, React, xstate, UI), loaded as a JS plugin. See its `POLICY.md`.
 - `tools/typed-lint` - vendored type-aware rules oxlint can't express. Config in `typed-lint.config.json`.

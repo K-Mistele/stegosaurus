@@ -34,8 +34,17 @@ jobs:
                   node-version: 22
                   cache: pnpm
 
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.4.2
+
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
+
+            # The fold packages publish built dist/ through publishConfig; pkg pack runs pnpm pack, which applies it.
+            - name: Build fold packages
+              run: pnpm build:packages
 
             - name: Pack changed packages
               id: pack

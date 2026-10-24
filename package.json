@@ -18,7 +18,8 @@
         "alchemy:destroy": "alchemy destroy",
         "alchemy:dev": "alchemy dev",
         "prepare": "vp config && effect-tsgo patch --oxlint",
-        "test:stack": "bun alchemy-test test"
+        "test:stack": "bun alchemy-test test",
+        "build:packages": "bun packages/fold-cli/scripts/build-packages.ts"
     },
     "dependencies": {
         "@alchemy.run/pkg": "catalog:",
