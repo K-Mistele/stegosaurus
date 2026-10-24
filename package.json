@@ -19,7 +19,12 @@
         "alchemy:dev": "alchemy dev",
         "prepare": "vp config && effect-tsgo patch --oxlint",
         "test:stack": "bun alchemy-test test",
-        "build:packages": "bun packages/fold-cli/scripts/build-packages.ts"
+        "build:packages": "bun packages/fold-cli/scripts/build-packages.ts",
+        "build:binaries": "bun packages/fold-cli/scripts/build-binaries.ts",
+        "release:tag-info": "bun packages/fold-cli/scripts/release/tag-info.ts",
+        "release:prepare": "bun packages/fold-cli/scripts/release/prepare.ts",
+        "release:validate": "bun packages/fold-cli/scripts/release/validate-manifest.ts",
+        "release:publish": "bun packages/fold-cli/scripts/release/publish.ts"
     },
     "dependencies": {
         "@alchemy.run/pkg": "catalog:",

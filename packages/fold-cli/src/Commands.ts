@@ -378,7 +378,7 @@ const run = Command.make('foldcode', commonFlags, (input) =>
             const prompt = optionValue(input.prompt);
             if (prompt === undefined && !isBunRuntime) {
                 yield* printFailure(
-                    'The full-screen TUI requires the native @humanlayer/fold package. Use foldcode --prompt "..." or install @humanlayer/fold globally.',
+                    'The full-screen TUI requires the native @stegosaurus/fold package. Use foldcode --prompt "..." or install @stegosaurus/fold globally.',
                 );
                 return;
             }
@@ -423,7 +423,7 @@ const launchTui = (options: CliSessionOptions, catalog: ReadonlyArray<ModelCatal
     Effect.gen(function* () {
         if (!isBunRuntime) {
             yield* printFailure(
-                'The full-screen TUI requires the native @humanlayer/fold package. Use foldcode --prompt "..." or install @humanlayer/fold globally.',
+                'The full-screen TUI requires the native @stegosaurus/fold package. Use foldcode --prompt "..." or install @stegosaurus/fold globally.',
             );
             return;
         }
@@ -499,7 +499,7 @@ const tui = Command.make('tui', commonFlags, (input) =>
         Effect.gen(function* () {
             if (!isBunRuntime) {
                 yield* printFailure(
-                    'The full-screen TUI requires the native @humanlayer/fold package. Use foldcode --prompt "..." or install @humanlayer/fold globally.',
+                    'The full-screen TUI requires the native @stegosaurus/fold package. Use foldcode --prompt "..." or install @stegosaurus/fold globally.',
                 );
                 return;
             }

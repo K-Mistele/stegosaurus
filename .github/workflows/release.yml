@@ -1,0 +1,110 @@
+name: Release
+
+# Publishes the fold packages to npm, as humanlayer/fold's release workflow does: the libraries, one native
+# `foldcode` package per target, and the `@stegosaurus/fold` wrapper that installs the right binary.
+# npm trusted publishing (OIDC) must be set up for each package on npmjs.com.
+
+on:
+    push:
+        tags: ['v*']
+    workflow_dispatch:
+        inputs:
+            version:
+                description: Existing release version to publish or resume
+                required: true
+                type: string
+            tag:
+                description: npm dist-tag
+                required: true
+                default: rc
+                type: string
+            skip:
+                description: Comma-separated package names already published
+                required: false
+                default: ''
+                type: string
+
+permissions:
+    contents: write
+    id-token: write
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v4
+
+            - name: Set up pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 12.15.0
+
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: pnpm
+                  registry-url: https://registry.npmjs.org
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: 1.4.2
+
+            # Trusted publishing needs npm 11.5.1 or newer.
+            - name: Update npm
+              run: npm install --global npm@latest
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Derive release version
+              id: release
+              run: |
+                  if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+                      pnpm release:tag-info --version "$MANUAL_VERSION" --tag "$MANUAL_TAG"
+                  else
+                      pnpm release:tag-info
+                  fi
+              env:
+                  MANUAL_VERSION: ${{ inputs.version }}
+                  MANUAL_TAG: ${{ inputs.tag }}
+
+            - name: Check format, lint and types
+              run: |
+                  pnpm format:check
+                  pnpm lint
+                  pnpm typecheck
+                  pnpm typed:check
+
+            - name: Test
+              run: pnpm test
+
+            - name: Build packages
+              run: pnpm build:packages --version "${{ steps.release.outputs.version }}"
+
+            - name: Build native binaries
+              run: pnpm build:binaries --version "${{ steps.release.outputs.version }}"
+
+            - name: Stage release
+              run: pnpm release:prepare --version "${{ steps.release.outputs.version }}"
+
+            - name: Validate release
+              run: pnpm release:validate --version "${{ steps.release.outputs.version }}"
+
+            - name: Publish packages
+              run: |
+                  args=(--version "${{ steps.release.outputs.version }}" --tag "${{ steps.release.outputs.tag }}")
+                  if [[ -n "$SKIP_PACKAGES" ]]; then
+                      args+=(--skip "$SKIP_PACKAGES")
+                  fi
+                  pnpm release:publish "${args[@]}"
+              env:
+                  SKIP_PACKAGES: ${{ inputs.skip }}
+
+            - name: Create GitHub release
+              if: github.event_name == 'push'
+              run: gh release create "$GITHUB_REF_NAME" --generate-notes
+              env:
+                  GH_TOKEN: ${{ github.token }}

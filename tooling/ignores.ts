@@ -21,4 +21,10 @@ export const ignorePatterns = [
 ];
 
 // Lint-only skips: fold-cli and its fold-tui-theme dependency, moved from github.com/humanlayer/fold as is.
-export const lintIgnorePatterns = [...ignorePatterns, 'packages/fold-cli/**', 'packages/fold-tui-theme/**'];
+// packages/fold runs at npm install time, before any dependency (Effect included) exists.
+export const lintIgnorePatterns = [
+    ...ignorePatterns,
+    'packages/fold-cli/**',
+    'packages/fold-tui-theme/**',
+    'packages/fold/**',
+];
