@@ -105,7 +105,7 @@ Ask before turning off any other rule.
 - `automation/no-single-use-private-functions`: demands inlining every helper with one caller, even ones named to keep a long function readable.
 - `vitest/no-standalone-expect` in `*.test.ts`: `@effect/vitest` and alchemy's harness call `expect` inside Effects.
 - `effecttsgo/strict-effect-provide` in test files and `test/` directories: each test is its own entry point, and a fresh layer per test gives it isolated state.
-- `automation/no-reexport-only-modules` in the fold packages' `src/index.ts`: they are the public entry points.
+- `automation/no-reexport-only-modules` in the fold and channels packages' `src/index.ts`: they are the public entry points.
 - `effecttsgo/node-builtin-import` and `effecttsgo/new-promise` in fold-codex's and fold-xai's `OAuthFlows.ts`, and `effecttsgo/strict-effect-provide` in their `CodexAuth.ts`/`XaiAuth.ts` and fold-agent's `TitleGenerator.ts`: fixing them is a redesign (an Effect `HttpServer` OAuth callback, a shared title-model client), left for later.
 - `effecttsgo/node-builtin-import` in the fold files listed in `tooling/lint/overrides.ts`: they keep plain synchronous `node:path` helpers that callers use outside Effect. Their Effect code uses `Path.Path`.
 - `automation/no-service-option` in test files: test fakes check whether a service was provided.

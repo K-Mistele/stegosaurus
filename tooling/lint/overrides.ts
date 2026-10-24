@@ -27,6 +27,12 @@ export const overrides = [
             'packages/fold-core/src/index.ts',
             'packages/fold-opencode/src/index.ts',
             'packages/fold-xai/src/index.ts',
+            'packages/channels-alchemy-cloudflare/src/index.ts',
+            'packages/channels-github/src/index.ts',
+            'packages/channels-linear/src/index.ts',
+            'packages/channels-redis/src/index.ts',
+            'packages/channels-slack/src/index.ts',
+            'packages/channels-sql/src/index.ts',
         ],
         rules: {
             'automation/no-reexport-only-modules': 'off',
