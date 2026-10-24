@@ -2,7 +2,7 @@ import {
     type MailboxSubscriptionError,
     type MailboxSubscriptionResult,
     MailboxSubscriptions,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxSubscriptions';
 import { Effect, Schema } from 'effect';
 
 import type {

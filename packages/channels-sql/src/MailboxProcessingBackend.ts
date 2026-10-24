@@ -9,45 +9,45 @@
  * All times come from Effect's Clock and reach SQL as parameters.
  */
 import {
-    DEFAULT_RETRY_AFTER_MS,
-    DeliveryAdmissionJson,
-    DeliveryPreparationConflict,
     MailboxProcessingAttemptResult,
     MailboxProcessingBackend,
     MailboxProcessingClaimLost,
     MailboxProcessingUnavailable,
-    MailboxSequence,
     OutputReadyMailbox,
     RecoverableMailbox,
-    Timestamp,
-    WaitingEvents,
     WaitingMailbox,
-    activeDeliveryWork,
-    ActiveDeliveryStage,
-    claimDeliveryOutput as claimDeliveryOutputSlot,
-    claimFrozenBatch as claimFrozenBatchSlot,
-    handOffDeliverySlot,
-    makeDeliveryId,
-    prepareDeliverySlot,
-    recordDeliveryAttempt,
-    renewDeliveryClaim,
-    renewDeliveryOutput as renewDeliveryOutputSlot,
-    settleDeliveryOutput as settleDeliveryOutputSlot,
-    startDeliveryBatch,
     toClaimedDeliveryOutput,
     toClaimedMailboxBatch,
     type ClaimDeliveryOutput,
     type ClaimMailbox,
     type ClaimWaitingEvents,
     type DeferMailbox,
-    type DeliverySlot,
     type HandOffMailboxDelivery,
     type PrepareMailboxDelivery,
     type RecordProcessingAttemptResult,
     type RenewDeliveryOutput,
     type RenewMailboxClaim,
     type SettleDeliveryOutput,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxProcessing';
+import { MailboxSequence, Timestamp, WaitingEvents } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { DeliveryAdmissionJson } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { formatDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
+import {
+    DEFAULT_RETRY_AFTER_MS,
+    activeDeliveryWork,
+    ActiveDeliveryStage,
+    claimDeliveryOutput as claimDeliveryOutputSlot,
+    claimFrozenBatch as claimFrozenBatchSlot,
+    handOffDeliverySlot,
+    prepareDeliverySlot,
+    recordDeliveryAttempt,
+    renewDeliveryClaim,
+    renewDeliveryOutput as renewDeliveryOutputSlot,
+    settleDeliveryOutput as settleDeliveryOutputSlot,
+    startDeliveryBatch,
+    type DeliverySlot,
+} from '@stegosaurus/channels-delivery/DeliveryLifecycle';
+import { DeliveryPreparationConflict } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Array as Arr, Clock, Effect, Layer, Match, Option, Predicate, Random, Schema } from 'effect';
 import * as SqlClient from 'effect/sql/SqlClient';
 import * as SqlError from 'effect/sql/SqlError';
@@ -409,7 +409,7 @@ const prepareDelivery = (input: PrepareMailboxDelivery) =>
                     PreparationMismatch: ({ batchId }) =>
                         Effect.fail(
                             new DeliveryPreparationConflict({
-                                deliveryId: makeDeliveryId({
+                                deliveryId: formatDeliveryId({
                                     mailboxKey: input.mailboxKey,
                                     batchId,
                                     callbackIndex: slot.active?.callbackIndex ?? 0,

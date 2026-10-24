@@ -29,16 +29,20 @@
 import {
     DeliveryOutputApplied,
     DeliveryOutputFailed,
-    type DeliveryOutcome,
-    type PortableReaction,
     type ProviderOutputAttempt,
     type ProviderOutputProcessor,
+} from '@stegosaurus/channels-delivery/ProviderOutput';
+import {
+    type PortableReaction,
     ProviderReactionTarget,
-    type ProviderRenderPlan,
     type ProviderSetMessageReaction,
+} from '@stegosaurus/channels-delivery/DeliveryReaction';
+import {
+    type ProviderRenderPlan,
     type DeliveryPlan,
     sameDeliveryPlan,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryPlan';
+import { type DeliveryOutcome } from '@stegosaurus/channels-delivery/DeliveryOutcome';
 import { Array as Arr, Effect, Match, Option, Predicate, Schema } from 'effect';
 
 import { SlackApi, type SlackApiError } from './SlackApi';

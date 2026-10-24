@@ -4,19 +4,18 @@
  * `chat.postMessage` and `chat.update` requests at the HTTP seam.
  */
 import { describe, it } from '@effect/vitest';
+import { ProviderOutputAttempt } from '@stegosaurus/channels-delivery/ProviderOutput';
+import { BatchId, formatDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
 import {
-    BatchId,
-    DeliveryOperationId,
     DeliveryPlan,
     DeliveryPlanItem,
     DeliveryPlanItemId,
     DeliveryPlanItemState,
-    PreparedDeliveryCallback,
-    ProviderOutputAttempt,
     ProviderRenderPlan,
     RenderedDeliveryPlan,
-    makeDeliveryId,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryPlan';
+import { DeliveryOperationId } from '@stegosaurus/channels-delivery/DeliveryOperation';
+import { PreparedDeliveryCallback } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Effect, Layer, Option, Queue, Ref, Result, Schema } from 'effect';
 
 import {
@@ -88,7 +87,7 @@ const shown = (plan: DeliveryPlan) =>
 
 const attempt = (operation: ProviderRenderPlan) =>
     ProviderOutputAttempt.make({
-        deliveryId: makeDeliveryId({
+        deliveryId: formatDeliveryId({
             mailboxKey: 'slack:v1:mailbox',
             batchId: BatchId.make('batch-1'),
         }),

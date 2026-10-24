@@ -1,25 +1,12 @@
+import { DeliveryAdmissionBatch } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import {
     ClaimedMailboxBatch,
-    DEFAULT_RETRY_AFTER_MS,
-    DeliveryAdmissionBatch,
-    DeliveryPreparationConflict,
     MailboxProcessingBackend,
     MailboxProcessingClaimLost,
     MailboxProcessingUnavailable,
     OutputReadyMailbox,
     RecoverableMailbox,
     WaitingMailbox,
-    activeDeliveryWork,
-    claimDeliveryOutput,
-    claimFrozenBatch,
-    handOffDeliverySlot,
-    makeDeliveryId,
-    prepareDeliverySlot,
-    recordDeliveryAttempt,
-    renewDeliveryClaim,
-    renewDeliveryOutput,
-    settleDeliveryOutput,
-    startDeliveryBatch,
     toClaimedDeliveryOutput,
     toClaimedMailboxBatch,
     type ClaimDeliveryOutput,
@@ -33,7 +20,22 @@ import {
     type RenewDeliveryOutput,
     type RenewMailboxClaim,
     type SettleDeliveryOutput,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxProcessing';
+import { formatDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
+import {
+    DEFAULT_RETRY_AFTER_MS,
+    activeDeliveryWork,
+    claimDeliveryOutput,
+    claimFrozenBatch,
+    handOffDeliverySlot,
+    prepareDeliverySlot,
+    recordDeliveryAttempt,
+    renewDeliveryClaim,
+    renewDeliveryOutput,
+    settleDeliveryOutput,
+    startDeliveryBatch,
+} from '@stegosaurus/channels-delivery/DeliveryLifecycle';
+import { DeliveryPreparationConflict } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Array as Arr, Clock, Effect, Layer, Match, Option, Predicate, Random, type Schema } from 'effect';
 
 import { DurableMailboxState, mailboxStateKey, type WaitingAdmission } from './MailboxState';
@@ -330,7 +332,7 @@ export const makeMailboxProcessingBackendFromDurableObjectStorage = Effect.gen(f
                         PreparationMismatch: ({ batchId }) =>
                             Effect.fail(
                                 new DeliveryPreparationConflict({
-                                    deliveryId: makeDeliveryId({
+                                    deliveryId: formatDeliveryId({
                                         mailboxKey: input.mailboxKey,
                                         batchId,
                                         callbackIndex: current.deliveries.active?.callbackIndex ?? 0,

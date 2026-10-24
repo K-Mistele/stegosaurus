@@ -8,15 +8,14 @@
  *
  * The delivery ID names the mailbox, so a request goes straight to its row with no lookup table.
  */
+import { applyDeliverySlotMutation, readDeliverySlotStatus } from '@stegosaurus/channels-delivery/DeliveryLifecycle';
 import {
     DeliveryControlBackend,
     DeliveryControlUnavailable,
     DeliveryNotFound,
-    applyDeliverySlotMutation,
-    readDeliverySlotStatus,
     type ApplyDeliveryMutation,
     type ReadDeliveryStatus,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryControl';
 import { Clock, Effect, Layer, Option, type Schema } from 'effect';
 import * as SqlClient from 'effect/sql/SqlClient';
 import * as SqlError from 'effect/sql/SqlError';

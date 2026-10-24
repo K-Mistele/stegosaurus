@@ -6,6 +6,7 @@
  * the request and the response cross the RPC as encoded schemas, and a typed failure travels as a
  * response value, so nothing depends on how Cloudflare serializes thrown errors.
  */
+import { parseDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
 import {
     DeliveryControl,
     DeliveryControlUnavailable,
@@ -15,8 +16,7 @@ import {
     DeliveryNotFound,
     DeliveryStatus,
     DeliveryStatusError,
-    parseDeliveryId,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryControl';
 import { Data, Effect, Layer, Match, Redacted, Schema } from 'effect';
 
 import { DeliveryMailboxes } from './MailboxDelivery';

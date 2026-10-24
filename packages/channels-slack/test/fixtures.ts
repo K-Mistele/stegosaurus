@@ -1,15 +1,16 @@
 import { NodeCrypto, NodeHttpServer } from '@effect/platform-node';
 import { createServer, type WebhookDispatcher } from '@emulators/core';
 import { getSlackStore, seedFromConfig, slackPlugin, type SlackSeedConfig } from '@emulators/slack';
+import { webhookRoutes, type RawWebhookInput } from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import {
+    processProviderEvent,
+    type ProviderEventProcessor,
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import {
     type DeliveryAdmission,
     DeliveryReceipt,
     MailboxDelivery,
-    processProviderEvent,
-    type ProviderEventProcessor,
-    webhookRoutes,
-    type RawWebhookInput,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Clock, Context, Effect, Layer, Match, Queue, Redacted, Schema } from 'effect';
 import { Headers, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from 'effect/http';
 
@@ -218,7 +219,7 @@ export const makeSlackEmulatorFixture = (options: SlackEmulatorFixtureOptions) =
             signingSecret: Redacted.make(slackEmulatorSigningSecret),
         });
 
-        const routes = webhookRoutes([provider]).pipe(HttpRouter.provideRequest(NodeCrypto.layer));
+        const routes = webhookRoutes([provider], {}).pipe(HttpRouter.provideRequest(NodeCrypto.layer));
         const web = HttpRouter.toWebHandler(routes, { disableLogger: true });
         yield* Effect.addFinalizer(() => Effect.promise(web.dispose));
 

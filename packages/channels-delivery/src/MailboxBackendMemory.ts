@@ -27,7 +27,7 @@ import {
     startDeliveryBatch,
     type DeliverySlot,
 } from './DeliveryLifecycle';
-import { makeDeliveryId } from './DeliveryReference';
+import { formatDeliveryId } from './DeliveryReference';
 import { DeliveryReceipt, MailboxDelivery, deliveryMailboxKey, type DeliveryAdmission } from './MailboxDelivery';
 import { Timestamp } from './MailboxPolicy';
 import {
@@ -45,17 +45,15 @@ import {
 } from './MailboxProcessing';
 import { DeliveryAdmissionBatch } from './ProviderEventProcessing';
 
-type WaitingEvent = {
-    readonly sequence: number;
-    readonly arrivedAt: number;
-    readonly admission: DeliveryAdmission;
-};
-
 type MemoryMailbox = {
     readonly mailboxKey: string;
     readonly provider: string;
     readonly nextSequence: number;
-    readonly waiting: ReadonlyArray<WaitingEvent>;
+    readonly waiting: ReadonlyArray<{
+        readonly sequence: number;
+        readonly arrivedAt: number;
+        readonly admission: DeliveryAdmission;
+    }>;
     readonly deliveries: DeliverySlot;
 };
 
@@ -69,12 +67,6 @@ const withMailbox = (store: MemoryStore, mailbox: MemoryMailbox): MemoryStore =>
     ...store,
     mailboxes: new Map([...store.mailboxes, [mailbox.mailboxKey, mailbox]]),
 });
-
-const toBatch = (events: ReadonlyArray<WaitingEvent>) => {
-    const [first, ...rest] = events.map(({ admission }) => admission);
-
-    return first === undefined ? null : DeliveryAdmissionBatch.make([first, ...rest]);
-};
 
 export const MailboxBackendMemory = Layer.effectContext(
     Effect.gen(function* () {
@@ -158,9 +150,12 @@ export const MailboxBackendMemory = Layer.effectContext(
             const now = yield* Clock.currentTimeMillis;
             const store = yield* SynchronizedRef.get(state);
 
-            return [...store.mailboxes.values()]
-                .filter(({ deliveries }) => deliveries.readyAt !== null && deliveries.readyAt <= now)
-                .flatMap((mailbox): ReadonlyArray<ReadyMailbox> => {
+            return Arr.flatMap(
+                Arr.filter(
+                    [...store.mailboxes.values()],
+                    ({ deliveries }) => deliveries.readyAt !== null && deliveries.readyAt <= now,
+                ),
+                (mailbox: MemoryMailbox): ReadonlyArray<ReadyMailbox> => {
                     if (mailbox.deliveries.active !== null) {
                         return activeDeliveryWork(mailbox.deliveries.active) === 'Output'
                             ? [OutputReadyMailbox.make({ mailboxKey: mailbox.mailboxKey })]
@@ -185,7 +180,8 @@ export const MailboxBackendMemory = Layer.effectContext(
                             },
                         }),
                     ];
-                });
+                },
+            );
         });
 
         const claimMailbox = (input: ClaimMailbox) =>
@@ -207,11 +203,13 @@ export const MailboxBackendMemory = Layer.effectContext(
                         return Match.value(input).pipe(
                             Match.tagsExhaustive({
                                 ClaimWaitingEvents: ({ upToSequence, batchId, accessToken, leaseMs }) => {
-                                    const admissions = toBatch(
-                                        current.waiting.filter(({ sequence }) => sequence <= upToSequence),
+                                    const [first, ...rest] = Arr.map(
+                                        Arr.filter(current.waiting, ({ sequence }) => sequence <= upToSequence),
+                                        ({ admission }) => admission,
                                     );
 
-                                    if (admissions === null) return [Option.none(), store] as const;
+                                    if (first === undefined) return [Option.none(), store] as const;
+                                    const admissions = DeliveryAdmissionBatch.make([first, ...rest]);
 
                                     const started = startDeliveryBatch(deliveries, {
                                         batchId,
@@ -226,7 +224,7 @@ export const MailboxBackendMemory = Layer.effectContext(
 
                                     const next: MemoryMailbox = {
                                         ...current,
-                                        waiting: current.waiting.filter(({ sequence }) => sequence > upToSequence),
+                                        waiting: Arr.filter(current.waiting, ({ sequence }) => sequence > upToSequence),
                                         deliveries: started.slot,
                                     };
 
@@ -274,7 +272,7 @@ export const MailboxBackendMemory = Layer.effectContext(
             });
 
         const claimLost = (mailboxKey: string, claimId: string) =>
-            new MailboxProcessingClaimLost({ mailboxKey, claimId });
+            MailboxProcessingClaimLost.make({ mailboxKey, claimId });
 
         const findDeliveries = (mailboxKey: string) =>
             SynchronizedRef.get(state).pipe(Effect.map((store) => store.mailboxes.get(mailboxKey)));
@@ -285,7 +283,7 @@ export const MailboxBackendMemory = Layer.effectContext(
                     const now = yield* Clock.currentTimeMillis;
                     const mailbox = yield* findDeliveries(input.reference.mailboxKey);
 
-                    if (mailbox === undefined) return yield* new DeliveryNotFound();
+                    if (mailbox === undefined) return yield* DeliveryNotFound.make();
 
                     return yield* readDeliverySlotStatus(mailbox.deliveries, {
                         ...input,
@@ -293,7 +291,7 @@ export const MailboxBackendMemory = Layer.effectContext(
                     }) satisfies Effect.Effect<DeliveryStatus, DeliveryNotFound>;
                 }),
             applyDeliveryMutation: (input) =>
-                updateDeliveries(input.reference.mailboxKey, new DeliveryNotFound(), (mailbox, now) =>
+                updateDeliveries(input.reference.mailboxKey, DeliveryNotFound.make(), (mailbox, now) =>
                     applyDeliverySlotMutation(mailbox.deliveries, {
                         ...input,
                         now,
@@ -363,8 +361,8 @@ export const MailboxBackendMemory = Layer.effectContext(
                                     ClaimNotOwned: () => Effect.fail(claimLost(input.mailboxKey, input.claimId)),
                                     PreparationMismatch: ({ batchId }) =>
                                         Effect.fail(
-                                            new DeliveryPreparationConflict({
-                                                deliveryId: makeDeliveryId({
+                                            DeliveryPreparationConflict.make({
+                                                deliveryId: formatDeliveryId({
                                                     mailboxKey: input.mailboxKey,
                                                     batchId,
                                                     callbackIndex: mailbox.deliveries.active?.callbackIndex ?? 0,

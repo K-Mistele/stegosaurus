@@ -2,7 +2,7 @@
  * This file is responsible for locating the configured provider for a given event that was put into a mailbox,
  * and handing it to that provider for execution. The flip side of MailboxDelivery.ts, if you will.
  */
-import { Schema, Effect, Predicate } from 'effect';
+import { Array as Arr, Schema, Effect, Option } from 'effect';
 
 import type { ProviderDeliveryExecution } from './DeliveryContext';
 import { DeliveryAdmission } from './MailboxDelivery';
@@ -27,32 +27,35 @@ export type ProviderEventResult = typeof ProviderEventResult.Type;
  * It  is possible that there is no provider configured to process an event - e.g. 'linear' event is in mailbox somehow but we only have slack/github
  * in that case we still know the namespace & provider it was intended for since that was written when the event was delivered to the mailbox initially
  */
-export class ProviderEventProcessorNotFound extends Schema.TaggedError<ProviderEventProcessorNotFound>()(
-    'ProviderEventProcessorNotFound',
-    {
-        namespace: Schema.NonEmptyString,
-        provider: Schema.NonEmptyString,
-    },
-) {}
-
-/** The provider could tell us that the event is invalid & unable to be executed */
-export class ProviderEventInvalid extends Schema.TaggedError<ProviderEventInvalid>()('ProviderEventInvalid', {
+export class ProviderEventProcessorNotFound extends Schema.TaggedError<
+    ProviderEventProcessorNotFound,
+    { readonly brand: unique symbol }
+>()('ProviderEventProcessorNotFound', {
+    namespace: Schema.NonEmptyString,
     provider: Schema.NonEmptyString,
-    reason: Schema.Literals(['invalid_payload', 'identity_mismatch', 'unsupported_version']),
 }) {}
 
-/** The provider could tell us that execution of the user-provided callback failed */
-export class ProviderEventExecutionFailed extends Schema.TaggedError<ProviderEventExecutionFailed>()(
-    'ProviderEventExecutionFailed',
+/** The provider could tell us that the event is invalid & unable to be executed */
+export class ProviderEventInvalid extends Schema.TaggedError<ProviderEventInvalid, { readonly brand: unique symbol }>()(
+    'ProviderEventInvalid',
     {
         provider: Schema.NonEmptyString,
-        retryable: Schema.Boolean,
-        safeCode: Schema.NonEmptyString,
-        retryAfterMs: Schema.optionalKey(
-            Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
-        ),
+        reason: Schema.Literals(['invalid_payload', 'identity_mismatch', 'unsupported_version']),
     },
 ) {}
+
+/** The provider could tell us that execution of the user-provided callback failed */
+export class ProviderEventExecutionFailed extends Schema.TaggedError<
+    ProviderEventExecutionFailed,
+    { readonly brand: unique symbol }
+>()('ProviderEventExecutionFailed', {
+    provider: Schema.NonEmptyString,
+    retryable: Schema.Boolean,
+    safeCode: Schema.NonEmptyString,
+    retryAfterMs: Schema.optionalKey(
+        Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
+    ),
+}) {}
 
 export const ProviderEventProcessorError = Schema.Union([ProviderEventInvalid, ProviderEventExecutionFailed]);
 
@@ -100,18 +103,20 @@ export const processProviderEvent = <R = never>(processors: ReadonlyArray<Provid
     ) {
         const admission = admissions[0];
 
-        const processor = processors.find(
+        const processor = Arr.findFirst(
+            processors,
             (candidate) => candidate.namespace === admission.namespace && candidate.providerName === admission.provider,
         );
 
-        if (Predicate.isUndefined(processor)) {
+        if (Option.isNone(processor)) {
             return yield* ProviderEventProcessorNotFound.make({
                 namespace: admission.namespace,
                 provider: admission.provider,
             });
         }
 
-        const mixedIdentity = admissions.some(
+        const mixedIdentity = Arr.some(
+            admissions,
             (candidate) => candidate.namespace !== admission.namespace || candidate.provider !== admission.provider,
         );
 
@@ -122,5 +127,5 @@ export const processProviderEvent = <R = never>(processors: ReadonlyArray<Provid
             });
         }
 
-        return yield* processor.process(admissions, execution);
+        return yield* processor.value.process(admissions, execution);
     });

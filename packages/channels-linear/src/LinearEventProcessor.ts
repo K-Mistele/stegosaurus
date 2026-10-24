@@ -1,19 +1,20 @@
 import {
-    deliveryMailboxKey,
-    type DeliveryAdmission,
     type DeliveryAdmissionBatch,
-    type DeliveryCallbackResult,
-    type DeliveryContext,
-    MailboxSubscriptions,
-    type PreparedDeliveryCallback,
-    type PreparedDeliveryInvocation,
-    type ProviderDeliveryExecution,
     ProviderEventExecutionFailed,
     ProviderEventHandled,
     ProviderEventIgnored,
     ProviderEventInvalid,
     type ProviderEventProcessor,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { deliveryMailboxKey, type DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import {
+    type DeliveryCallbackResult,
+    type DeliveryContext,
+    type PreparedDeliveryCallback,
+    type PreparedDeliveryInvocation,
+    type ProviderDeliveryExecution,
+} from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Array as Arr, Effect, Match, Option, Predicate, Schema, Struct } from 'effect';
 
 import { LinearApi } from './LinearApi';

@@ -4,11 +4,8 @@
  * A session callback writes to its Agent Session; an issue callback writes to the issue. The delivery
  * core stores these values as opaque JSON beside `presentationVersion`; only the Linear provider reads them.
  */
-import {
-    DeliveryOperationKind,
-    DeliveryReactionTargetKind,
-    PreparedDeliveryInvocation,
-} from '@stegosaurus/channels-delivery';
+import { DeliveryReactionTargetKind } from '@stegosaurus/channels-delivery/DeliveryReaction';
+import { DeliveryOperationKind, PreparedDeliveryInvocation } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Effect, Match, Predicate, Schema } from 'effect';
 
 import { LinearCallbackName } from './LinearCallbacks';

@@ -1,11 +1,8 @@
 import { describe, it } from '@effect/vitest';
-import {
-    DeliveryContext,
-    DeliveryReceipt,
-    type DeliveryAdmission,
-    MailboxSubscriptions,
-    ProviderEventHandled,
-} from '@stegosaurus/channels-delivery';
+import { ProviderEventHandled } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { DeliveryReceipt, type DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Deferred, Effect, Layer } from 'effect';
 import { vi } from 'vite-plus/test';
 

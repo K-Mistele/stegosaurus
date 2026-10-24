@@ -94,7 +94,7 @@ Never commit the webhook secret or private key.
 ## Configure a provider
 
 ```ts
-import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery';
+import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
 import { GitHubBot, GitHubId } from '@stegosaurus/channels-github';
 import { Config, Effect } from 'effect';
 

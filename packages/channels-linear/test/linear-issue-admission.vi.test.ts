@@ -1,5 +1,6 @@
 import { describe, it } from '@effect/vitest';
-import { DeliveryAdmission, ProviderWebhookEvent } from '@stegosaurus/channels-delivery';
+import { ProviderWebhookEvent } from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Effect } from 'effect';
 
 import { issueCreatePayload, linearOrganizationId, makeLinearTestProvider, signedLinearInput } from './fixtures';

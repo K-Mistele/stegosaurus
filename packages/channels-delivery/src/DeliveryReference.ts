@@ -6,7 +6,7 @@
  * on every retry or recovery. The public delivery ID carries the mailbox key and the batch ID, so a
  * host can route a request to the owning mailbox without a lookup table.
  */
-import { Crypto, Effect, Option, Result, Schema } from 'effect';
+import { Array as Arr, Crypto, Effect, Option, Result, Schema, String as Str } from 'effect';
 import { Base64Url } from 'effect/encoding';
 
 /** The longest public delivery ID, so it fits in a request path on every host. */
@@ -65,7 +65,7 @@ export const isRoutableMailboxKey = (mailboxKey: string) =>
     Base64Url.encode(mailboxKey).length <= ENCODED_MAILBOX_KEY_MAX_LENGTH;
 
 /** The delivery ID of a batch. The mailbox key must be routable; see {@link isRoutableMailboxKey}. */
-export const makeDeliveryId = (input: {
+export const formatDeliveryId = (input: {
     readonly mailboxKey: string;
     readonly batchId: BatchId;
     readonly callbackIndex?: number;
@@ -76,7 +76,7 @@ export const makeDeliveryId = (input: {
 };
 
 /** The conversation ID of a mailbox. */
-export const makeConversationId = (mailboxKey: string) =>
+export const mailboxConversationId = (mailboxKey: string) =>
     ConversationId.make(`conversation:v1:${Base64Url.encode(mailboxKey)}`);
 
 /**
@@ -84,20 +84,23 @@ export const makeConversationId = (mailboxKey: string) =>
  * so a caller can answer "not found" without saying why.
  */
 export const parseDeliveryId = (input: string): Option.Option<DeliveryReference> => {
-    const deliveryId = Schema.decodeUnknownOption(DeliveryId)(input);
+    const deliveryId = Schema.decodeOption(DeliveryId)(input);
 
     if (Option.isNone(deliveryId)) return Option.none();
-    const [, , encodedKey, rawBatchId, rawIndex] = deliveryId.value.split(':');
+    const [, , encodedKey, rawBatchId, rawIndex] = Str.split(':')(deliveryId.value);
     const mailboxKey = Result.getOrUndefined(Base64Url.decodeString(encodedKey ?? ''));
-    const batchId = Schema.decodeUnknownOption(BatchId)(rawBatchId);
+    const batchId = Schema.decodeOption(BatchId)(rawBatchId);
 
-    const callbackIndex = Schema.decodeUnknownOption(DeliveryReference.fields.callbackIndex)(Number(rawIndex));
+    const callbackIndex = Schema.decodeOption(DeliveryReference.fields.callbackIndex)(Number(rawIndex));
 
     if (Option.isNone(callbackIndex)) return Option.none();
 
     if (mailboxKey === undefined || mailboxKey === '' || Option.isNone(batchId)) return Option.none();
 
-    if (makeDeliveryId({ mailboxKey, batchId: batchId.value, callbackIndex: callbackIndex.value }) !== deliveryId.value)
+    if (
+        formatDeliveryId({ mailboxKey, batchId: batchId.value, callbackIndex: callbackIndex.value }) !==
+        deliveryId.value
+    )
         return Option.none();
 
     return Option.some(
@@ -111,31 +114,20 @@ export const parseDeliveryId = (input: string): Option.Option<DeliveryReference>
 };
 
 /** A new batch ID. */
-export const makeBatchId = Effect.gen(function* () {
+export const randomBatchId = Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
 
     return BatchId.make(Base64Url.encode(yield* crypto.randomBytes(16)));
 });
 
+/** A new access token from a `Crypto` the caller already holds: 32 random bytes. */
+export const randomDeliveryAccessTokenWith = (crypto: Crypto.Crypto) =>
+    Effect.map(crypto.randomBytes(32), (bytes) => DeliveryAccessToken.make(Base64Url.encode(bytes)));
+
 /** A new access token: 32 random bytes. */
-export const makeDeliveryAccessToken = Effect.gen(function* () {
-    const crypto = yield* Crypto.Crypto;
-
-    return DeliveryAccessToken.make(Base64Url.encode(yield* crypto.randomBytes(32)));
+export const randomDeliveryAccessToken = Effect.gen(function* () {
+    return yield* randomDeliveryAccessTokenWith(yield* Crypto.Crypto);
 });
-
-/** Sixteen bytes as a UUID v4 string: sets the version and variant bits, then formats them. */
-const formatUuidV4 = (bytes: Uint8Array) => {
-    const hex = Array.from(bytes.subarray(0, 16), (byte, index) => {
-        if (index === 6) return ((byte & 0x0f) | 0x40).toString(16).padStart(2, '0');
-
-        if (index === 8) return ((byte & 0x3f) | 0x80).toString(16).padStart(2, '0');
-
-        return byte.toString(16).padStart(2, '0');
-    }).join('');
-
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-};
 
 /**
  * A UUID made from a delivery ID: the same on every attempt at the delivery, and different for every
@@ -143,14 +135,26 @@ const formatUuidV4 = (bytes: Uint8Array) => {
  * ask for one. A provider sends it with output it makes before the callback runs, so a retry cannot
  * make that output twice.
  */
-export const makeDeliveryIdempotencyKey = Effect.fn('delivery.make_idempotency_key')(function* (
-    deliveryId: DeliveryId,
-) {
+export const deliveryIdempotencyKey = Effect.fn('delivery.make_idempotency_key')(function* (deliveryId: DeliveryId) {
     const crypto = yield* Crypto.Crypto;
 
     const digest = yield* crypto.digest('SHA-256', new TextEncoder().encode(`delivery-idempotency:v1:${deliveryId}`));
 
-    return formatUuidV4(digest);
+    /** The first sixteen bytes as a UUID v4 string: set the version and variant bits, then format them. */
+    const hexByte = (byte: number) => Str.padStart(2, '0')(byte.toString(16));
+
+    const hex = Arr.join(
+        Array.from(digest.subarray(0, 16), (byte, index) => {
+            if (index === 6) return hexByte((byte & 0x0f) | 0x40);
+
+            if (index === 8) return hexByte((byte & 0x3f) | 0x80);
+
+            return hexByte(byte);
+        }),
+        '',
+    );
+
+    return `${Str.slice(0, 8)(hex)}-${Str.slice(8, 12)(hex)}-${Str.slice(12, 16)(hex)}-${Str.slice(16, 20)(hex)}-${Str.slice(20, 32)(hex)}`;
 });
 
 /**
@@ -158,11 +162,15 @@ export const makeDeliveryIdempotencyKey = Effect.fn('delivery.make_idempotency_k
  * saved token's length, so the comparison does not reveal how much of a guess was right.
  */
 export const deliveryAccessTokenMatches = (input: { readonly saved: string; readonly presented: string }) => {
-    if (input.saved.length !== input.presented.length) return false;
+    const encoder = new TextEncoder();
+    const saved = encoder.encode(input.saved);
+    const presented = encoder.encode(input.presented);
+
+    if (saved.length !== presented.length) return false;
     let difference = 0;
 
-    for (let index = 0; index < input.saved.length; index += 1) {
-        difference |= input.saved.charCodeAt(index) ^ input.presented.charCodeAt(index);
+    for (let index = 0; index < saved.length; index += 1) {
+        difference |= (saved[index] ?? 0) ^ (presented[index] ?? 0);
     }
 
     return difference === 0;

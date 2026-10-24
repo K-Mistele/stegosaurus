@@ -4,23 +4,22 @@
  */
 import { describe, it } from '@effect/vitest';
 import {
-    BatchId,
-    CreateMessage,
-    DeliveryOperationId,
-    DeliveryOutcome,
-    MessageId,
-    PreparedDeliveryCallback,
-    DeliveryActivity,
-    ProviderDeleteMessage,
     ProviderPresentOutcome,
-    ProviderReactionTarget,
-    ProviderSetMessageReaction,
-    SetActivity,
     ProviderOutputAttempt,
-    ProviderUpdateMessage,
-    makeDeliveryId,
     type ProviderOutputOperation,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderOutput';
+import { BatchId, formatDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
+import { ProviderReactionTarget, ProviderSetMessageReaction } from '@stegosaurus/channels-delivery/DeliveryReaction';
+import { DeliveryOutcome } from '@stegosaurus/channels-delivery/DeliveryOutcome';
+import { DeliveryOperationId } from '@stegosaurus/channels-delivery/DeliveryOperation';
+import {
+    CreateMessage,
+    MessageId,
+    ProviderDeleteMessage,
+    ProviderUpdateMessage,
+} from '@stegosaurus/channels-delivery/DeliveryMessage';
+import { PreparedDeliveryCallback } from '@stegosaurus/channels-delivery/DeliveryContext';
+import { DeliveryActivity, SetActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
 import { Effect, Layer, Ref, Result, Schema } from 'effect';
 
 import { commentOutputScenarios } from '../../channels-delivery/test/comment-output-scenarios';
@@ -79,7 +78,7 @@ const prepared = (overrides: Partial<PreparedDeliveryCallback> = {}) =>
 
 const attempt = (operation: ProviderOutputOperation, invocation = prepared()) =>
     ProviderOutputAttempt.make({
-        deliveryId: makeDeliveryId({
+        deliveryId: formatDeliveryId({
             mailboxKey: 'slack:v1:mailbox',
             batchId: BatchId.make('batch-1'),
         }),

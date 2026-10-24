@@ -1,18 +1,19 @@
 import { describe, it } from '@effect/vitest';
 import {
-    DeliveryPreparationConflict,
-    DeliveryPreparationUnavailable,
-    MailboxSubscriptions,
-    MailboxSubscriptionsMemory,
-    PreparedDeliveryInvocation,
-    ProviderDeliveryExecution,
     ProviderEventExecutionFailed,
     ProviderEventHandled,
     ProviderEventIgnored,
-    deliveryMailboxKey,
-    type DeliveryAdmission,
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptionsMemory } from '@stegosaurus/channels-delivery/MailboxSubscriptionsMemory';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { deliveryMailboxKey, type DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import {
+    DeliveryPreparationConflict,
+    DeliveryPreparationUnavailable,
+    PreparedDeliveryInvocation,
+    ProviderDeliveryExecution,
     type DeliveryContext,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Effect, Layer, Match, Option, Ref, type Schema } from 'effect';
 
 import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution';

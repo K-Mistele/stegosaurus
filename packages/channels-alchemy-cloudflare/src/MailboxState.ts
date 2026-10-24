@@ -1,10 +1,6 @@
-import {
-    DeliveryAdmission,
-    DeliverySlot,
-    MailboxSequence,
-    Timestamp,
-    emptyDeliverySlot,
-} from '@stegosaurus/channels-delivery';
+import { MailboxSequence, Timestamp } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { DeliverySlot, emptyDeliverySlot } from '@stegosaurus/channels-delivery/DeliveryLifecycle';
 import { Schema } from 'effect';
 
 /** One event waiting in the mailbox for a later batch. */

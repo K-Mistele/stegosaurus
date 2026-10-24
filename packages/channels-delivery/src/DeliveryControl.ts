@@ -10,7 +10,7 @@
  * A change saves the provider output it needs in the same write, such as the `PresentOutcome` of a
  * result. Mailbox processing applies that output later.
  */
-import { Context, Effect, Layer, Match, Option, Predicate, Redacted, Schema } from 'effect';
+import { Context, Effect, Layer, Match, Predicate, Redacted, Schema } from 'effect';
 
 import { DeliveryActivity } from './DeliveryActivity';
 import { DeliveryOperationKind, DeliveryStage } from './DeliveryContext';
@@ -176,35 +176,50 @@ export type DeliveryStatus = typeof DeliveryStatus.Type;
  * No such delivery, or the token does not match it. The two are not told apart,
  * so a caller cannot learn which deliveries exist.
  */
-export class DeliveryNotFound extends Schema.TaggedError<DeliveryNotFound>()('DeliveryNotFound', {}) {}
-
-/** The delivery already ended differently, or with different Markdown. */
-export class DeliveryTerminalConflict extends Schema.TaggedError<DeliveryTerminalConflict>()(
-    'DeliveryTerminalConflict',
+export class DeliveryNotFound extends Schema.TaggedError<DeliveryNotFound, { readonly brand: unique symbol }>()(
+    'DeliveryNotFound',
     {},
 ) {}
 
-/** The delivery has ended, so it takes no new changes. Repeats of changes it already took are still accepted. */
-export class DeliveryClosed extends Schema.TaggedError<DeliveryClosed>()('DeliveryClosed', {}) {}
+/** The delivery already ended differently, or with different Markdown. */
+export class DeliveryTerminalConflict extends Schema.TaggedError<
+    DeliveryTerminalConflict,
+    { readonly brand: unique symbol }
+>()('DeliveryTerminalConflict', {}) {}
 
-/** The delivery's destination cannot do this, such as edit a message. Nothing was saved. */
-export class DeliveryOperationUnsupported extends Schema.TaggedError<DeliveryOperationUnsupported>()(
-    'DeliveryOperationUnsupported',
-    { operation: DeliveryOperationKind },
+/** The delivery has ended, so it takes no new changes. Repeats of changes it already took are still accepted. */
+export class DeliveryClosed extends Schema.TaggedError<DeliveryClosed, { readonly brand: unique symbol }>()(
+    'DeliveryClosed',
+    {},
 ) {}
 
+/** The delivery's destination cannot do this, such as edit a message. Nothing was saved. */
+export class DeliveryOperationUnsupported extends Schema.TaggedError<
+    DeliveryOperationUnsupported,
+    { readonly brand: unique symbol }
+>()('DeliveryOperationUnsupported', { operation: DeliveryOperationKind }) {}
+
 /** The delivery has no message with this ID, or posting it failed, so there is nothing to change. */
-export class DeliveryMessageNotFound extends Schema.TaggedError<DeliveryMessageNotFound>()('DeliveryMessageNotFound', {
+export class DeliveryMessageNotFound extends Schema.TaggedError<
+    DeliveryMessageNotFound,
+    { readonly brand: unique symbol }
+>()('DeliveryMessageNotFound', {
     messageId: MessageId,
 }) {}
 
 /** The message was removed, so it cannot be changed. */
-export class DeliveryMessageDeleted extends Schema.TaggedError<DeliveryMessageDeleted>()('DeliveryMessageDeleted', {
+export class DeliveryMessageDeleted extends Schema.TaggedError<
+    DeliveryMessageDeleted,
+    { readonly brand: unique symbol }
+>()('DeliveryMessageDeleted', {
     messageId: MessageId,
 }) {}
 
 /** A message with this ID was already created with different text. */
-export class DeliveryMessageConflict extends Schema.TaggedError<DeliveryMessageConflict>()('DeliveryMessageConflict', {
+export class DeliveryMessageConflict extends Schema.TaggedError<
+    DeliveryMessageConflict,
+    { readonly brand: unique symbol }
+>()('DeliveryMessageConflict', {
     messageId: MessageId,
 }) {}
 
@@ -212,16 +227,16 @@ export class DeliveryMessageConflict extends Schema.TaggedError<DeliveryMessageC
  * The delivery's destination cannot react on this target: the delivery has no activation target, the
  * provider cannot react on its messages, or the target is the plan, which no provider reacts on yet. Nothing was saved.
  */
-export class DeliveryReactionTargetUnavailable extends Schema.TaggedError<DeliveryReactionTargetUnavailable>()(
-    'DeliveryReactionTargetUnavailable',
-    { target: DeliveryReactionTargetKind },
-) {}
+export class DeliveryReactionTargetUnavailable extends Schema.TaggedError<
+    DeliveryReactionTargetUnavailable,
+    { readonly brand: unique symbol }
+>()('DeliveryReactionTargetUnavailable', { target: DeliveryReactionTargetKind }) {}
 
 /** The store could not be reached. */
-export class DeliveryControlUnavailable extends Schema.TaggedError<DeliveryControlUnavailable>()(
-    'DeliveryControlUnavailable',
-    { reason: Schema.String },
-) {}
+export class DeliveryControlUnavailable extends Schema.TaggedError<
+    DeliveryControlUnavailable,
+    { readonly brand: unique symbol }
+>()('DeliveryControlUnavailable', { reason: Schema.String }) {}
 
 export const DeliveryStatusError = Schema.Union([DeliveryNotFound, DeliveryControlUnavailable]);
 
@@ -269,7 +284,7 @@ export class DeliveryControlBackend extends Context.Service<
             input: ApplyDeliveryMutation,
         ) => Effect.Effect<DeliveryMutationReceipt, DeliveryMutationError>;
     }
->()('@stegosaurus/channels-delivery/DeliveryControlBackend') {}
+>()('@stegosaurus/channels-delivery/DeliveryControl/DeliveryControlBackend') {}
 
 /**
  * What a remote worker can do to its delivery, whatever store holds it.
@@ -340,7 +355,4 @@ export const terminalFromMutation = (mutation: CompleteDelivery | FailDelivery):
 export const sameDeliveryTerminal = Schema.toEquivalence(DeliveryTerminal);
 
 const referenceOrNotFound = (deliveryId: string) =>
-    Option.match(parseDeliveryId(deliveryId), {
-        onNone: () => Effect.fail(new DeliveryNotFound()),
-        onSome: Effect.succeed,
-    });
+    Effect.fromOption(parseDeliveryId(deliveryId)).pipe(Effect.mapError(() => DeliveryNotFound.make()));

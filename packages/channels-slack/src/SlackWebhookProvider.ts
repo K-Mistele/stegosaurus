@@ -1,5 +1,4 @@
 import {
-    DeliveryAdmission,
     ProviderWebhookEvent,
     ProviderWebhookIgnored,
     ProviderWebhookResponse,
@@ -9,7 +8,8 @@ import {
     type ProviderWebhookOutcome,
     type RawWebhookInput,
     type WebhookProvider,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Crypto, Effect, Match, Redacted, Schema } from 'effect';
 
 import { SlackApi } from './SlackApi';

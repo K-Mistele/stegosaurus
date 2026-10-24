@@ -5,15 +5,14 @@
  * `DeliveryLifecycle` rules, and the alarm moves with the mailbox's new `readyAt`: a result or a link
  * saves its output and wakes the mailbox at once to send it.
  */
+import { applyDeliverySlotMutation, readDeliverySlotStatus } from '@stegosaurus/channels-delivery/DeliveryLifecycle';
 import {
     DeliveryControlBackend,
     DeliveryControlUnavailable,
     DeliveryNotFound,
-    applyDeliverySlotMutation,
-    readDeliverySlotStatus,
     type ApplyDeliveryMutation,
     type ReadDeliveryStatus,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryControl';
 import { Array as Arr, Clock, Effect, Layer, Option, Predicate, type Schema } from 'effect';
 
 import { mailboxStateKey } from './MailboxState';

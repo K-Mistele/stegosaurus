@@ -1,38 +1,28 @@
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
-import { describe, it } from '@effect/vitest';
-import { Effect, Option, Queue, Redacted } from 'effect';
+import { assert, describe, it, layer } from '@effect/vitest';
+import { Array as Arr, Effect, Layer, Option, Queue, Redacted } from 'effect';
 
+import { ProviderEventHandled, type ProviderEventProcessor } from '../src/ProviderEventProcessing';
+import { MailboxProcessingBackend, processClaim, toClaimedDeliveryOutput } from '../src/MailboxProcessing';
+import { MailboxBackendMemory } from '../src/MailboxBackendMemory';
+import { BatchId, DeliveryAccessToken, formatDeliveryId, parseDeliveryId } from '../src/DeliveryReference';
+import { DeliveryOutcome, DeliveryTerminal } from '../src/DeliveryOutcome';
+import { DeliveryOutputSettlement } from '../src/DeliveryOperation';
 import {
-    BatchId,
-    CompleteDelivery,
-    DeliveryAccessToken,
-    FailDelivery,
-    DeliveryOutcome,
-    DeliveryOutputSettlement,
-    DeliveryTerminal,
-    MailboxBackendMemory,
-    MailboxProcessingBackend,
-    PreparedDeliveryInvocation,
-    ProviderEventHandled,
     applyDeliverySlotMutation,
     claimDeliveryOutput,
     claimFrozenBatch,
     emptyDeliverySlot,
     handOffDeliverySlot,
-    makeDeliveryId,
-    parseDeliveryId,
     prepareDeliverySlot,
-    processClaim,
     readDeliverySlotStatus,
     recordDeliveryAttempt,
     settleDeliveryOutput,
     startDeliveryBatch,
-    toClaimedDeliveryOutput,
-    type DeliveryContext,
-    type DeliveryMutation,
     type DeliverySlot,
-    type ProviderEventProcessor,
-} from '../src';
+} from '../src/DeliveryLifecycle';
+import { CompleteDelivery, FailDelivery, type DeliveryMutation } from '../src/DeliveryControl';
+import { PreparedDeliveryInvocation, type DeliveryContext } from '../src/DeliveryContext';
 import { claimAll, claimFrozen, deliver, event, findWaiting, mailboxKey } from './backend-contract';
 
 const tokens = ['first-token', 'second-token', 'third-token'] as const;
@@ -82,7 +72,7 @@ const finish = (slot: DeliverySlot, succeeded = true, claimId = 'claim-0') =>
 const reference = (callbackIndex: number) =>
     Option.getOrThrow(
         parseDeliveryId(
-            makeDeliveryId({
+            formatDeliveryId({
                 mailboxKey,
                 batchId: BatchId.make('sequence'),
                 callbackIndex,
@@ -230,7 +220,7 @@ describe('sequential callbacks', () => {
                 expect(retry.claimed).toMatchObject({ callbackIndex: 1, attempt: 2 });
                 slot = yield* finish(retry.slot, true, 'retry-1');
                 expect(slot.active).toMatchObject({ callbackIndex: 2, accessToken: tokens[2], attempt: 0 });
-                expect(slot.retained.map(({ callbackIndex }) => callbackIndex)).toEqual([0, 1]);
+                expect(Arr.map(slot.retained, ({ callbackIndex }) => callbackIndex)).toEqual([0, 1]);
 
                 const last = claimFrozenBatch(slot, {
                     claimId: 'claim-2',
@@ -241,7 +231,7 @@ describe('sequential callbacks', () => {
 
                 slot = yield* finish(last.slot, true, 'claim-2');
                 expect(slot.active).toBeNull();
-                expect(slot.retained.map(({ callbackIndex }) => callbackIndex)).toEqual([0, 1, 2]);
+                expect(Arr.map(slot.retained, ({ callbackIndex }) => callbackIndex)).toEqual([0, 1, 2]);
             }),
     );
 
@@ -274,7 +264,7 @@ describe('sequential callbacks', () => {
                     idempotencyKey: 'projection-key',
                 });
 
-                if (output.claimed === null) return yield* Effect.die(new Error('expected output'));
+                assert.isNotNull(output.claimed, 'expected output');
 
                 const projected = toClaimedDeliveryOutput({
                     mailboxKey,
@@ -404,58 +394,60 @@ describe('sequential callbacks', () => {
         }),
     );
 
-    it.effect(
-        'generates and persists a unique random token for each remaining callback and uses indexed execution IDs',
-        ({ expect }) =>
-            Effect.gen(function* () {
-                const contexts = yield* Queue.unbounded<{
-                    readonly index: number;
-                    readonly context: DeliveryContext;
-                }>();
+    layer(Layer.merge(MailboxBackendMemory, NodeCrypto.layer))((it) => {
+        it.effect(
+            'generates and persists a unique random token for each remaining callback and uses indexed execution IDs',
+            ({ expect }) =>
+                Effect.gen(function* () {
+                    const contexts = yield* Queue.unbounded<{
+                        readonly index: number;
+                        readonly context: DeliveryContext;
+                    }>();
 
-                const processor: ProviderEventProcessor = {
-                    namespace: 'contract',
-                    providerName: 'example',
-                    process: (_admissions, execution) =>
-                        Effect.gen(function* () {
-                            yield* execution.prepare(prepared);
-                            yield* Queue.offer(contexts, {
-                                index: execution.callbackIndex,
-                                context: execution.context,
-                            });
+                    const processor: ProviderEventProcessor = {
+                        namespace: 'contract',
+                        providerName: 'example',
+                        process: (_admissions, execution) =>
+                            Effect.gen(function* () {
+                                yield* execution.prepare(prepared);
+                                yield* Queue.offer(contexts, {
+                                    index: execution.callbackIndex,
+                                    context: execution.context,
+                                });
 
-                            return ProviderEventHandled.make({});
-                        }).pipe(Effect.orDie),
-                };
+                                return ProviderEventHandled.make({});
+                            }).pipe(Effect.orDie),
+                    };
 
-                yield* deliver('first');
-                let claim = yield* claimAll(yield* findWaiting);
-                const initialToken = claim.accessToken;
-                const seenTokens = new Set<string>();
-                const seenIds = new Set<string>();
+                    yield* deliver('first');
+                    let claim = yield* claimAll(yield* findWaiting);
+                    const initialToken = claim.accessToken;
+                    const seenTokens = new Set<string>();
+                    const seenIds = new Set<string>();
 
-                for (const index of [0, 1, 2]) {
-                    expect(claim.callbackIndex).toBe(index);
-                    yield* processClaim({ claim, maxAttempts: 5, leaseMs: 100, processors: [processor] });
-                    const recorded = yield* Queue.take(contexts);
-                    expect(recorded.index).toBe(index);
-                    expect(recorded.context.deliveryId).toBe(
-                        makeDeliveryId({ mailboxKey, batchId: claim.batchId, callbackIndex: index }),
-                    );
-                    const token = Redacted.value(recorded.context.accessToken);
-                    expect(token).toBe(claim.accessToken);
+                    for (const index of [0, 1, 2]) {
+                        expect(claim.callbackIndex).toBe(index);
+                        yield* processClaim({ claim, maxAttempts: 5, leaseMs: 100, processors: [processor] });
+                        const recorded = yield* Queue.take(contexts);
+                        expect(recorded.index).toBe(index);
+                        expect(recorded.context.deliveryId).toBe(
+                            formatDeliveryId({ mailboxKey, batchId: claim.batchId, callbackIndex: index }),
+                        );
+                        const token = Redacted.value(recorded.context.accessToken);
+                        expect(token).toBe(claim.accessToken);
 
-                    if (index === 0) expect(token).toBe(initialToken);
-                    else expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-                    seenTokens.add(token);
-                    seenIds.add(recorded.context.deliveryId);
+                        if (index === 0) expect(token).toBe(initialToken);
+                        else expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+                        seenTokens.add(token);
+                        seenIds.add(recorded.context.deliveryId);
 
-                    if (index < 2) claim = Option.getOrThrow(yield* claimFrozen);
-                }
+                        if (index < 2) claim = Option.getOrThrow(yield* claimFrozen);
+                    }
 
-                expect(seenTokens.size).toBe(3);
-                expect(seenIds.size).toBe(3);
-                expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toEqual([]);
-            }).pipe(Effect.provide(MailboxBackendMemory), Effect.provide(NodeCrypto.layer)),
-    );
+                    expect(seenTokens.size).toBe(3);
+                    expect(seenIds.size).toBe(3);
+                    expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toEqual([]);
+                }),
+        );
+    });
 });

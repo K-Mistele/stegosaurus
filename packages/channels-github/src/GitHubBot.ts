@@ -1,7 +1,8 @@
 /**
  * This file defines `GitHubBot.make`: the GitHub provider as `Channels.make` takes it.
  */
-import { type ChannelsProvider, type DeliveryMode } from '@stegosaurus/channels-delivery';
+import { type DeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { type ChannelsProvider } from '@stegosaurus/channels-delivery/ChannelsProvider';
 import { Effect, Schema } from 'effect';
 import type { Config, Redacted } from 'effect';
 

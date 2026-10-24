@@ -5,7 +5,7 @@
  * The two halves it is made of are exported too, for hosts that run them in different places.
  * A Cloudflare Worker serves `routesLayer` while its Durable Object runs `processingLayer`.
  */
-import { Context, Crypto, Effect, Exit, Layer, Predicate, Scope } from 'effect';
+import { Array as Arr, Context, Crypto, Effect, Exit, Layer, Option, Predicate, Scope } from 'effect';
 import { HttpEffect, HttpRouter } from 'effect/http';
 
 import type { ChannelsProvider, ChannelsProviderRequirements } from './ChannelsProvider';
@@ -68,20 +68,6 @@ export const routesLayer = <const Requirements extends ReadonlyArray<ChannelsPro
     );
 };
 
-const deliveryModeForProviders =
-    (
-        providers: ReadonlyArray<{
-            readonly providerName: string;
-            readonly deliveryMode: DeliveryMode;
-        }>,
-    ) =>
-    (providerName: string): DeliveryMode => {
-        const provider = providers.find((candidate) => candidate.providerName === providerName);
-
-        /** A mailbox for a provider this bot does not have runs at once and fails as "processor not found". */
-        return Predicate.isUndefined(provider) ? QueueDeliveryMode.make({}) : provider.deliveryMode;
-    };
-
 /** The processing options for a bot's mailboxes. */
 export const processingOptions = <const Requirements extends ReadonlyArray<ChannelsProviderRequirements>>(
     options: Options<Requirements>,
@@ -89,7 +75,15 @@ export const processingOptions = <const Requirements extends ReadonlyArray<Chann
 ): MailboxProcessingOptions => ({
     ...options.eventProcessing,
     polling,
-    deliveryModeFor: deliveryModeForProviders(options.providers),
+    /** A mailbox for a provider this bot does not have runs at once and fails as "processor not found". */
+    deliveryModeFor: (providerName: string): DeliveryMode =>
+        Option.match(
+            Arr.findFirst(options.providers, (candidate) => candidate.providerName === providerName),
+            {
+                onNone: () => QueueDeliveryMode.make({}),
+                onSome: (provider) => provider.deliveryMode,
+            },
+        ),
 });
 
 /** Build each provider's event processor, and its output processor when it has one. */
@@ -187,7 +181,9 @@ export const make = <
      * The delivery API. Mount it beside `routes` to let remote workers finish handed-off deliveries.
      * It needs a store that provides `DeliveryControlBackend`; with any other store it does not compile.
      */
-    const deliveryApi = deliveryApiRoutes(options).pipe(Layer.provide(DeliveryControl.layer), Layer.provide(layer));
+    const deliveryApi = deliveryApiRoutes(options).pipe(
+        Layer.provide(Layer.provideMerge(DeliveryControl.layer, layer)),
+    );
 
     /**
      * Serve `routes`, and any `extraRoutes` such as `bot.deliveryApi`, outside an Effect program.

@@ -1,7 +1,9 @@
 /**
  * This file defines `SlackBot.make`: the Slack provider as `Channels.make` takes it.
  */
-import { type ChannelsProvider, type DeliveryMode, type RawWebhookInput } from '@stegosaurus/channels-delivery';
+import { type RawWebhookInput } from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { type DeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { type ChannelsProvider } from '@stegosaurus/channels-delivery/ChannelsProvider';
 import { Effect } from 'effect';
 import type { Config, Redacted } from 'effect';
 

@@ -7,7 +7,7 @@ import {
     MailboxSubscriptionAlreadyExistsResult,
     type MailboxSubscriptionOperation,
     MailboxSubscriptions,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxSubscriptions';
 import { Effect, Layer, Schema } from 'effect';
 import * as SqlClient from 'effect/sql/SqlClient';
 import * as SqlError from 'effect/sql/SqlError';

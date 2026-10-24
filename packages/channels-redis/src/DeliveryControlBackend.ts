@@ -9,15 +9,14 @@
  *
  * The delivery ID names the mailbox, so a request goes straight to its keys with no lookup.
  */
+import { applyDeliverySlotMutation, readDeliverySlotStatus } from '@stegosaurus/channels-delivery/DeliveryLifecycle';
 import {
     DeliveryControlBackend,
     DeliveryControlUnavailable,
     DeliveryNotFound,
-    applyDeliverySlotMutation,
-    readDeliverySlotStatus,
     type ApplyDeliveryMutation,
     type ReadDeliveryStatus,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryControl';
 import { Clock, Effect, Layer, Option } from 'effect';
 import * as Redis from 'effect/persistence/Redis';
 

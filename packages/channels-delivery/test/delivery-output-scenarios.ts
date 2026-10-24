@@ -5,28 +5,23 @@
  */
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { it } from '@effect/vitest';
-import { Effect, Layer, Option, Queue, Redacted, Ref } from 'effect';
+import { Array as Arr, Effect, Layer, Option, Queue, Redacted, Ref } from 'effect';
 import { TestClock } from 'effect/testing';
 
 import {
-    CompleteDelivery,
-    DeliveryAdmission,
-    DeliveryControlBackend,
     DeliveryOutputApplied,
     DeliveryOutputFailed,
-    ExternalLink,
-    MailboxDelivery,
-    MailboxProcessing,
-    type MailboxProcessingBackend,
-    PreparedDeliveryInvocation,
-    ProviderEventHandled,
-    QueueDeliveryMode,
-    parseDeliveryId,
-    type DeliveryId,
-    type ProviderEventProcessor,
     type ProviderOutputAttempt,
     type ProviderOutputProcessor,
-} from '../src';
+} from '../src/ProviderOutput';
+import { ProviderEventHandled, type ProviderEventProcessor } from '../src/ProviderEventProcessing';
+import { MailboxProcessing, type MailboxProcessingBackend } from '../src/MailboxProcessing';
+import { QueueDeliveryMode } from '../src/MailboxPolicy';
+import { DeliveryAdmission, MailboxDelivery } from '../src/MailboxDelivery';
+import { parseDeliveryId, type DeliveryId } from '../src/DeliveryReference';
+import { ExternalLink } from '../src/DeliveryLink';
+import { CompleteDelivery, DeliveryControlBackend, DeliveryOperationUnsupported } from '../src/DeliveryControl';
+import { PreparedDeliveryInvocation } from '../src/DeliveryContext';
 
 const admission = DeliveryAdmission.make({
     namespace: 'test',
@@ -35,51 +30,6 @@ const admission = DeliveryAdmission.make({
     resourceId: 'thread-1',
     eventId: 'a',
     payload: null,
-});
-
-/** Every batch prepares, unless told not to, then hands itself off and reports its delivery. */
-const handingOffProcessor = (input: {
-    readonly deliveries: Queue.Queue<{
-        readonly deliveryId: DeliveryId;
-        readonly accessToken: string;
-    }>;
-    readonly callbacks: Ref.Ref<number>;
-    readonly prepare: boolean;
-}): ProviderEventProcessor => ({
-    namespace: 'test',
-    providerName: 'example',
-    process: (_admissions, execution) =>
-        Effect.gen(function* () {
-            yield* Ref.update(input.callbacks, (count) => count + 1);
-
-            if (input.prepare) {
-                yield* execution.prepare(
-                    PreparedDeliveryInvocation.make({
-                        callbacks: [
-                            {
-                                name: 'onEvent',
-                                presentationVersion: 1,
-                                destination: { thread: 'thread-1' },
-                                supportedOperations: ['PresentOutcome'],
-                            },
-                        ],
-                    }),
-                );
-            }
-
-            /** An unprepared delivery hands off with a link, the one output it can still owe. */
-            yield* execution.context.handoff(
-                input.prepare
-                    ? undefined
-                    : { links: [ExternalLink.make({ label: 'Run', url: 'https://example.com/run/1' })] },
-            );
-            yield* Queue.offer(input.deliveries, {
-                deliveryId: execution.deliveryId,
-                accessToken: Redacted.value(execution.context.accessToken),
-            });
-
-            return ProviderEventHandled.make({});
-        }).pipe(Effect.orDie),
 });
 
 /** An output processor that records attempts and answers each with the next scripted result. */
@@ -96,7 +46,7 @@ const scriptedProcessor = (
 
             if (next === 'applied') return DeliveryOutputApplied.make({});
 
-            return yield* new DeliveryOutputFailed({
+            return yield* DeliveryOutputFailed.make({
                 provider: 'example',
                 retryable: next === 'retryable',
                 safeCode: next === 'retryable' ? 'example_unavailable' : 'example_refused',
@@ -120,8 +70,47 @@ const setup = <E>(options: {
 
         const attempts = yield* Queue.unbounded<ProviderOutputAttempt>();
         const callbacks = yield* Ref.make(0);
+        const prepare = options.prepare ?? true;
 
-        const layer = MailboxProcessing.layer(
+        /** Every batch prepares, unless told not to, then hands itself off and reports its delivery. */
+        const processor: ProviderEventProcessor = {
+            namespace: 'test',
+            providerName: 'example',
+            process: (_admissions, execution) =>
+                Effect.gen(function* () {
+                    yield* Ref.update(callbacks, (count) => count + 1);
+
+                    if (prepare) {
+                        yield* execution.prepare(
+                            PreparedDeliveryInvocation.make({
+                                callbacks: [
+                                    {
+                                        name: 'onEvent',
+                                        presentationVersion: 1,
+                                        destination: { thread: 'thread-1' },
+                                        supportedOperations: ['PresentOutcome'],
+                                    },
+                                ],
+                            }),
+                        );
+                    }
+
+                    /** An unprepared delivery hands off with a link, the one output it can still owe. */
+                    yield* execution.context.handoff(
+                        prepare
+                            ? undefined
+                            : { links: [ExternalLink.make({ label: 'Run', url: 'https://example.com/run/1' })] },
+                    );
+                    yield* Queue.offer(deliveries, {
+                        deliveryId: execution.deliveryId,
+                        accessToken: Redacted.value(execution.context.accessToken),
+                    });
+
+                    return ProviderEventHandled.make({});
+                }).pipe(Effect.orDie),
+        };
+
+        const processing = MailboxProcessing.layer(
             {
                 concurrency: 1,
                 leaseMs: 30_000,
@@ -130,10 +119,12 @@ const setup = <E>(options: {
                 polling: 'disabled',
             },
             {
-                events: [handingOffProcessor({ deliveries, callbacks, prepare: options.prepare ?? true })],
+                events: [processor],
                 outputs: options.output(attempts),
             },
-        ).pipe(Layer.provide(NodeCrypto.layer), Layer.provideMerge(options.store));
+        );
+
+        const layer = Layer.provideMerge(processing, Layer.merge(options.store, NodeCrypto.layer));
 
         return { deliveries, attempts, callbacks, layer };
     });
@@ -204,7 +195,7 @@ export const deliveryOutputScenarios = <E>(storeName: string, makeEmptyStore: ()
                         },
                     ]);
                     expect(yield* Ref.get(callbacks)).toBe(1);
-                }).pipe(Effect.provide(layer));
+                }).pipe(Effect.provide(yield* Layer.build(layer)));
             }),
     );
 
@@ -223,7 +214,7 @@ export const deliveryOutputScenarios = <E>(storeName: string, makeEmptyStore: ()
                 yield* Queue.take(attempts);
                 expect((yield* status).output[0]?.state).toBe('Failed');
                 expect((yield* status).stage).toBe('Retired');
-            }).pipe(Effect.provide(layer));
+            }).pipe(Effect.provide(yield* Layer.build(layer)));
         }),
     );
 
@@ -241,7 +232,7 @@ export const deliveryOutputScenarios = <E>(storeName: string, makeEmptyStore: ()
                     yield* processReady;
                     expect((yield* status).stage).toBe('Retired');
                     expect((yield* status).output[0]?.state).toBe('Failed');
-                }).pipe(Effect.provide(layer));
+                }).pipe(Effect.provide(yield* Layer.build(layer)));
             }),
     );
 
@@ -272,10 +263,7 @@ export const deliveryOutputScenarios = <E>(storeName: string, makeEmptyStore: ()
                         })
                         .pipe(Effect.flip);
 
-                    expect(refused).toMatchObject({
-                        _tag: 'DeliveryOperationUnsupported',
-                        operation: 'PresentOutcome',
-                    });
+                    expect(refused).toEqual(DeliveryOperationUnsupported.make({ operation: 'PresentOutcome' }));
                     yield* processReady;
 
                     const status = yield* control.readDeliveryStatus({
@@ -283,11 +271,11 @@ export const deliveryOutputScenarios = <E>(storeName: string, makeEmptyStore: ()
                         accessToken: delivery.accessToken,
                     });
 
-                    expect(status.output.map(({ kind, state }) => `${kind}:${state}`)).toEqual([
+                    expect(Arr.map(status.output, ({ kind, state }) => `${kind}:${state}`)).toEqual([
                         'AddExternalLink:Failed',
                     ]);
                     expect(yield* Queue.size(attempts)).toBe(0);
-                }).pipe(Effect.provide(layer));
+                }).pipe(Effect.provide(yield* Layer.build(layer)));
             }),
     );
 };

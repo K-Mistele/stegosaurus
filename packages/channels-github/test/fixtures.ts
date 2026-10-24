@@ -4,15 +4,12 @@ import * as NodeHttp from 'node:http';
 import { NodeCrypto, NodeHttpServer } from '@effect/platform-node';
 import { createServer } from '@emulators/core';
 import { getGitHubStore, githubPlugin, seedFromConfig, type GitHubSeedConfig } from '@emulators/github';
+import { webhookRoutes, type RawWebhookInput } from '@stegosaurus/channels-delivery/ProviderWebhooks';
 import {
-    DeliveryAdmission,
-    DeliveryReceipt,
-    MailboxDelivery,
     processProviderEvent,
     type ProviderEventProcessor,
-    webhookRoutes,
-    type RawWebhookInput,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { DeliveryAdmission, DeliveryReceipt, MailboxDelivery } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Context, Effect, Layer, Match, Predicate, Queue, Redacted, Schema } from 'effect';
 import {
     FetchHttpClient,
@@ -473,7 +470,7 @@ export const makeGitHubEmulatorFixture = (options: GitHubEmulatorFixtureOptions)
 
         const callbackUrl = yield* serveOnLoopback(
             HttpRouter.serve(
-                webhookRoutes([provider]).pipe(
+                webhookRoutes([provider], {}).pipe(
                     HttpRouter.provideRequest(
                         Layer.merge(NodeCrypto.layer, Layer.succeed(MailboxDelivery, options.mailboxDelivery)),
                     ),

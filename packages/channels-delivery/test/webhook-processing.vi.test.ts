@@ -2,17 +2,19 @@ import { describe, it } from '@effect/vitest';
 import { Effect, Ref } from 'effect';
 
 import {
-    DeliveryAdmission,
-    DeliveryReceipt,
-    MailboxDeliveryRejected,
-    MailboxDeliveryUnavailable,
     ProviderWebhookEvent,
     ProviderWebhookEvents,
     ProviderWebhookIgnored,
     ProviderWebhookResponse,
     WebhookAuthenticationError,
     WebhookPayloadInvalidError,
-} from '../src';
+} from '../src/ProviderWebhooks';
+import {
+    DeliveryAdmission,
+    DeliveryReceipt,
+    MailboxDeliveryRejected,
+    MailboxDeliveryUnavailable,
+} from '../src/MailboxDelivery';
 import { makeWebhookTestApp } from './mocks';
 
 const admission = DeliveryAdmission.make({
@@ -80,10 +82,12 @@ describe('ProviderWebhook routing tests', () => {
             const app = yield* makeWebhookTestApp(
                 () => Effect.succeed(ProviderWebhookEvents.make({ events: [admission, second] })),
                 {
-                    deliver: (event) =>
-                        Ref.update(delivered, (eventIds) => [...eventIds, event.eventId]).pipe(
-                            Effect.as(DeliveryReceipt.make({ mailboxKey: event.resourceId, accepted: true })),
-                        ),
+                    mailboxDelivery: {
+                        deliver: (event) =>
+                            Ref.update(delivered, (eventIds) => [...eventIds, event.eventId]).pipe(
+                                Effect.as(DeliveryReceipt.make({ mailboxKey: event.resourceId, accepted: true })),
+                            ),
+                    },
                 },
             );
 
@@ -97,7 +101,7 @@ describe('ProviderWebhook routing tests', () => {
     it.effect('Authentication errors return a 401', ({ expect }) =>
         Effect.gen(function* () {
             const app = yield* makeWebhookTestApp(() =>
-                Effect.fail(new WebhookAuthenticationError({ reason: 'test authentication failure' })),
+                Effect.fail(WebhookAuthenticationError.make({ reason: 'test authentication failure' })),
             );
 
             const response = yield* app.post();
@@ -110,7 +114,7 @@ describe('ProviderWebhook routing tests', () => {
     it.effect('Invalid payload errors return a 400', ({ expect }) =>
         Effect.gen(function* () {
             const app = yield* makeWebhookTestApp(() =>
-                Effect.fail(new WebhookPayloadInvalidError({ reason: 'test payload failure' })),
+                Effect.fail(WebhookPayloadInvalidError.make({ reason: 'test payload failure' })),
             );
 
             const response = yield* app.post();
@@ -125,7 +129,10 @@ describe('ProviderWebhook routing tests', () => {
             const app = yield* makeWebhookTestApp(
                 () => Effect.succeed(ProviderWebhookEvent.make({ event: admission })),
                 {
-                    deliver: () => Effect.fail(new MailboxDeliveryUnavailable({ reason: 'test delivery failure' })),
+                    mailboxDelivery: {
+                        deliver: () =>
+                            Effect.fail(MailboxDeliveryUnavailable.make({ reason: 'test delivery failure' })),
+                    },
                 },
             );
 
@@ -141,7 +148,9 @@ describe('ProviderWebhook routing tests', () => {
             const app = yield* makeWebhookTestApp(
                 () => Effect.succeed(ProviderWebhookEvent.make({ event: admission })),
                 {
-                    deliver: () => Effect.fail(new MailboxDeliveryRejected({ reason: 'test queue rejection' })),
+                    mailboxDelivery: {
+                        deliver: () => Effect.fail(MailboxDeliveryRejected.make({ reason: 'test queue rejection' })),
+                    },
                 },
             );
 
@@ -168,8 +177,7 @@ describe('ProviderWebhook routing tests', () => {
 
             const app = yield* makeWebhookTestApp(
                 () => Ref.set(called, true).pipe(Effect.as(ProviderWebhookIgnored.make({}))),
-                undefined,
-                4,
+                { maxBodyBytes: 4 },
             );
 
             const response = yield* app.post('example', '12345');

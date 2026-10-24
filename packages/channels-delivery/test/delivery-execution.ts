@@ -6,17 +6,15 @@
  */
 import { Effect, Option, Redacted, Ref, Schema } from 'effect';
 
+import { BatchId, mailboxConversationId, formatDeliveryId } from '../src/DeliveryReference';
 import {
-    BatchId,
     DeliveryContext,
     DeliveryHandoff,
     DeliveryPreparationConflict,
     PreparedDeliveryInvocation,
     ProviderDeliveryExecution,
-    makeConversationId,
-    makeDeliveryId,
     type HandoffOptions,
-} from '../src';
+} from '../src/DeliveryContext';
 
 /** The idempotency key every test execution carries: stable across attempts, as in a real store. */
 export const TEST_DELIVERY_IDEMPOTENCY_KEY = '00000000-0000-4000-8000-00000000d11e';
@@ -37,7 +35,7 @@ const make = (input: {
     readonly saved: Ref.Ref<Option.Option<PreparedDeliveryInvocation>>;
 }): Effect.Effect<TestDeliveryExecution> =>
     Effect.gen(function* () {
-        const deliveryId = makeDeliveryId({
+        const deliveryId = formatDeliveryId({
             mailboxKey: input.mailboxKey,
             batchId: BatchId.make('test-batch'),
         });
@@ -64,11 +62,11 @@ const make = (input: {
 
                     return Schema.toEquivalence(PreparedDeliveryInvocation)(current.value, proposed)
                         ? current.value
-                        : yield* new DeliveryPreparationConflict({ deliveryId });
+                        : yield* DeliveryPreparationConflict.make({ deliveryId });
                 }),
             context: new DeliveryContext({
                 deliveryId,
-                conversationId: makeConversationId(input.mailboxKey),
+                conversationId: mailboxConversationId(input.mailboxKey),
                 accessToken: Redacted.make('test-access-token'),
                 handoff: (options) =>
                     Ref.update(handoffs, (all) => [...all, options]).pipe(

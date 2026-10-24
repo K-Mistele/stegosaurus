@@ -1,14 +1,12 @@
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { describe, it } from '@effect/vitest';
-import {
-    Channels,
-    ChannelsMemory,
-    DeliveryActivity,
-    MessageId,
-    QueueDeliveryMode,
-    makeDeliveryClient,
-    type DeliveryContext,
-} from '@stegosaurus/channels-delivery';
+import { QueueDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { MessageId } from '@stegosaurus/channels-delivery/DeliveryMessage';
+import * as DeliveryHttpClient from '@stegosaurus/channels-delivery/DeliveryHttpClient';
+import { type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
+import { DeliveryActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
+import * as Channels from '@stegosaurus/channels-delivery/Channels';
+import * as ChannelsMemory from '@stegosaurus/channels-delivery/ChannelsMemory';
 import { Clock, Config, Deferred, Effect, Layer, Queue, Redacted, Ref, Schedule } from 'effect';
 import { FetchHttpClient, HttpRouter, HttpServerRequest } from 'effect/http';
 import { TestClock } from 'effect/testing';
@@ -196,7 +194,7 @@ const handOffMention = (slackApi: Layer.Layer<SlackApi>) =>
 
         const delivery = yield* Queue.take(contexts);
 
-        const client = yield* makeDeliveryClient({
+        const client = yield* DeliveryHttpClient.make({
             baseUrl: 'http://localhost',
             basePath: '/api/channels',
         }).pipe(

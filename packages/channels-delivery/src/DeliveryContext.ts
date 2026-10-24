@@ -100,35 +100,38 @@ export const DeliveryStage = Schema.Literals([
 export type DeliveryStage = typeof DeliveryStage.Type;
 
 /** The store cannot hand deliveries off yet. */
-export class DeliveryHandoffUnsupported extends Schema.TaggedError<DeliveryHandoffUnsupported>()(
-    'DeliveryHandoffUnsupported',
-    {},
-) {}
+export class DeliveryHandoffUnsupported extends Schema.TaggedError<
+    DeliveryHandoffUnsupported,
+    { readonly brand: unique symbol }
+>()('DeliveryHandoffUnsupported', {}) {}
 
 /** The delivery can no longer be handed off: its claim was lost, or it already ended. */
-export class DeliveryHandoffRejected extends Schema.TaggedError<DeliveryHandoffRejected>()('DeliveryHandoffRejected', {
+export class DeliveryHandoffRejected extends Schema.TaggedError<
+    DeliveryHandoffRejected,
+    { readonly brand: unique symbol }
+>()('DeliveryHandoffRejected', {
     deliveryId: DeliveryId,
 }) {}
 
 /** The store could not be reached. */
-export class DeliveryHandoffUnavailable extends Schema.TaggedError<DeliveryHandoffUnavailable>()(
-    'DeliveryHandoffUnavailable',
-    { reason: Schema.String },
-) {}
+export class DeliveryHandoffUnavailable extends Schema.TaggedError<
+    DeliveryHandoffUnavailable,
+    { readonly brand: unique symbol }
+>()('DeliveryHandoffUnavailable', { reason: Schema.String }) {}
 
 export type DeliveryHandoffError = DeliveryHandoffUnsupported | DeliveryHandoffRejected | DeliveryHandoffUnavailable;
 
 /** The batch already runs a different callback, or its claim was lost. The provider must not run anything. */
-export class DeliveryPreparationConflict extends Schema.TaggedError<DeliveryPreparationConflict>()(
-    'DeliveryPreparationConflict',
-    { deliveryId: DeliveryId },
-) {}
+export class DeliveryPreparationConflict extends Schema.TaggedError<
+    DeliveryPreparationConflict,
+    { readonly brand: unique symbol }
+>()('DeliveryPreparationConflict', { deliveryId: DeliveryId }) {}
 
 /** The store could not be reached while saving the preparation. */
-export class DeliveryPreparationUnavailable extends Schema.TaggedError<DeliveryPreparationUnavailable>()(
-    'DeliveryPreparationUnavailable',
-    { reason: Schema.String },
-) {}
+export class DeliveryPreparationUnavailable extends Schema.TaggedError<
+    DeliveryPreparationUnavailable,
+    { readonly brand: unique symbol }
+>()('DeliveryPreparationUnavailable', { reason: Schema.String }) {}
 
 export type DeliveryPreparationError = DeliveryPreparationConflict | DeliveryPreparationUnavailable;
 

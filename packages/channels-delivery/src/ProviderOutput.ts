@@ -6,7 +6,7 @@
  * ran, never storage. `processProviderOutput` picks the processor of the provider that owns the
  * delivery.
  */
-import { Effect, Predicate, Schema } from 'effect';
+import { Array as Arr, Effect, Option, Schema } from 'effect';
 
 import { SetActivity } from './DeliveryActivity';
 import { PreparedDeliveryCallback } from './DeliveryContext';
@@ -76,20 +76,26 @@ export const DeliveryOutputApplied = Schema.TaggedStruct('DeliveryOutputApplied'
 export type DeliveryOutputApplied = typeof DeliveryOutputApplied.Type;
 
 /** The provider could not apply the operation. A retryable failure runs again later; others give up. */
-export class DeliveryOutputFailed extends Schema.TaggedError<DeliveryOutputFailed>()('DeliveryOutputFailed', {
-    provider: Schema.NonEmptyString,
-    retryable: Schema.Boolean,
-    safeCode: Schema.NonEmptyString,
-    retryAfterMs: Schema.optionalKey(
-        Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
-    ),
-}) {}
+export class DeliveryOutputFailed extends Schema.TaggedError<DeliveryOutputFailed, { readonly brand: unique symbol }>()(
+    'DeliveryOutputFailed',
+    {
+        provider: Schema.NonEmptyString,
+        retryable: Schema.Boolean,
+        safeCode: Schema.NonEmptyString,
+        retryAfterMs: Schema.optionalKey(
+            Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
+        ),
+    },
+) {}
 
 /** No provider in this bot sends output for the delivery's provider. */
-export class ProviderOutputProcessorNotFound extends Schema.TaggedError<ProviderOutputProcessorNotFound>()(
-    'ProviderOutputProcessorNotFound',
-    { namespace: Schema.NonEmptyString, provider: Schema.NonEmptyString },
-) {}
+export class ProviderOutputProcessorNotFound extends Schema.TaggedError<
+    ProviderOutputProcessorNotFound,
+    { readonly brand: unique symbol }
+>()('ProviderOutputProcessorNotFound', {
+    namespace: Schema.NonEmptyString,
+    provider: Schema.NonEmptyString,
+}) {}
 
 /** One provider's output half. `R` is what it needs while it sends, such as the provider's API client. */
 export type ProviderOutputProcessor<R = never> = {
@@ -105,16 +111,17 @@ export const processProviderOutput = <R = never>(processors: ReadonlyArray<Provi
         readonly provider: string;
         readonly attempt: ProviderOutputAttempt;
     }) {
-        const processor = processors.find(
+        const processor = Arr.findFirst(
+            processors,
             (candidate) => candidate.namespace === input.namespace && candidate.providerName === input.provider,
         );
 
-        if (Predicate.isUndefined(processor)) {
-            return yield* new ProviderOutputProcessorNotFound({
+        if (Option.isNone(processor)) {
+            return yield* ProviderOutputProcessorNotFound.make({
                 namespace: input.namespace,
                 provider: input.provider,
             });
         }
 
-        return yield* processor.process(input.attempt);
+        return yield* processor.value.process(input.attempt);
     });

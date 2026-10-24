@@ -6,28 +6,25 @@
  *
  * Store tests call `mailboxBackendContract` with a layer that starts from an empty store.
  */
-import { it } from '@effect/vitest';
-import { Clock, Effect, Match, Option, type Layer } from 'effect';
+import { layer } from '@effect/vitest';
+import { Array as Arr, Clock, Effect, Match, Option, Order, type Layer } from 'effect';
 import { TestClock } from 'effect/testing';
 import { expect } from 'vite-plus/test';
 
 import {
-    BatchId,
     ClaimFrozenBatch,
     ClaimWaitingEvents,
-    DeliveryAccessToken,
-    PreparedDeliveryInvocation,
-    DeliveryAdmission,
-    MailboxDelivery,
     MailboxProcessingAttemptCompleted,
     MailboxProcessingAttemptRetryableFailure,
     MailboxProcessingBackend,
     RecoverableMailbox,
-    Timestamp,
-    deliveryMailboxKey,
     type ClaimedMailboxBatch,
     type WaitingMailbox,
-} from '../src';
+} from '../src/MailboxProcessing';
+import { Timestamp } from '../src/MailboxPolicy';
+import { DeliveryAdmission, MailboxDelivery, deliveryMailboxKey } from '../src/MailboxDelivery';
+import { BatchId, DeliveryAccessToken } from '../src/DeliveryReference';
+import { PreparedDeliveryInvocation } from '../src/DeliveryContext';
 
 export const leaseMs = 1_000;
 
@@ -43,7 +40,7 @@ export const event = (eventId: string, resourceId = 'thread-1') =>
 
 export const mailboxKey = deliveryMailboxKey(event('any'));
 
-export const deliver = (eventId: string, resourceId?: string) =>
+export const deliver = (eventId: string, resourceId = 'thread-1') =>
     Effect.gen(function* () {
         return yield* (yield* MailboxDelivery).deliver(event(eventId, resourceId));
     });
@@ -56,7 +53,7 @@ export const findReady = Effect.gen(function* () {
 export const findWaiting = Effect.gen(function* () {
     const ready = yield* findReady;
 
-    const [only] = ready.flatMap((mailbox) =>
+    const [only] = Arr.flatMap(ready, (mailbox) =>
         Match.value(mailbox).pipe(
             Match.tag('WaitingMailbox', (waiting) => [waiting]),
             Match.orElse(() => []),
@@ -116,7 +113,7 @@ export const settle = (claim: ClaimedMailboxBatch, result: 'completed' | { reado
         });
     });
 
-export const eventIds = (claim: ClaimedMailboxBatch) => claim.admissions.map(({ eventId }) => eventId);
+export const eventIds = (claim: ClaimedMailboxBatch) => Arr.map(claim.admissions, ({ eventId }) => eventId);
 
 export const preparation = (callback: string) =>
     PreparedDeliveryInvocation.make({
@@ -139,7 +136,10 @@ export const mailboxBackendContract = <E>(
     const contract = <TestError>(
         name: string,
         test: Effect.Effect<void, TestError, MailboxDelivery | MailboxProcessingBackend>,
-    ) => it.effect(`${storeName}: ${name}`, () => test.pipe(Effect.provide(makeEmptyStore())));
+    ) =>
+        layer(makeEmptyStore())((it) => {
+            it.effect(`${storeName}: ${name}`, () => test);
+        });
 
     contract(
         'reports what is waiting, with arrival times and growing sequence numbers',
@@ -340,11 +340,19 @@ export const mailboxBackendContract = <E>(
                 yield* deliver('a', 'thread-1');
                 yield* deliver('b', 'thread-2');
                 const ready = yield* findReady;
-                expect(ready.map(({ mailboxKey: key }) => key).toSorted()).toEqual(
-                    [deliveryMailboxKey(event('a', 'thread-1')), deliveryMailboxKey(event('b', 'thread-2'))].toSorted(),
+                expect(
+                    Arr.sort(
+                        Arr.map(ready, ({ mailboxKey: key }) => key),
+                        Order.String,
+                    ),
+                ).toEqual(
+                    Arr.sort(
+                        [deliveryMailboxKey(event('a', 'thread-1')), deliveryMailboxKey(event('b', 'thread-2'))],
+                        Order.String,
+                    ),
                 );
                 yield* claimUpTo(Number.MAX_SAFE_INTEGER);
-                expect((yield* findReady).map(({ mailboxKey: key }) => key)).toEqual([
+                expect(Arr.map(yield* findReady, ({ mailboxKey: key }) => key)).toEqual([
                     deliveryMailboxKey(event('b', 'thread-2')),
                 ]);
             }),

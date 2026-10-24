@@ -10,13 +10,16 @@
  *
  * Provider-specific behavior, such as activity or the exact API request, stays in each provider's tests.
  */
-import { describe, it } from '@effect/vitest';
-import { Effect, Result } from 'effect';
+import { assert, describe, it } from '@effect/vitest';
+import { Effect, Option, Predicate, Result } from 'effect';
 
 import {
-    AddExternalLink,
-    CreateMessage,
-    DeliveryOutcome,
+    ProviderPresentOutcome,
+    type DeliveryOutputApplied,
+    type DeliveryOutputFailed,
+    type ProviderOutputOperation,
+} from '../src/ProviderOutput';
+import {
     DeliveryPlan,
     DeliveryPlanItem,
     DeliveryPlanItemId,
@@ -24,15 +27,10 @@ import {
     ProviderRenderPlan,
     RenderedDeliveryPlan,
     deliveryPlanMarkdown,
-    ExternalLink,
-    MessageId,
-    ProviderDeleteMessage,
-    ProviderPresentOutcome,
-    ProviderUpdateMessage,
-    type DeliveryOutputApplied,
-    type DeliveryOutputFailed,
-    type ProviderOutputOperation,
-} from '../src';
+} from '../src/DeliveryPlan';
+import { DeliveryOutcome } from '../src/DeliveryOutcome';
+import { CreateMessage, MessageId, ProviderDeleteMessage, ProviderUpdateMessage } from '../src/DeliveryMessage';
+import { AddExternalLink, ExternalLink } from '../src/DeliveryLink';
 
 /**
  * How the fake provider answers every call of one attempt.
@@ -69,6 +67,9 @@ export type CommentOutputHarness = {
 const completed = DeliveryOutcome.cases.Completed.make({});
 
 const messageId = MessageId.make('progress');
+
+/** The failure of a run that failed. Throws, failing the test, when the run succeeded. */
+const failureOf = (run: CommentOutputRun) => Option.getOrThrow(Result.getFailure(run.result));
 
 /** The receipt of a successful run, which a later update or deletion receives as its reference. */
 const receiptOf = (run: CommentOutputRun) =>
@@ -126,7 +127,7 @@ export const commentOutputScenarios = (harness: CommentOutputHarness) =>
                 expect(created.shown).toEqual(['post: Running tests…']);
                 const reference = receiptOf(created);
 
-                if (reference === undefined) return expect.unreachable();
+                assert.isDefined(reference);
 
                 const edited = yield* harness.run(
                     ProviderUpdateMessage.make({ messageId, markdown: 'Tests passed.', reference }),
@@ -145,7 +146,7 @@ export const commentOutputScenarios = (harness: CommentOutputHarness) =>
             Effect.gen(function* () {
                 const reference = receiptOf(yield* harness.run(CreateMessage.make({ messageId, markdown: 'x' })));
 
-                if (reference === undefined) return expect.unreachable();
+                assert.isDefined(reference);
 
                 const removed = yield* harness.run(ProviderDeleteMessage.make({ messageId, reference }), {
                     fault: 'gone',
@@ -160,8 +161,7 @@ export const commentOutputScenarios = (harness: CommentOutputHarness) =>
                     },
                 );
 
-                if (!Result.isFailure(edited.result)) return expect.unreachable();
-                expect(edited.result.failure.retryable).toBe(false);
+                expect(failureOf(edited).retryable).toBe(false);
             }),
         );
 
@@ -171,15 +171,10 @@ export const commentOutputScenarios = (harness: CommentOutputHarness) =>
                 const outage = yield* harness.run(create, { fault: 'retryable' });
                 const refused = yield* harness.run(create, { fault: 'final' });
 
-                if (!Result.isFailure(outage.result) || !Result.isFailure(refused.result)) return expect.unreachable();
-                expect(outage.result.failure).toMatchObject({
-                    _tag: 'DeliveryOutputFailed',
-                    retryable: true,
-                });
-                expect(refused.result.failure).toMatchObject({
-                    _tag: 'DeliveryOutputFailed',
-                    retryable: false,
-                });
+                expect(Predicate.isTagged(failureOf(outage), 'DeliveryOutputFailed')).toBe(true);
+                expect(failureOf(outage).retryable).toBe(true);
+                expect(Predicate.isTagged(failureOf(refused), 'DeliveryOutputFailed')).toBe(true);
+                expect(failureOf(refused).retryable).toBe(false);
             }),
         );
 
@@ -191,8 +186,7 @@ export const commentOutputScenarios = (harness: CommentOutputHarness) =>
                         ProviderDeleteMessage.make({ messageId, reference: { something: 'else' } }),
                     );
 
-                    if (!Result.isFailure(unreadable.result)) return expect.unreachable();
-                    expect(unreadable.result.failure).toMatchObject({
+                    expect(failureOf(unreadable)).toMatchObject({
                         retryable: false,
                         safeCode: 'message_reference_invalid',
                     });
@@ -201,8 +195,7 @@ export const commentOutputScenarios = (harness: CommentOutputHarness) =>
                         futureVersion: true,
                     });
 
-                    if (!Result.isFailure(future.result)) return expect.unreachable();
-                    expect(future.result.failure).toMatchObject({
+                    expect(failureOf(future)).toMatchObject({
                         retryable: false,
                         safeCode: 'unsupported_presentation_version',
                     });
@@ -254,7 +247,7 @@ export const planCommentScenarios = (harness: CommentOutputHarness) =>
                     expect(first.shown).toEqual([`post: ${deliveryPlanMarkdown(firstPlan)}`]);
                     const presentation = receiptOf(first);
 
-                    if (presentation === undefined) return expect.unreachable();
+                    assert.isDefined(presentation);
 
                     const rendered = RenderedDeliveryPlan.make({
                         revision: 1,
@@ -284,9 +277,8 @@ export const planCommentScenarios = (harness: CommentOutputHarness) =>
                 const outage = yield* harness.run(render, { fault: 'retryable' });
                 const refused = yield* harness.run(render, { fault: 'final' });
 
-                if (!Result.isFailure(outage.result) || !Result.isFailure(refused.result)) return expect.unreachable();
-                expect(outage.result.failure.retryable).toBe(true);
-                expect(refused.result.failure.retryable).toBe(false);
+                expect(failureOf(outage).retryable).toBe(true);
+                expect(failureOf(refused).retryable).toBe(false);
             }),
         );
     });

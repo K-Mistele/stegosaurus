@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { SerialDeliveryMode } from '@stegosaurus/channels-delivery';
+import { SerialDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
 import { Config, ConfigProvider, Effect, Predicate, Redacted, Schema } from 'effect';
 
 import { LinearAuth, LinearBot, LinearOrganizationId, LinearUserId } from '../src';

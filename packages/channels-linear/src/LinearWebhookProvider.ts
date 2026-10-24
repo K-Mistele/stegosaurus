@@ -1,5 +1,4 @@
 import {
-    DeliveryAdmission,
     ProviderWebhookEvent,
     ProviderWebhookIgnored,
     ProviderWebhookResponse,
@@ -7,7 +6,8 @@ import {
     WebhookPayloadInvalidError,
     type RawWebhookInput,
     type WebhookProvider,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import {
     Array as Arr,
     Crypto,

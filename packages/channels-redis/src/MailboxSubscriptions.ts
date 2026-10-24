@@ -4,7 +4,7 @@ import {
     MailboxSubscriptionAlreadyExistsResult,
     type MailboxSubscriptionOperation,
     MailboxSubscriptions,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxSubscriptions';
 import { Effect, Layer, Schema } from 'effect';
 import * as Redis from 'effect/persistence/Redis';
 

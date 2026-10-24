@@ -3,7 +3,7 @@ import {
     ProviderWebhookEvent,
     ProviderWebhookResponse,
     WebhookPayloadInvalidError,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderWebhooks';
 import { Effect, Schema } from 'effect';
 
 import { LinearStoredAgentSessionWebhook } from '../src/LinearWebhookSchemas';

@@ -17,7 +17,7 @@
  * └── rendered     revision, the exact plan last shown, and the provider's presentation
  * ```
  */
-import { Array as Arr, Match, Predicate, Schema } from 'effect';
+import { Array as Arr, Match, Predicate, Schema, String as Str } from 'effect';
 
 /** The most items one plan holds. Slack's plan shows at most 50 tasks. */
 export const DELIVERY_PLAN_MAX_ITEMS = 50;
@@ -60,7 +60,7 @@ export const DeliveryPlan = Schema.Struct({
     items: Schema.Array(DeliveryPlanItem).check(
         Schema.isMaxLength(DELIVERY_PLAN_MAX_ITEMS),
         Schema.makeFilter((items: ReadonlyArray<DeliveryPlanItem>) =>
-            new Set(items.map(({ id }) => id)).size === items.length ? undefined : 'expected unique item ids',
+            new Set(Arr.map(items, ({ id }) => id)).size === items.length ? undefined : 'expected unique item ids',
         ),
     ),
 });
@@ -148,23 +148,7 @@ export const deliveryPlanStatus = (state: DeliveryPlanState) => {
 };
 
 /** One line of text, for a list item. */
-const oneLine = (text: string) => text.replace(/\s*\n\s*/g, ' ');
-
-/** An item as one Markdown list line: a mark for its state, its title, and its note. */
-const itemMarkdown = (item: DeliveryPlanItem) => {
-    const [mark, note] = Match.value(item.state).pipe(
-        Match.tagsExhaustive({
-            Pending: () => ['⬜', undefined] as const,
-            InProgress: ({ details }) => ['🔄', details] as const,
-            Completed: ({ result }) => ['✅', result] as const,
-            Failed: ({ reason }) => ['❌', reason] as const,
-        }),
-    );
-
-    const line = `- ${mark} ${oneLine(item.title)}`;
-
-    return Predicate.isUndefined(note) ? line : `${line}: ${oneLine(note)}`;
-};
+const oneLine = Str.replace(/\s*\n\s*/g, ' ');
 
 /**
  * The plan as Markdown, for a provider that shows it in one comment, such as GitHub. The title, then one
@@ -173,8 +157,22 @@ const itemMarkdown = (item: DeliveryPlanItem) => {
 export const deliveryPlanMarkdown = (plan: DeliveryPlan) => {
     const lines = Arr.match(plan.items, {
         onEmpty: () => ['_No steps yet._'],
-        onNonEmpty: Arr.map(itemMarkdown),
+        /** Each item as one Markdown list line: a mark for its state, its title, and its note. */
+        onNonEmpty: Arr.map((item: DeliveryPlanItem) => {
+            const [mark, note] = Match.value(item.state).pipe(
+                Match.tagsExhaustive({
+                    Pending: () => ['⬜', undefined] as const,
+                    InProgress: ({ details }) => ['🔄', details] as const,
+                    Completed: ({ result }) => ['✅', result] as const,
+                    Failed: ({ reason }) => ['❌', reason] as const,
+                }),
+            );
+
+            const line = `- ${mark} ${oneLine(item.title)}`;
+
+            return Predicate.isUndefined(note) ? line : `${line}: ${oneLine(note)}`;
+        }),
     });
 
-    return [`**${oneLine(plan.title ?? 'Plan')}**`, '', ...lines].join('\n');
+    return Arr.join([`**${oneLine(plan.title ?? 'Plan')}**`, '', ...lines], '\n');
 };

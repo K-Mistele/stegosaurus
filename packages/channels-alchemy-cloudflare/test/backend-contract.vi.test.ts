@@ -1,23 +1,23 @@
 import { it } from '@effect/vitest';
 import {
     ClaimWaitingEvents,
-    DeliveryAdmission,
-    DeliveryControlBackend,
-    CompleteDelivery,
-    DeliveryOutputSettlement,
-    DeliveryReceipt,
-    MailboxDelivery,
     MailboxProcessing,
     MailboxProcessingAttemptCompleted,
     MailboxProcessingBackend,
     MailboxProcessingSummary,
     MailboxProcessingUnavailable,
-    Timestamp,
     WaitingMailbox,
+} from '@stegosaurus/channels-delivery/MailboxProcessing';
+import { Timestamp } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import {
+    DeliveryAdmission,
+    DeliveryReceipt,
+    MailboxDelivery,
     deliveryMailboxKey,
-    makeDeliveryId,
-    parseDeliveryId,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { formatDeliveryId, parseDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
+import { DeliveryOutputSettlement } from '@stegosaurus/channels-delivery/DeliveryOperation';
+import { DeliveryControlBackend, CompleteDelivery } from '@stegosaurus/channels-delivery/DeliveryControl';
 import { Clock, Effect, Layer, Option, Schema } from 'effect';
 import { TestClock } from 'effect/testing';
 
@@ -203,7 +203,7 @@ it.effect(
             yield* TestClock.adjust(200);
 
             const reference = Option.getOrThrow(
-                parseDeliveryId(makeDeliveryId({ mailboxKey, batchId: claim.batchId })),
+                parseDeliveryId(formatDeliveryId({ mailboxKey, batchId: claim.batchId })),
             );
 
             yield* control.applyDeliveryMutation({

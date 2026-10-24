@@ -1,5 +1,6 @@
 import { describe, it } from '@effect/vitest';
-import { MailboxSubscriptions, ProviderEventHandled, ProviderEventIgnored } from '@stegosaurus/channels-delivery';
+import { ProviderEventHandled, ProviderEventIgnored } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
 import { Effect, Layer, Schema } from 'effect';
 import { vi } from 'vite-plus/test';
 

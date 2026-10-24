@@ -5,17 +5,15 @@
  */
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { describe, it } from '@effect/vitest';
-import {
-    Channels,
-    ChannelsMemory,
-    DeliveryActivity,
-    DeliveryReactionTarget,
-    MessageId,
-    QueueDeliveryMode,
-    makeDeliveryClient,
-    type DeliveryClient,
-    type DeliveryContext,
-} from '@stegosaurus/channels-delivery';
+import { QueueDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { DeliveryReactionTarget } from '@stegosaurus/channels-delivery/DeliveryReaction';
+import { MessageId } from '@stegosaurus/channels-delivery/DeliveryMessage';
+import { type DeliveryClient } from '@stegosaurus/channels-delivery/DeliveryHttpClient';
+import * as DeliveryHttpClient from '@stegosaurus/channels-delivery/DeliveryHttpClient';
+import { type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
+import { DeliveryActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
+import * as Channels from '@stegosaurus/channels-delivery/Channels';
+import * as ChannelsMemory from '@stegosaurus/channels-delivery/ChannelsMemory';
 import { Config, Data, Effect, Layer, Match, Predicate, Queue, Redacted, Ref, Schedule, Schema } from 'effect';
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 import { expect } from 'vite-plus/test';
@@ -211,7 +209,7 @@ const startBot = (api: Layer.Layer<GitHubApi>) =>
             ),
         );
 
-        const client = yield* makeDeliveryClient({
+        const client = yield* DeliveryHttpClient.make({
             baseUrl: 'http://localhost',
             basePath: '/api/channels',
         }).pipe(Effect.provideService(HttpClient.HttpClient, http));

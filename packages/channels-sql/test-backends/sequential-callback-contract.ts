@@ -1,16 +1,14 @@
 import { it } from '@effect/vitest';
 import {
-    CompleteDelivery,
-    DeliveryControlBackend,
-    DeliveryOutputSettlement,
-    MailboxDelivery,
     MailboxProcessingAttemptTerminalFailure,
     MailboxProcessingBackend,
-    PreparedDeliveryInvocation,
-    Timestamp,
-    makeDeliveryId,
-    parseDeliveryId,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxProcessing';
+import { Timestamp } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { MailboxDelivery } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { formatDeliveryId, parseDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
+import { DeliveryOutputSettlement } from '@stegosaurus/channels-delivery/DeliveryOperation';
+import { CompleteDelivery, DeliveryControlBackend } from '@stegosaurus/channels-delivery/DeliveryControl';
+import { PreparedDeliveryInvocation } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Clock, Effect, Option, type Layer } from 'effect';
 import { TestClock } from 'effect/testing';
 
@@ -61,7 +59,7 @@ export const sequentialCallbackContract = <E>(name: string, makeStore: () => Lay
 
             const reference = (callbackIndex: number) =>
                 Option.getOrThrow(
-                    parseDeliveryId(makeDeliveryId({ mailboxKey, batchId: first.batchId, callbackIndex })),
+                    parseDeliveryId(formatDeliveryId({ mailboxKey, batchId: first.batchId, callbackIndex })),
                 );
 
             const read = (callbackIndex: number, accessToken = tokens[callbackIndex] ?? '') =>
@@ -203,14 +201,14 @@ export const sequentialCallbackContract = <E>(name: string, makeStore: () => Lay
             const control = yield* DeliveryControlBackend;
             expect(
                 (yield* control.readDeliveryStatus({
-                    reference: Option.getOrThrow(parseDeliveryId(makeDeliveryId(claim))),
+                    reference: Option.getOrThrow(parseDeliveryId(formatDeliveryId(claim))),
                     accessToken: claim.accessToken,
                 })).stage,
             ).toBe('Retired');
             expect(
                 (yield* control
                     .readDeliveryStatus({
-                        reference: Option.getOrThrow(parseDeliveryId(makeDeliveryId({ ...claim, callbackIndex: 1 }))),
+                        reference: Option.getOrThrow(parseDeliveryId(formatDeliveryId({ ...claim, callbackIndex: 1 }))),
                         accessToken: 'never-started',
                     })
                     .pipe(Effect.flip))._tag,

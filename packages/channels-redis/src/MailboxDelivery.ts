@@ -1,14 +1,13 @@
+import { Timestamp } from '@stegosaurus/channels-delivery/MailboxPolicy';
 import {
     deliveryMailboxKey,
     DeliveryAdmissionJson,
     type DeliveryAdmission,
     DeliveryReceipt,
-    DeliverySlot,
     MailboxDelivery,
     MailboxDeliveryUnavailable,
-    Timestamp,
-    requestDeliveryInterrupt,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { DeliverySlot, requestDeliveryInterrupt } from '@stegosaurus/channels-delivery/DeliveryLifecycle';
 import { Clock, Effect, Layer, Option, Predicate, Schema } from 'effect';
 import * as Redis from 'effect/persistence/Redis';
 

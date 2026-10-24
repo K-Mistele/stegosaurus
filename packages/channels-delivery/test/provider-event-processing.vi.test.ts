@@ -2,13 +2,13 @@ import { describe, it } from '@effect/vitest';
 import { Effect, Queue } from 'effect';
 
 import {
-    DeliveryAdmission,
     DeliveryAdmissionBatch,
     processProviderEvent,
     ProviderEventHandled,
     ProviderEventInvalid,
     type ProviderEventProcessor,
-} from '../src';
+} from '../src/ProviderEventProcessing';
+import { DeliveryAdmission } from '../src/MailboxDelivery';
 import { makeTestDeliveryExecution } from './delivery-execution';
 
 const admission = (eventId: string, overrides: Partial<DeliveryAdmission> = {}) =>

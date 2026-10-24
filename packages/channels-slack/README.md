@@ -53,7 +53,7 @@ Never commit the signing secret or bot token.
 ## Configure a provider
 
 ```ts
-import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery';
+import { DebounceDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
 import { SlackBot, SlackContent } from '@stegosaurus/channels-slack';
 import { Config, Effect } from 'effect';
 

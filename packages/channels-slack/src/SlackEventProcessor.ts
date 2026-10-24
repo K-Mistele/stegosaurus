@@ -1,20 +1,21 @@
 /** Slack post-admission batch normalization and callback routing. */
 import {
-    deliveryMailboxKey,
-    type DeliveryAdmission,
     type DeliveryAdmissionBatch,
-    type DeliveryCallbackResult,
-    type DeliveryContext,
-    MailboxSubscriptions,
-    type PreparedDeliveryCallback,
-    PreparedDeliveryInvocation,
-    type ProviderDeliveryExecution,
     ProviderEventExecutionFailed,
     ProviderEventHandled,
     ProviderEventIgnored,
     ProviderEventInvalid,
     type ProviderEventProcessor,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { deliveryMailboxKey, type DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import {
+    type DeliveryCallbackResult,
+    type DeliveryContext,
+    type PreparedDeliveryCallback,
+    PreparedDeliveryInvocation,
+    type ProviderDeliveryExecution,
+} from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Array as Arr, Data, Effect, Match, Option, Predicate, Schema, Struct } from 'effect';
 
 import { SlackApi, SlackApiError, isSlackTokenRejected } from './SlackApi';

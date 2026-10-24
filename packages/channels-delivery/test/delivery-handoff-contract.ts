@@ -4,49 +4,52 @@
  * It drives a store through MailboxDelivery, MailboxProcessingBackend, and DeliveryControlBackend,
  * under the test clock.
  */
-import { it } from '@effect/vitest';
-import { Clock, Effect, Option, type Layer } from 'effect';
+import { layer } from '@effect/vitest';
+import { Array as Arr, Clock, Effect, Option, type Layer } from 'effect';
 import { TestClock } from 'effect/testing';
 import { expect } from 'vite-plus/test';
 
 import {
-    AddDeliveryLink,
-    BatchId,
-    CompleteDelivery,
-    CreateDeliveryMessage,
-    DeleteDeliveryMessage,
-    DELIVERY_RETENTION_MS,
-    DELIVERY_TIMED_OUT_MARKDOWN,
-    DeliveryAdmission,
-    DeliveryControlBackend,
-    DeliveryOutcome,
-    DeliveryOutputSettlement,
-    DeliveryReactionTarget,
-    ExternalLink,
-    DeliveryActivity,
+    MailboxProcessingBackend,
+    OutputReadyMailbox,
+    RecoverableMailbox,
+    type ClaimedDeliveryOutput,
+    type ClaimedMailboxBatch,
+} from '../src/MailboxProcessing';
+import { Timestamp } from '../src/MailboxPolicy';
+import { DeliveryAdmission, MailboxDelivery } from '../src/MailboxDelivery';
+import { BatchId, formatDeliveryId, parseDeliveryId } from '../src/DeliveryReference';
+import { DeliveryReactionTarget, SetMessageReaction, type PortableReaction } from '../src/DeliveryReaction';
+import {
     DeliveryPlan,
     DeliveryPlanItem,
     DeliveryPlanItemId,
     DeliveryPlanItemState,
+    DeliveryPlanRevision,
+    RenderPlan,
+} from '../src/DeliveryPlan';
+import { DeliveryOutcome, PresentOutcome } from '../src/DeliveryOutcome';
+import { DeliveryOutputSettlement } from '../src/DeliveryOperation';
+import { CreateMessage, DeleteMessage, MessageId, UpdateMessage } from '../src/DeliveryMessage';
+import { AddExternalLink, ExternalLink } from '../src/DeliveryLink';
+import { DELIVERY_RETENTION_MS, DELIVERY_TIMED_OUT_MARKDOWN } from '../src/DeliveryLifecycle';
+import {
+    AddDeliveryLink,
+    CompleteDelivery,
+    CreateDeliveryMessage,
+    DeleteDeliveryMessage,
+    DeliveryControlBackend,
+    DeliveryOperationUnsupported,
+    DeliveryReactionTargetUnavailable,
     FailDelivery,
-    MailboxDelivery,
-    MessageId,
-    PreparedDeliveryInvocation,
     PutDeliveryPlan,
     SetDeliveryActivity,
     SetDeliveryReaction,
     UpdateDeliveryMessage,
-    MailboxProcessingBackend,
-    OutputReadyMailbox,
-    RecoverableMailbox,
-    Timestamp,
-    makeDeliveryId,
-    parseDeliveryId,
-    type ClaimedDeliveryOutput,
-    type ClaimedMailboxBatch,
     type DeliveryMutation,
-    type PortableReaction,
-} from '../src';
+} from '../src/DeliveryControl';
+import { PreparedDeliveryInvocation } from '../src/DeliveryContext';
+import { DeliveryActivity, SetActivity } from '../src/DeliveryActivity';
 import {
     claimAll,
     claimFrozen,
@@ -63,12 +66,16 @@ import {
 type HandoffStore = MailboxDelivery | MailboxProcessingBackend | DeliveryControlBackend;
 
 const reference = (claim: ClaimedMailboxBatch) =>
-    Option.getOrThrow(parseDeliveryId(makeDeliveryId({ mailboxKey: claim.mailboxKey, batchId: claim.batchId })));
+    Option.getOrThrow(parseDeliveryId(formatDeliveryId({ mailboxKey: claim.mailboxKey, batchId: claim.batchId })));
 
-const handOff = (claim: ClaimedMailboxBatch, links: ReadonlyArray<ExternalLink> = [], failAfterMs?: number) =>
+const handOff = (
+    claim: ClaimedMailboxBatch,
+    options: { readonly links?: ReadonlyArray<ExternalLink>; readonly failAfterMs?: number } = {},
+) =>
     Effect.gen(function* () {
         const backend = yield* MailboxProcessingBackend;
         const handedOffAt = Timestamp.make(yield* Clock.currentTimeMillis);
+        const { links = [], failAfterMs } = options;
         const request = { mailboxKey: claim.mailboxKey, claimId: claim.claimId, handedOffAt, links };
         yield* backend.handOffDelivery(failAfterMs === undefined ? request : { ...request, failAfterMs });
     });
@@ -293,7 +300,9 @@ const planC = planOf(
 
 export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: () => Layer.Layer<HandoffStore, E>) => {
     const contract = <TestError>(name: string, test: Effect.Effect<void, TestError, HandoffStore>) =>
-        it.effect(`${storeName} handoff: ${name}`, () => test.pipe(Effect.provide(makeEmptyStore())));
+        layer(makeEmptyStore())((it) => {
+            it.effect(`${storeName} handoff: ${name}`, () => test);
+        });
 
     contract(
         'a handed-off delivery holds the mailbox, with no lease, until its remote worker finishes and its output is sent',
@@ -316,11 +325,12 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             expect((yield* status(claim)).stage).toEqual('Finishing');
             expect(yield* findReady).toEqual([OutputReadyMailbox.make({ mailboxKey })]);
             const output = yield* sendOutput;
-            expect(output.operation).toEqual({
-                _tag: 'PresentOutcome',
-                outcome: { _tag: 'Completed' },
-                markdown: 'done',
-            });
+            expect(output.operation).toEqual(
+                PresentOutcome.make({
+                    outcome: DeliveryOutcome.cases.Completed.make({}),
+                    markdown: 'done',
+                }),
+            );
             expect((yield* status(claim)).stage).toEqual('Retired');
             expect((yield* status(claim)).outcome).toEqual(DeliveryOutcome.cases.Completed.make({}));
             expect((yield* findWaiting).waiting.count).toEqual(1);
@@ -344,10 +354,11 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             ]);
             const output = yield* sendOutput;
             expect(output.operationId).toEqual('outcome');
-            expect(output.operation).toEqual({
-                _tag: 'PresentOutcome',
-                outcome: { _tag: 'AwaitingInput', options: ['staging', 'production'] },
-            });
+            expect(output.operation).toEqual(
+                PresentOutcome.make({
+                    outcome: DeliveryOutcome.cases.AwaitingInput.make({ options: ['staging', 'production'] }),
+                }),
+            );
             expect(output.provider).toEqual('example');
             expect(output.prepared).toEqual(preparation('onNewMention').callbacks[0]);
             expect((yield* status(claim)).output).toEqual([
@@ -665,14 +676,17 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             yield* deliver('a');
             const claim = yield* claimPrepared;
             const run = link('https://example.com/run/1');
-            yield* handOff(claim, [run, run, link('https://example.com/run/2')]);
-            yield* handOff(claim, [link('https://example.com/run/3')]);
-            expect((yield* status(claim)).output.map(({ operationId }) => operationId)).toEqual(['link-1', 'link-2']);
+            yield* handOff(claim, { links: [run, run, link('https://example.com/run/2')] });
+            yield* handOff(claim, { links: [link('https://example.com/run/3')] });
+            expect(Arr.map((yield* status(claim)).output, ({ operationId }) => operationId)).toEqual([
+                'link-1',
+                'link-2',
+            ]);
             expect(Option.isNone(yield* claimOutput)).toEqual(true);
             yield* settle(claim, 'completed');
             expect(yield* findReady).toEqual([OutputReadyMailbox.make({ mailboxKey })]);
             const first = yield* sendOutput;
-            expect(first.operation).toEqual({ _tag: 'AddExternalLink', link: run });
+            expect(first.operation).toEqual(AddExternalLink.make({ link: run }));
             yield* sendOutput;
             expect(yield* findReady).toEqual([]);
             expect((yield* status(claim)).stage).toEqual('ExternalWaiting');
@@ -699,7 +713,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             yield* finish(claim);
             const late = AddDeliveryLink.make({ link: link('https://github.com/org/repo/pull/2') });
             expect((yield* apply(claim, late).pipe(Effect.flip))._tag).toEqual('DeliveryClosed');
-            const sent = [yield* sendOutput, yield* sendOutput].map(({ operation }) => operation._tag);
+            const sent = Arr.map([yield* sendOutput, yield* sendOutput], ({ operation }) => operation._tag);
             expect(sent).toEqual(['AddExternalLink', 'PresentOutcome']);
             expect((yield* status(claim)).stage).toEqual('Retired');
             expect((yield* apply(claim, pullRequest)).status).toEqual('already_recorded');
@@ -760,25 +774,17 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             ]);
 
             const create = Option.getOrThrow(yield* claimOutput);
-            expect(create.operation).toEqual({
-                _tag: 'CreateMessage',
-                messageId: progress,
-                markdown: 'Running tests…',
-            });
+            expect(create.operation).toEqual(CreateMessage.make({ messageId: progress, markdown: 'Running tests…' }));
             expect(create.messageReference).toBeUndefined();
             expect(Option.isNone(yield* claimOutput)).toEqual(true);
             yield* settleOutput(create, postedReceipt('1'));
 
             const update = Option.getOrThrow(yield* claimOutput);
-            expect(update.operation).toEqual({
-                _tag: 'UpdateMessage',
-                messageId: progress,
-                markdown: 'Tests passed.',
-            });
+            expect(update.operation).toEqual(UpdateMessage.make({ messageId: progress, markdown: 'Tests passed.' }));
             expect(update.messageReference).toEqual({ ts: '1' });
             yield* settleOutput(update);
             const deletion = yield* sendOutput;
-            expect(deletion.operation).toEqual({ _tag: 'DeleteMessage', messageId: progress });
+            expect(deletion.operation).toEqual(DeleteMessage.make({ messageId: progress }));
             expect(deletion.messageReference).toEqual({ ts: '1' });
             expect(yield* findReady).toEqual([]);
             expect((yield* status(claim)).stage).toEqual('ExternalWaiting');
@@ -800,7 +806,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             expect((yield* apply(claim, deleteProgress)).status).toEqual('accepted');
             expect((yield* apply(claim, deleteProgress)).status).toEqual('already_recorded');
             expect((yield* apply(claim, updateProgress('c')).pipe(Effect.flip))._tag).toEqual('DeliveryMessageDeleted');
-            expect((yield* status(claim)).output.map(({ kind }) => kind)).toEqual([
+            expect(Arr.map((yield* status(claim)).output, ({ kind }) => kind)).toEqual([
                 'CreateMessage',
                 'UpdateMessage',
                 'DeleteMessage',
@@ -839,11 +845,8 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             const claim = yield* waitingDelivery;
             expect((yield* apply(claim, createProgress('a'))).status).toEqual('accepted');
             const refused = yield* apply(claim, updateProgress('b')).pipe(Effect.flip);
-            expect(refused).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'UpdateMessage',
-            });
-            expect((yield* status(claim)).output.map(({ kind }) => kind)).toEqual(['CreateMessage']);
+            expect(refused).toEqual(DeliveryOperationUnsupported.make({ operation: 'UpdateMessage' }));
+            expect(Arr.map((yield* status(claim)).output, ({ kind }) => kind)).toEqual(['CreateMessage']);
 
             yield* deliver('b');
             yield* sendOutput;
@@ -851,10 +854,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             yield* sendOutput;
             const unprepared = yield* claimAll(yield* findWaiting);
             const refusedUnprepared = yield* apply(unprepared, createProgress('a')).pipe(Effect.flip);
-            expect(refusedUnprepared).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'CreateMessage',
-            });
+            expect(refusedUnprepared).toEqual(DeliveryOperationUnsupported.make({ operation: 'CreateMessage' }));
         }),
     );
 
@@ -917,15 +917,9 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             });
 
             const refused = yield* apply(claim, link).pipe(Effect.flip);
-            expect(refused).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'AddExternalLink',
-            });
+            expect(refused).toEqual(DeliveryOperationUnsupported.make({ operation: 'AddExternalLink' }));
             const activity = yield* apply(claim, working('x')).pipe(Effect.flip);
-            expect(activity).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'SetActivity',
-            });
+            expect(activity).toEqual(DeliveryOperationUnsupported.make({ operation: 'SetActivity' }));
             expect((yield* status(claim)).output).toEqual([]);
             expect(yield* findReady).toEqual([]);
             expect((yield* finish(claim)).status).toEqual('accepted');
@@ -937,10 +931,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
         Effect.gen(function* () {
             const claim = yield* deliveryFor([]);
             const refused = yield* finish(claim).pipe(Effect.flip);
-            expect(refused).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'PresentOutcome',
-            });
+            expect(refused).toEqual(DeliveryOperationUnsupported.make({ operation: 'PresentOutcome' }));
             const unchanged = yield* status(claim);
             expect(unchanged.stage).toEqual('ExternalWaiting');
             expect(unchanged.outcome).toBeUndefined();
@@ -960,19 +951,20 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             expect((yield* status(claim)).activity).toEqual(
                 DeliveryActivity.cases.Working.make({ message: 'Running tests' }),
             );
-            expect((yield* status(claim)).output.map(({ operationId }) => operationId)).toEqual(['activity-1']);
+            expect(Arr.map((yield* status(claim)).output, ({ operationId }) => operationId)).toEqual(['activity-1']);
 
             const first = Option.getOrThrow(yield* claimOutput);
-            expect(first.operation).toEqual({
-                _tag: 'SetActivity',
-                activity: { _tag: 'Working', message: 'Running tests' },
-            });
+            expect(first.operation).toEqual(
+                SetActivity.make({
+                    activity: DeliveryActivity.cases.Working.make({ message: 'Running tests' }),
+                }),
+            );
             yield* apply(claim, working('Fixing'));
             yield* apply(claim, idle);
             yield* settleOutput(first);
             const second = yield* sendOutput;
             expect(second.operationId).toEqual('activity-2');
-            expect(second.operation).toEqual({ _tag: 'SetActivity', activity: { _tag: 'Idle' } });
+            expect(second.operation).toEqual(SetActivity.make({ activity: DeliveryActivity.cases.Idle.make({}) }));
             expect((yield* status(claim)).activity).toEqual(DeliveryActivity.cases.Idle.make({}));
             expect(yield* findReady).toEqual([]);
         }),
@@ -990,14 +982,13 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
                 DeliveryOutputSettlement.cases.Retry.make({ readyAt: Timestamp.make(now + 5_000) }),
             );
             yield* apply(claim, working('b'));
-            expect((yield* status(claim)).output.map(({ operationId }) => operationId)).toEqual(['activity-1']);
+            expect(Arr.map((yield* status(claim)).output, ({ operationId }) => operationId)).toEqual(['activity-1']);
             yield* TestClock.adjust(5_000);
             const retried = Option.getOrThrow(yield* claimOutput);
             expect(retried.attempt).toEqual(2);
-            expect(retried.operation).toEqual({
-                _tag: 'SetActivity',
-                activity: { _tag: 'Working', message: 'b' },
-            });
+            expect(retried.operation).toEqual(
+                SetActivity.make({ activity: DeliveryActivity.cases.Working.make({ message: 'b' }) }),
+            );
 
             yield* TestClock.adjust(leaseMs);
             const recovered = Option.getOrThrow(yield* claimOutput);
@@ -1044,10 +1035,9 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             yield* settleOutput(recovered, DeliveryOutputSettlement.cases.Retry.make({ readyAt: Timestamp.make(now) }));
             yield* apply(claim, working('b'));
             const replaced = Option.getOrThrow(yield* claimOutputWithKey('key-3'));
-            expect(replaced.operation).toEqual({
-                _tag: 'SetActivity',
-                activity: { _tag: 'Working', message: 'b' },
-            });
+            expect(replaced.operation).toEqual(
+                SetActivity.make({ activity: DeliveryActivity.cases.Working.make({ message: 'b' }) }),
+            );
             expect(replaced.hadAmbiguousAttempt).toEqual(true);
             expect(replaced.idempotencyKey).toEqual('key-3');
             yield* settleOutput(replaced);
@@ -1114,7 +1104,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             yield* apply(claim, working('b'));
             yield* settleOutput(first);
             expect(yield* findReady).toEqual([OutputReadyMailbox.make({ mailboxKey })]);
-            const sent = [yield* sendOutput, yield* sendOutput].map(({ operation }) => operation._tag);
+            const sent = Arr.map([yield* sendOutput, yield* sendOutput], ({ operation }) => operation._tag);
             expect(sent).toEqual(['CreateMessage', 'SetActivity']);
             expect(yield* findReady).toEqual([]);
         }),
@@ -1142,23 +1132,17 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             ]);
 
             const first = Option.getOrThrow(yield* claimOutput);
-            expect(first.operation).toEqual({
-                _tag: 'SetMessageReaction',
-                target: onActivation,
-                reaction: 'eyes',
-                active: true,
-            });
+            expect(first.operation).toEqual(
+                SetMessageReaction.make({ target: onActivation, reaction: 'eyes', active: true }),
+            );
             expect((yield* apply(claim, react(onActivation, 'eyes', false))).status).toEqual('accepted');
             expect((yield* apply(claim, react(onActivation, 'rocket', true))).status).toEqual('accepted');
             yield* settleOutput(first);
             const removal = yield* sendOutput;
             expect(removal.operationId).toEqual('reaction-2');
-            expect(removal.operation).toEqual({
-                _tag: 'SetMessageReaction',
-                target: onActivation,
-                reaction: 'eyes',
-                active: false,
-            });
+            expect(removal.operation).toEqual(
+                SetMessageReaction.make({ target: onActivation, reaction: 'eyes', active: false }),
+            );
             const rocket = yield* sendOutput;
             expect(rocket.operationId).toEqual('reaction-3');
             expect(rocket.operation).toMatchObject({ reaction: 'rocket', active: true });
@@ -1207,12 +1191,9 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             expect(Option.isNone(yield* claimOutput)).toEqual(true);
             yield* settleOutput(create, postedReceipt('1'));
             const reaction = yield* sendOutput;
-            expect(reaction.operation).toEqual({
-                _tag: 'SetMessageReaction',
-                target: onProgress,
-                reaction: 'thumbs_up',
-                active: true,
-            });
+            expect(reaction.operation).toEqual(
+                SetMessageReaction.make({ target: onProgress, reaction: 'thumbs_up', active: true }),
+            );
             expect(reaction.messageReference).toEqual({ ts: '1' });
 
             const unknown = DeliveryReactionTarget.cases.MessageTarget.make({
@@ -1240,20 +1221,14 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
 
             const activation = yield* apply(messagesOnly, react(onActivation, 'eyes', true)).pipe(Effect.flip);
 
-            expect(activation).toMatchObject({
-                _tag: 'DeliveryReactionTargetUnavailable',
-                target: 'ActivationTarget',
-            });
+            expect(activation).toEqual(DeliveryReactionTargetUnavailable.make({ target: 'ActivationTarget' }));
 
             const plan = yield* apply(
                 messagesOnly,
                 react(DeliveryReactionTarget.cases.PlanTarget.make({}), 'eyes', true),
             ).pipe(Effect.flip);
 
-            expect(plan).toMatchObject({
-                _tag: 'DeliveryReactionTargetUnavailable',
-                target: 'PlanTarget',
-            });
+            expect(plan).toEqual(DeliveryReactionTargetUnavailable.make({ target: 'PlanTarget' }));
             expect((yield* status(messagesOnly)).output).toEqual([]);
             yield* finish(messagesOnly);
             yield* sendOutput;
@@ -1275,10 +1250,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
 
             const refused = yield* apply(unsupported, react(onActivation, 'eyes', true)).pipe(Effect.flip);
 
-            expect(refused).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'SetMessageReaction',
-            });
+            expect(refused).toEqual(DeliveryOperationUnsupported.make({ operation: 'SetMessageReaction' }));
             expect((yield* status(unsupported)).reactionTargets).toEqual([]);
         }),
     );
@@ -1293,7 +1265,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             expect((yield* apply(claim, react(onActivation, 'rocket', false)).pipe(Effect.flip))._tag).toEqual(
                 'DeliveryClosed',
             );
-            const sent = [yield* sendOutput, yield* sendOutput].map(({ operation }) => operation._tag);
+            const sent = Arr.map([yield* sendOutput, yield* sendOutput], ({ operation }) => operation._tag);
             expect(sent).toEqual(['SetMessageReaction', 'PresentOutcome']);
             expect((yield* status(claim)).stage).toEqual('Retired');
             expect((yield* apply(claim, react(onActivation, 'rocket', true)).pipe(Effect.flip))._tag).toEqual(
@@ -1323,7 +1295,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             ]);
 
             const first = Option.getOrThrow(yield* claimOutput);
-            expect(first.operation).toEqual({ _tag: 'RenderPlan', revision: 2, plan: planB });
+            expect(first.operation).toEqual(RenderPlan.make({ revision: DeliveryPlanRevision.make(2), plan: planB }));
             expect(first.renderedPlan).toBeUndefined();
             expect((yield* apply(claim, putPlan(planC))).status).toEqual('accepted');
             yield* settleOutput(first, DeliveryOutputSettlement.cases.Applied.make({ receipt: { stream: 's-1' } }));
@@ -1335,7 +1307,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
 
             const second = Option.getOrThrow(yield* claimOutput);
             expect(second.operationId).toEqual('plan-2');
-            expect(second.operation).toEqual({ _tag: 'RenderPlan', revision: 3, plan: planC });
+            expect(second.operation).toEqual(RenderPlan.make({ revision: DeliveryPlanRevision.make(3), plan: planC }));
             /** The snapshot is what the first render sent, not the plan desired when it settled. */
             expect(second.renderedPlan).toEqual({
                 revision: 2,
@@ -1379,7 +1351,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             expect(again.operationId).toEqual(lost.operationId);
             expect(again.hadAmbiguousAttempt).toEqual(true);
             expect(again.idempotencyKey).toEqual(lost.idempotencyKey);
-            expect(again.operation).toEqual({ _tag: 'RenderPlan', revision: 3, plan: planC });
+            expect(again.operation).toEqual(RenderPlan.make({ revision: DeliveryPlanRevision.make(3), plan: planC }));
             expect(again.renderedPlan).toEqual({
                 revision: 1,
                 plan: planA,
@@ -1440,11 +1412,9 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             expect((yield* apply(claim, putPlan(planA))).status).toEqual('accepted');
             expect(Option.isNone(yield* claimOutput)).toEqual(true);
             yield* settle(claim, 'completed');
-            expect((yield* sendOutput).operation).toEqual({
-                _tag: 'RenderPlan',
-                revision: 1,
-                plan: planA,
-            });
+            expect((yield* sendOutput).operation).toEqual(
+                RenderPlan.make({ revision: DeliveryPlanRevision.make(1), plan: planA }),
+            );
         }),
     );
 
@@ -1453,7 +1423,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
         Effect.gen(function* () {
             yield* deliver('a');
             const claim = yield* claimPreparedWith(messagePreparation);
-            yield* handOff(claim, [], failAfterMs);
+            yield* handOff(claim, { failAfterMs });
             yield* settle(claim, 'completed');
 
             return claim;
@@ -1473,13 +1443,14 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             yield* TestClock.adjust(60_000);
             expect(yield* findReady).toEqual([OutputReadyMailbox.make({ mailboxKey })]);
             const outcome = Option.getOrThrow(yield* claimOutput);
-            expect(outcome.operation).toEqual({
-                _tag: 'PresentOutcome',
-                outcome: { _tag: 'Failed', reason: 'TimedOut' },
-                markdown: DELIVERY_TIMED_OUT_MARKDOWN,
-            });
+            expect(outcome.operation).toEqual(
+                PresentOutcome.make({
+                    outcome: DeliveryOutcome.cases.Failed.make({ reason: 'TimedOut' }),
+                    markdown: DELIVERY_TIMED_OUT_MARKDOWN,
+                }),
+            );
             const finishing = yield* status(claim);
-            expect(finishing.outcome).toEqual({ _tag: 'Failed', reason: 'TimedOut' });
+            expect(finishing.outcome).toEqual(DeliveryOutcome.cases.Failed.make({ reason: 'TimedOut' }));
             expect(finishing.failAt).toBeUndefined();
             expect((yield* finish(claim).pipe(Effect.flip))._tag).toEqual('DeliveryTerminalConflict');
 
@@ -1507,7 +1478,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             yield* TestClock.adjust(20_000);
             expect(yield* findReady).toEqual([OutputReadyMailbox.make({ mailboxKey })]);
             expect((yield* sendOutput).operation).toMatchObject({
-                outcome: { _tag: 'Failed', reason: 'TimedOut' },
+                outcome: DeliveryOutcome.cases.Failed.make({ reason: 'TimedOut' }),
             });
         }),
     );
@@ -1519,7 +1490,7 @@ export const deliveryHandoffContract = <E>(storeName: string, makeEmptyStore: ()
             yield* finish(limited);
             yield* sendOutput;
             yield* TestClock.adjust(120_000);
-            expect((yield* status(limited)).outcome).toEqual({ _tag: 'Completed' });
+            expect((yield* status(limited)).outcome).toEqual(DeliveryOutcome.cases.Completed.make({}));
 
             yield* deliver('b');
             const unlimited = yield* claimPreparedWith(messagePreparation);

@@ -28,13 +28,29 @@ const bearerToken = (request: HttpServerRequest.HttpServerRequest) =>
     Option.fromNullishOr(request.headers.authorization).pipe(
         Option.flatMap((header) => Option.fromNullishOr(bearerPattern.exec(header)?.[1])),
         Option.match({
-            onNone: () => Effect.fail(new DeliveryCredentialMissing()),
+            onNone: () => Effect.fail(DeliveryCredentialMissing.make()),
             onSome: (token) => Effect.succeed(Redacted.make(token)),
         }),
     );
 
-const handlers = (api: ReturnType<typeof prefixedDeliveryHttpApi>) =>
-    HttpApiBuilder.group(api, 'deliveries', (group) =>
+/**
+ * `HttpApiBuilder.layer` declares file, path, and ETag services for static and multipart routes.
+ * The delivery API serves neither, so it gets inert ones and a host needs no platform layer for it.
+ */
+const deliveryApiPlatform = Layer.mergeAll(
+    HttpPlatform.layer.pipe(Layer.provideMerge(FileSystem.layerNoop({}))),
+    Path.layer,
+    Etag.layer,
+);
+
+/**
+ * The delivery API routes under `basePath`. Needs a `DeliveryControl`.
+ * Mount it on the same `HttpRouter` as the provider webhooks.
+ */
+export const deliveryApiRoutes = (options: { readonly basePath?: string | undefined }) => {
+    const api = prefixedDeliveryHttpApi(options.basePath);
+
+    const handlers = HttpApiBuilder.group(api, 'deliveries', (group) =>
         Effect.gen(function* () {
             const control = yield* DeliveryControl;
 
@@ -118,22 +134,5 @@ const handlers = (api: ReturnType<typeof prefixedDeliveryHttpApi>) =>
         }),
     );
 
-/**
- * `HttpApiBuilder.layer` declares file, path, and ETag services for static and multipart routes.
- * The delivery API serves neither, so it gets inert ones and a host needs no platform layer for it.
- */
-const deliveryApiPlatform = Layer.mergeAll(
-    HttpPlatform.layer.pipe(Layer.provideMerge(FileSystem.layerNoop({}))),
-    Path.layer,
-    Etag.layer,
-);
-
-/**
- * The delivery API routes under `basePath`. Needs a `DeliveryControl`.
- * Mount it on the same `HttpRouter` as the provider webhooks.
- */
-export const deliveryApiRoutes = (options: { readonly basePath?: string | undefined }) => {
-    const api = prefixedDeliveryHttpApi(options.basePath);
-
-    return HttpApiBuilder.layer(api).pipe(Layer.provide(handlers(api)), Layer.provide(deliveryApiPlatform));
+    return HttpApiBuilder.layer(api).pipe(Layer.provide([handlers, deliveryApiPlatform]));
 };

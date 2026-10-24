@@ -27,13 +27,13 @@ export const MailboxSubscriptionOperation = Schema.Literals(['migrate', 'subscri
 
 export type MailboxSubscriptionOperation = typeof MailboxSubscriptionOperation.Type;
 
-export class MailboxSubscriptionError extends Schema.TaggedError<MailboxSubscriptionError>()(
-    'MailboxSubscriptionError',
-    {
-        operation: MailboxSubscriptionOperation,
-        reason: Schema.NonEmptyString,
-    },
-) {}
+export class MailboxSubscriptionError extends Schema.TaggedError<
+    MailboxSubscriptionError,
+    { readonly brand: unique symbol }
+>()('MailboxSubscriptionError', {
+    operation: MailboxSubscriptionOperation,
+    reason: Schema.NonEmptyString,
+}) {}
 
 /**
  * This service fronts storage (DO/SQL/Redis ) for tracking whether a thread is subscribed to or not & updating subscriptions

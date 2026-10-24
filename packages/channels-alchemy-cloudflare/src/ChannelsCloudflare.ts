@@ -6,14 +6,12 @@
  * mailbox's Durable Object. The Durable Object stores the mailbox and runs the callbacks when its
  * alarm fires. Both halves are built from the same options, so they cannot drift apart.
  */
-import {
-    Channels,
-    DeliveryControl,
-    MailboxProcessing,
-    MailboxSubscriptions,
-    deliveryApiRoutes,
-    type ChannelsProviderRequirements,
-} from '@stegosaurus/channels-delivery';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { MailboxProcessing } from '@stegosaurus/channels-delivery/MailboxProcessing';
+import { deliveryApiRoutes } from '@stegosaurus/channels-delivery/DeliveryHttpServer';
+import { DeliveryControl } from '@stegosaurus/channels-delivery/DeliveryControl';
+import { type ChannelsProviderRequirements } from '@stegosaurus/channels-delivery/ChannelsProvider';
+import * as Channels from '@stegosaurus/channels-delivery/Channels';
 import { Effect } from 'effect';
 
 import { DeliveryControlAlchemyCloudflare, makeDeliveryRequestHandler } from './DeliveryControl';

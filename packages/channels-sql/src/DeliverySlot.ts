@@ -28,20 +28,19 @@
  * - claim rows are the attempt history. A mailbox has at most one live claim row: the claim that
  *   owns the batch, or the attempt waiting to retry.
  */
+import { Timestamp } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { DeliveryAdmissionJson } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { BatchId, DeliveryAccessToken } from '@stegosaurus/channels-delivery/DeliveryReference';
 import {
     ActiveDelivery,
     ActiveDeliveryStage,
-    BatchId,
-    DeliveryAccessToken,
-    DeliveryAdmissionJson,
     DeliverySlot,
     MAX_RETAINED_DELIVERIES,
-    PreparedDeliveryInvocationJson,
     RetainedDelivery,
     StoredActiveDelivery,
-    Timestamp,
     mailboxSchedulerStatus,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryLifecycle';
+import { PreparedDeliveryInvocationJson } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Array as Arr, Clock, Effect, Match, Option, Predicate, Schema, Struct } from 'effect';
 import * as SqlClient from 'effect/sql/SqlClient';
 import * as SqlError from 'effect/sql/SqlError';

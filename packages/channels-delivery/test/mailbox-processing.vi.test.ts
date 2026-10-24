@@ -1,27 +1,30 @@
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { describe, it } from '@effect/vitest';
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Queue, Ref } from 'effect';
+import { Array as Arr, Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Queue, Ref } from 'effect';
 import { TestClock } from 'effect/testing';
 
 import {
-    BurstDeliveryMode,
-    DebounceDeliveryMode,
-    DeliveryAdmission,
-    MailboxDelivery,
-    MailboxProcessing,
-    MailboxProcessingBackend,
-    MailboxProcessingClaimLost,
     ProviderEventExecutionFailed,
     ProviderEventHandled,
-    QueueDeliveryMode,
-    SerialDeliveryMode,
     type DeliveryAdmissionBatch,
-    type DeliveryMode,
-    type MailboxProcessingOptions,
     type ProviderEventProcessor,
     type ProviderEventProcessorError,
     type ProviderEventResult,
-} from '../src';
+} from '../src/ProviderEventProcessing';
+import {
+    MailboxProcessing,
+    MailboxProcessingBackend,
+    MailboxProcessingClaimLost,
+    type MailboxProcessingOptions,
+} from '../src/MailboxProcessing';
+import {
+    BurstDeliveryMode,
+    DebounceDeliveryMode,
+    QueueDeliveryMode,
+    SerialDeliveryMode,
+    type DeliveryMode,
+} from '../src/MailboxPolicy';
+import { DeliveryAdmission, MailboxDelivery } from '../src/MailboxDelivery';
 import { MailboxBackendMemory } from '../src/MailboxBackendMemory';
 
 const admission = (eventId: string, resourceId = 'thread-1') =>
@@ -34,7 +37,7 @@ const admission = (eventId: string, resourceId = 'thread-1') =>
         payload: { eventId },
     });
 
-const deliver = (eventId: string, resourceId?: string) =>
+const deliver = (eventId: string, resourceId = 'thread-1') =>
     Effect.gen(function* () {
         yield* (yield* MailboxDelivery).deliver(admission(eventId, resourceId));
     });
@@ -43,11 +46,9 @@ const processReady = Effect.gen(function* () {
     return yield* (yield* MailboxProcessing).processReady;
 });
 
-const eventIds = (batch: DeliveryAdmissionBatch) => batch.map(({ eventId }) => eventId);
-
 const handled = Effect.succeed(ProviderEventHandled.make({}));
 
-const temporaryFailure = new ProviderEventExecutionFailed({
+const temporaryFailure = ProviderEventExecutionFailed.make({
     provider: 'example',
     safeCode: 'temporary',
     retryable: true,
@@ -61,7 +62,11 @@ const recordingProcessor = (
 ): ProviderEventProcessor => ({
     namespace: 'test',
     providerName: 'example',
-    process: (batch) => Queue.offer(dispatched, eventIds(batch)).pipe(Effect.andThen(callback(batch))),
+    process: (batch) =>
+        Queue.offer(
+            dispatched,
+            Arr.map(batch, ({ eventId }) => eventId),
+        ).pipe(Effect.andThen(callback(batch))),
 });
 
 const processingOptions = (overrides: Partial<MailboxProcessingOptions> = {}): MailboxProcessingOptions => ({
@@ -74,9 +79,9 @@ const processingOptions = (overrides: Partial<MailboxProcessingOptions> = {}): M
 
 /** The real processing layer over the in-memory store, with the store's services left visible to the test. */
 const processingOver = (processor: ProviderEventProcessor, options: MailboxProcessingOptions) =>
-    MailboxProcessing.layer(options, { events: [processor], outputs: [] }).pipe(
-        Layer.provide(NodeCrypto.layer),
-        Layer.provideMerge(MailboxBackendMemory),
+    Layer.provideMerge(
+        MailboxProcessing.layer(options, { events: [processor], outputs: [] }),
+        Layer.merge(MailboxBackendMemory, NodeCrypto.layer),
     );
 
 /** An in-memory store built ahead of the processing layer, for tests that wrap or call the store themselves. */
@@ -108,7 +113,7 @@ describe('mailbox processing', () => {
                 expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toEqual([]);
                 yield* TestClock.adjust(30_000);
                 expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toHaveLength(1);
-            }).pipe(Effect.provide(processingOver(processor, processingOptions())));
+            }).pipe(Effect.provide(yield* Layer.build(processingOver(processor, processingOptions()))));
         }),
     );
 
@@ -119,7 +124,7 @@ describe('mailbox processing', () => {
 
             const result = yield* deliver('a').pipe(
                 Effect.andThen(processReady),
-                Effect.provide(processingOver(processor, processingOptions())),
+                Effect.provide(yield* Layer.build(processingOver(processor, processingOptions()))),
                 Effect.exit,
             );
 
@@ -149,7 +154,9 @@ describe('mailbox processing', () => {
                 yield* processReady;
                 yield* processReady;
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['first'], ['first'], ['later']]);
-            }).pipe(Effect.provide(processingOver(processor, processingOptions({ maxAttempts: 2 }))));
+            }).pipe(
+                Effect.provide(yield* Layer.build(processingOver(processor, processingOptions({ maxAttempts: 2 })))),
+            );
         }),
     );
 
@@ -172,7 +179,7 @@ describe('mailbox processing', () => {
                 expect((yield* processReady).claimed).toBe(1);
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['stale'], ['stale']]);
                 expect(yield* (yield* MailboxProcessingBackend).findReadyMailboxes).toEqual([]);
-            }).pipe(Effect.provide(processingOver(processor, processingOptions())));
+            }).pipe(Effect.provide(yield* Layer.build(processingOver(processor, processingOptions()))));
         }),
     );
 });
@@ -197,7 +204,9 @@ describe('attempt limit', () => {
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['poison'], ['poison']]);
                 expect((yield* processReady).claimed).toBe(1);
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['next']]);
-            }).pipe(Effect.provide(processingOver(processor, processingOptions({ maxAttempts: 2 }))));
+            }).pipe(
+                Effect.provide(yield* Layer.build(processingOver(processor, processingOptions({ maxAttempts: 2 })))),
+            );
         }),
     );
 });
@@ -212,7 +221,11 @@ describe('delivery modes', () => {
                 yield* processReady;
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b']]);
             }).pipe(
-                Effect.provide(processingOver(recordingProcessor(dispatched), withMode(QueueDeliveryMode.make({})))),
+                Effect.provide(
+                    yield* Layer.build(
+                        processingOver(recordingProcessor(dispatched), withMode(QueueDeliveryMode.make({}))),
+                    ),
+                ),
             );
         }),
     );
@@ -227,7 +240,11 @@ describe('delivery modes', () => {
                 yield* processReady;
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['a'], ['b']]);
             }).pipe(
-                Effect.provide(processingOver(recordingProcessor(dispatched), withMode(SerialDeliveryMode.make({})))),
+                Effect.provide(
+                    yield* Layer.build(
+                        processingOver(recordingProcessor(dispatched), withMode(SerialDeliveryMode.make({}))),
+                    ),
+                ),
             );
         }),
     );
@@ -248,9 +265,11 @@ describe('delivery modes', () => {
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b']]);
             }).pipe(
                 Effect.provide(
-                    processingOver(
-                        recordingProcessor(dispatched),
-                        withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000 })),
+                    yield* Layer.build(
+                        processingOver(
+                            recordingProcessor(dispatched),
+                            withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000 })),
+                        ),
                     ),
                 ),
             );
@@ -272,9 +291,11 @@ describe('delivery modes', () => {
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b', 'c']]);
             }).pipe(
                 Effect.provide(
-                    processingOver(
-                        recordingProcessor(dispatched),
-                        withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000, maxWaitMs: 3_000 })),
+                    yield* Layer.build(
+                        processingOver(
+                            recordingProcessor(dispatched),
+                            withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000, maxWaitMs: 3_000 })),
+                        ),
                     ),
                 ),
             );
@@ -295,9 +316,11 @@ describe('delivery modes', () => {
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['a', 'b']]);
             }).pipe(
                 Effect.provide(
-                    processingOver(
-                        recordingProcessor(dispatched),
-                        withMode(BurstDeliveryMode.make({ windowMs: 2_000 })),
+                    yield* Layer.build(
+                        processingOver(
+                            recordingProcessor(dispatched),
+                            withMode(BurstDeliveryMode.make({ windowMs: 2_000 })),
+                        ),
                     ),
                 ),
             );
@@ -325,10 +348,15 @@ describe('delivery modes', () => {
                 expect(yield* Queue.takeAll(dispatched)).toEqual([['a'], ['during-run']]);
             }).pipe(
                 Effect.provide(
-                    MailboxProcessing.layer(withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000 })), {
-                        events: [processor],
-                        outputs: [],
-                    }).pipe(Layer.provide(NodeCrypto.layer), Layer.provideMerge(Layer.succeedContext(store))),
+                    yield* Layer.build(
+                        Layer.provideMerge(
+                            MailboxProcessing.layer(withMode(DebounceDeliveryMode.make({ quietPeriodMs: 2_000 })), {
+                                events: [processor],
+                                outputs: [],
+                            }),
+                            Layer.merge(Layer.succeedContext(store), NodeCrypto.layer),
+                        ),
+                    ),
                 ),
             );
         }),
@@ -356,7 +384,9 @@ describe('claim lease', () => {
                 expect(yield* Fiber.join(pass)).toEqual({ claimed: 1, deferred: 0, output: 0 });
                 yield* TestClock.adjust(60_000);
                 expect(yield* backend.findReadyMailboxes).toEqual([]);
-            }).pipe(Effect.provide(processingOver(processor, processingOptions({ leaseMs: 3_000 }))));
+            }).pipe(
+                Effect.provide(yield* Layer.build(processingOver(processor, processingOptions({ leaseMs: 3_000 })))),
+            );
         }),
     );
 
@@ -372,7 +402,7 @@ describe('claim lease', () => {
                 MailboxProcessingBackend.of({
                     ...realBackend,
                     renewClaim: ({ mailboxKey, claimId }) =>
-                        Effect.fail(new MailboxProcessingClaimLost({ mailboxKey, claimId })),
+                        Effect.fail(MailboxProcessingClaimLost.make({ mailboxKey, claimId })),
                     recordProcessingAttemptResult: (input) =>
                         Ref.update(recorded, (count) => count + 1).pipe(
                             Effect.andThen(realBackend.recordProcessingAttemptResult(input)),
@@ -400,12 +430,16 @@ describe('claim lease', () => {
                 expect(yield* Ref.get(recorded)).toBe(0);
             }).pipe(
                 Effect.provide(
-                    MailboxProcessing.layer(processingOptions({ leaseMs: 3_000 }), {
-                        events: [processor],
-                        outputs: [],
-                    }).pipe(Layer.provide(Layer.mergeAll(backendThatLosesClaims, NodeCrypto.layer))),
+                    Context.merge(
+                        store,
+                        yield* Layer.build(
+                            MailboxProcessing.layer(processingOptions({ leaseMs: 3_000 }), {
+                                events: [processor],
+                                outputs: [],
+                            }).pipe(Layer.provide(Layer.mergeAll(backendThatLosesClaims, NodeCrypto.layer))),
+                        ),
+                    ),
                 ),
-                Effect.provide(store),
             );
         }),
     );
@@ -449,15 +483,19 @@ describe('polling', () => {
                 expect(yield* Queue.take(dispatched)).toEqual(['c']);
             }).pipe(
                 Effect.provide(
-                    MailboxProcessing.layer(
-                        processingOptions({
-                            deliveryModeFor: () => SerialDeliveryMode.make({}),
-                            polling: { intervalMs: 1_000 },
-                        }),
-                        { events: [recordingProcessor(dispatched)], outputs: [] },
-                    ).pipe(Layer.provide(Layer.mergeAll(observedBackend, NodeCrypto.layer))),
+                    Context.merge(
+                        store,
+                        yield* Layer.build(
+                            MailboxProcessing.layer(
+                                processingOptions({
+                                    deliveryModeFor: () => SerialDeliveryMode.make({}),
+                                    polling: { intervalMs: 1_000 },
+                                }),
+                                { events: [recordingProcessor(dispatched)], outputs: [] },
+                            ).pipe(Layer.provide(Layer.mergeAll(observedBackend, NodeCrypto.layer))),
+                        ),
+                    ),
                 ),
-                Effect.provide(store),
             );
         }),
     );

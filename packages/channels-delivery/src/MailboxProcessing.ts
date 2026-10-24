@@ -7,6 +7,7 @@
  *
  */
 import {
+    Array as Arr,
     Cause,
     Clock,
     Context,
@@ -14,7 +15,6 @@ import {
     Data,
     Duration,
     Effect,
-    Exit,
     Layer,
     Match,
     Option,
@@ -62,11 +62,12 @@ import {
     BatchId,
     DeliveryAccessToken,
     isRoutableMailboxKey,
-    makeBatchId,
-    makeConversationId,
-    makeDeliveryAccessToken,
-    makeDeliveryId,
-    makeDeliveryIdempotencyKey,
+    randomBatchId,
+    mailboxConversationId,
+    randomDeliveryAccessToken,
+    randomDeliveryAccessTokenWith,
+    formatDeliveryId,
+    deliveryIdempotencyKey,
 } from './DeliveryReference';
 import {
     decideMailboxClaim,
@@ -76,13 +77,7 @@ import {
     WaitingEvents,
     type DeliveryMode,
 } from './MailboxPolicy';
-import {
-    DeliveryAdmissionBatch,
-    processProviderEvent,
-    type ProviderEventProcessingError,
-    type ProviderEventResult,
-    type ProviderEventProcessor,
-} from './ProviderEventProcessing';
+import { DeliveryAdmissionBatch, processProviderEvent, type ProviderEventProcessor } from './ProviderEventProcessing';
 import {
     processProviderOutput,
     ProviderOutputAttempt,
@@ -218,19 +213,10 @@ export const toClaimedMailboxBatch = (input: {
 };
 
 /** A handoff's `failAfter` was not a positive duration. A programming error, so it is a defect. */
-class HandoffFailAfterInvalid extends Data.TaggedError('HandoffFailAfterInvalid')<{}> {}
-
-/** A handoff's time limit in whole milliseconds; none when it has no limit. */
-const handoffFailAfterMs = (failAfter: Duration.Input) =>
-    Option.match(Duration.fromInput(failAfter), {
-        onNone: () => Effect.die(new HandoffFailAfterInvalid()),
-        onSome: (duration) => {
-            if (!Duration.isFinite(duration)) return Effect.succeedNone;
-            const ms = Math.ceil(Duration.toMillis(duration));
-
-            return ms > 0 ? Effect.succeedSome(ms) : Effect.die(new HandoffFailAfterInvalid());
-        },
-    });
+class HandoffFailAfterInvalid extends Schema.TaggedError<HandoffFailAfterInvalid, { readonly brand: unique symbol }>()(
+    'HandoffFailAfterInvalid',
+    {},
+) {}
 
 /** Save the callback choice and destination for the batch this claim owns. */
 export const PrepareMailboxDelivery = Schema.Struct({
@@ -406,18 +392,18 @@ export const RecordProcessingAttemptResult = Schema.Struct({
 export type RecordProcessingAttemptResult = typeof RecordProcessingAttemptResult.Type;
 
 /** Errors  */
-export class MailboxProcessingUnavailable extends Schema.TaggedError<MailboxProcessingUnavailable>()(
-    'MailboxProcessingUnavailable',
-    { reason: Schema.String },
-) {}
+export class MailboxProcessingUnavailable extends Schema.TaggedError<
+    MailboxProcessingUnavailable,
+    { readonly brand: unique symbol }
+>()('MailboxProcessingUnavailable', { reason: Schema.String }) {}
 
-export class MailboxProcessingClaimLost extends Schema.TaggedError<MailboxProcessingClaimLost>()(
-    'MailboxProcessingClaimLost',
-    {
-        mailboxKey: Schema.String,
-        claimId: Schema.NonEmptyString,
-    },
-) {}
+export class MailboxProcessingClaimLost extends Schema.TaggedError<
+    MailboxProcessingClaimLost,
+    { readonly brand: unique symbol }
+>()('MailboxProcessingClaimLost', {
+    mailboxKey: Schema.String,
+    claimId: Schema.NonEmptyString,
+}) {}
 
 export type MailboxProcessingBackendError = MailboxProcessingUnavailable | MailboxProcessingClaimLost;
 
@@ -501,7 +487,7 @@ export class MailboxProcessingBackend extends Context.Service<
             input: SettleDeliveryOutput,
         ) => Effect.Effect<void, MailboxProcessingBackendError>;
     }
->()('@stegosaurus/channels-delivery/MailboxProcessingBackend') {}
+>()('@stegosaurus/channels-delivery/MailboxProcessing/MailboxProcessingBackend') {}
 
 /**
  * @property claimed - batches whose callbacks ran
@@ -534,43 +520,6 @@ export type MailboxProcessors<R = never> = {
     readonly outputs: ReadonlyArray<ProviderOutputProcessor<R>>;
 };
 
-/** Convert a provider processing success to a mailbox processing success result */
-const providerSuccessToAttemptResult = (result: ProviderEventResult) =>
-    Match.value(result).pipe(
-        Match.tagsExhaustive({
-            ProviderEventHandled: () => MailboxProcessingAttemptCompleted.make({}),
-            ProviderEventIgnored: ({ reason }) =>
-                MailboxProcessingAttemptCompleted.make({
-                    ignoredReason: reason,
-                }),
-        }),
-    );
-
-/** Convert a provider processing failures to a mailbox processing failures */
-const providerFailureToAttemptResult = (error: ProviderEventProcessingError) =>
-    Match.value(error).pipe(
-        Match.tagsExhaustive({
-            ProviderEventProcessorNotFound: () =>
-                MailboxProcessingAttemptRetryableFailure.make({
-                    safeCode: 'processor_not_found',
-                }),
-            ProviderEventInvalid: ({ reason }) =>
-                MailboxProcessingAttemptTerminalFailure.make({
-                    safeCode: reason,
-                }),
-            ProviderEventExecutionFailed: ({ retryable, retryAfterMs, safeCode }) =>
-                Match.value(retryable).pipe(
-                    Match.when(true, () =>
-                        Predicate.isUndefined(retryAfterMs)
-                            ? MailboxProcessingAttemptRetryableFailure.make({ safeCode })
-                            : MailboxProcessingAttemptRetryableFailure.make({ safeCode, retryAfterMs }),
-                    ),
-                    Match.when(false, () => MailboxProcessingAttemptTerminalFailure.make({ safeCode })),
-                    Match.exhaustive,
-                ),
-        }),
-    );
-
 /**
  * Hand a claimed batch to the processor of the provider that owns it, then record the result.
  *
@@ -587,57 +536,44 @@ export type ProcessClaimInput<R = never> = {
     readonly processors: ReadonlyArray<ProviderEventProcessor<R>>;
 };
 
-/**
- * Tell the store "still working" for as long as the callback runs.
- *
- * Renews three times per lease, so one or two renewals may fail before the lease lapses.
- * Never succeeds: it runs until it is interrupted, or fails once the claim belongs to someone else.
- */
-const keepClaimLeaseAlive = (input: { readonly claim: ClaimedMailboxBatch; readonly leaseMs: number }) =>
-    Effect.gen(function* () {
-        const backend = yield* MailboxProcessingBackend;
+export const processClaim = Effect.fn('delivery.process_mailbox_claim')(function* <R>(input: ProcessClaimInput<R>) {
+    const backend = yield* MailboxProcessingBackend;
+    const { claim, maxAttempts, leaseMs } = input;
+    const startedAt = yield* Clock.currentTimeMillis;
 
-        return yield* Effect.sleep(Duration.millis(Math.max(1, Math.floor(input.leaseMs / 3)))).pipe(
-            Effect.andThen(
-                backend.renewClaim({
-                    mailboxKey: input.claim.mailboxKey,
-                    claimId: input.claim.claimId,
-                    leaseMs: input.leaseMs,
-                }),
-            ),
-            Effect.catchTag('MailboxProcessingUnavailable', (error) =>
-                Effect.logWarning('Mailbox claim lease renewal failed; will try again', error),
-            ),
-            Effect.forever,
-        );
-    });
+    const claimAnnotations = {
+        mailbox_key: claim.mailboxKey,
+        batch_id: claim.batchId,
+        claim_id: claim.claimId,
+        attempt: claim.attempt,
+        event_count: claim.admissions.length,
+        provider: claim.admissions[0].provider,
+    };
 
-/**
- * The execution a provider receives for one attempt: the delivery's identity, what an earlier attempt
- * saved, and the claim-guarded prepare and handoff operations.
- */
-const makeProviderDeliveryExecution = (input: {
-    readonly claim: ClaimedMailboxBatch;
-    readonly handedOff: Ref.Ref<boolean>;
-}) =>
-    Effect.gen(function* () {
-        const backend = yield* MailboxProcessingBackend;
+    yield* Effect.logInfo('Mailbox processing started').pipe(Effect.annotateLogs(claimAnnotations));
+
+    const handedOff = yield* Ref.make(false);
+
+    /**
+     * The execution a provider receives for one attempt: the delivery's identity, what an earlier attempt
+     * saved, and the claim-guarded prepare and handoff operations.
+     */
+    const makeExecution = Effect.gen(function* () {
         const crypto = yield* Crypto.Crypto;
-        const { claim } = input;
 
-        const deliveryId = makeDeliveryId({
+        const deliveryId = formatDeliveryId({
             mailboxKey: claim.mailboxKey,
             batchId: claim.batchId,
             callbackIndex: claim.callbackIndex,
         });
 
-        const idempotencyKey = yield* makeDeliveryIdempotencyKey(deliveryId);
+        const idempotencyKey = yield* deliveryIdempotencyKey(deliveryId);
         const owner = { mailboxKey: claim.mailboxKey, claimId: claim.claimId };
 
-        const prepare = (prepared: PreparedDeliveryInvocation) =>
-            Effect.gen(function* () {
-                const remaining = yield* Effect.forEach(prepared.callbacks.slice(1), () =>
-                    makeDeliveryAccessToken.pipe(Effect.provideService(Crypto.Crypto, crypto)),
+        const prepare = Effect.fn('delivery.prepare')(
+            function* (prepared: PreparedDeliveryInvocation) {
+                const remaining = yield* Effect.forEach(Arr.drop(prepared.callbacks, 1), () =>
+                    randomDeliveryAccessTokenWith(crypto),
                 );
 
                 return yield* backend.prepareDelivery({
@@ -645,52 +581,59 @@ const makeProviderDeliveryExecution = (input: {
                     prepared,
                     callbackAccessTokens: [claim.accessToken, ...remaining],
                 });
-            }).pipe(
-                Effect.tapError((error) =>
-                    Effect.logWarning('Delivery preparation failed', error).pipe(
-                        Effect.annotateLogs({ mailbox_key: claim.mailboxKey, claim_id: claim.claimId }),
-                    ),
+            },
+            Effect.tapError((error) =>
+                Effect.logWarning('Delivery preparation failed', error).pipe(
+                    Effect.annotateLogs({ mailbox_key: claim.mailboxKey, claim_id: claim.claimId }),
                 ),
-                Effect.catchTags({
-                    PlatformError: () =>
-                        Effect.fail(new DeliveryPreparationUnavailable({ reason: 'random_unavailable' })),
-                    MailboxProcessingUnavailable: ({ reason }) =>
-                        Effect.fail(new DeliveryPreparationUnavailable({ reason })),
-                    MailboxProcessingClaimLost: () => Effect.fail(new DeliveryPreparationConflict({ deliveryId })),
-                }),
-                Effect.withSpan('delivery.prepare'),
-            );
+            ),
+            Effect.catchTags({
+                PlatformError: () => Effect.fail(DeliveryPreparationUnavailable.make({ reason: 'random_unavailable' })),
+                MailboxProcessingUnavailable: ({ reason }) =>
+                    Effect.fail(DeliveryPreparationUnavailable.make({ reason })),
+                MailboxProcessingClaimLost: () => Effect.fail(DeliveryPreparationConflict.make({ deliveryId })),
+            }),
+        );
 
-        const handoff = (options?: HandoffOptions) =>
-            Effect.gen(function* () {
-                const handedOffAt = Timestamp.make(yield* Clock.currentTimeMillis);
+        const handoff = Effect.fn('delivery.handoff')(function* (options: HandoffOptions | undefined) {
+            const handedOffAt = Timestamp.make(yield* Clock.currentTimeMillis);
 
-                const failAfterMs = yield* handoffFailAfterMs(options?.failAfter ?? DEFAULT_HANDOFF_FAIL_AFTER);
+            /** The time limit in whole milliseconds; none when it has no limit. Not a positive duration is a defect. */
+            const failAfter = Duration.fromInput(options?.failAfter ?? DEFAULT_HANDOFF_FAIL_AFTER);
 
-                const request = { ...owner, handedOffAt, links: options?.links ?? [] };
-                yield* backend
-                    .handOffDelivery(
-                        Option.match(failAfterMs, {
-                            onNone: () => request,
-                            onSome: (ms) => ({ ...request, failAfterMs: ms }),
-                        }),
-                    )
-                    .pipe(
-                        Effect.tapError((error) =>
-                            Effect.logWarning('Delivery handoff failed', error).pipe(
-                                Effect.annotateLogs({ mailbox_key: claim.mailboxKey, claim_id: claim.claimId }),
-                            ),
+            if (Option.isNone(failAfter)) return yield* Effect.die(HandoffFailAfterInvalid.make());
+
+            const failAfterMs = Duration.isFinite(failAfter.value)
+                ? Option.some(Math.ceil(Duration.toMillis(failAfter.value)))
+                : Option.none();
+
+            if (Option.exists(failAfterMs, (ms) => ms <= 0)) return yield* Effect.die(HandoffFailAfterInvalid.make());
+
+            const request = { ...owner, handedOffAt, links: options?.links ?? [] };
+
+            yield* backend
+                .handOffDelivery(
+                    Option.match(failAfterMs, {
+                        onNone: () => request,
+                        onSome: (ms) => ({ ...request, failAfterMs: ms }),
+                    }),
+                )
+                .pipe(
+                    Effect.tapError((error) =>
+                        Effect.logWarning('Delivery handoff failed', error).pipe(
+                            Effect.annotateLogs({ mailbox_key: claim.mailboxKey, claim_id: claim.claimId }),
                         ),
-                        Effect.catchTags({
-                            MailboxProcessingUnavailable: ({ reason }) =>
-                                Effect.fail(new DeliveryHandoffUnavailable({ reason })),
-                            MailboxProcessingClaimLost: () => Effect.fail(new DeliveryHandoffRejected({ deliveryId })),
-                        }),
-                    );
-                yield* Ref.set(input.handedOff, true);
+                    ),
+                    Effect.catchTags({
+                        MailboxProcessingUnavailable: ({ reason }) =>
+                            Effect.fail(DeliveryHandoffUnavailable.make({ reason })),
+                        MailboxProcessingClaimLost: () => Effect.fail(DeliveryHandoffRejected.make({ deliveryId })),
+                    }),
+                );
+            yield* Ref.set(handedOff, true);
 
-                return DeliveryHandoff.make({ deliveryId });
-            }).pipe(Effect.withSpan('delivery.handoff'));
+            return DeliveryHandoff.make({ deliveryId });
+        });
 
         return new ProviderDeliveryExecution({
             deliveryId,
@@ -700,125 +643,162 @@ const makeProviderDeliveryExecution = (input: {
             prepare,
             context: new DeliveryContext({
                 deliveryId,
-                conversationId: makeConversationId(claim.mailboxKey),
+                conversationId: mailboxConversationId(claim.mailboxKey),
                 accessToken: Redacted.make(claim.accessToken),
                 handoff,
             }),
         });
     });
 
-export const processClaim = <R>(input: ProcessClaimInput<R>) =>
-    Effect.gen(function* () {
-        const backend = yield* MailboxProcessingBackend;
-        const { claim, maxAttempts, leaseMs } = input;
-        const startedAt = yield* Clock.currentTimeMillis;
+    /**
+     * Tell the store "still working" for as long as the callback runs.
+     *
+     * Renews three times per lease, so one or two renewals may fail before the lease lapses.
+     * Never succeeds: it runs until it is interrupted, or fails once the claim belongs to someone else.
+     */
+    const keepClaimLeaseAlive = Effect.sleep(Duration.millis(Math.max(1, Math.floor(leaseMs / 3)))).pipe(
+        Effect.andThen(
+            backend.renewClaim({
+                mailboxKey: claim.mailboxKey,
+                claimId: claim.claimId,
+                leaseMs,
+            }),
+        ),
+        Effect.catchTag('MailboxProcessingUnavailable', (error) =>
+            Effect.logWarning('Mailbox claim lease renewal failed; will try again', error),
+        ),
+        Effect.forever,
+    );
 
-        const claimAnnotations = {
-            mailbox_key: claim.mailboxKey,
-            batch_id: claim.batchId,
-            claim_id: claim.claimId,
-            attempt: claim.attempt,
-            event_count: claim.admissions.length,
-            provider: claim.admissions[0].provider,
-        };
+    const runCallbackUnderLease = Effect.gen(function* () {
+        const execution = yield* makeExecution;
 
-        yield* Effect.logInfo('Mailbox processing started').pipe(Effect.annotateLogs(claimAnnotations));
-
-        const handedOff = yield* Ref.make(false);
-
-        const runCallbackUnderLease = Effect.gen(function* () {
-            const execution = yield* makeProviderDeliveryExecution({ claim, handedOff });
-
-            return yield* Effect.raceFirst(
-                processProviderEvent(input.processors)(claim.admissions, execution).pipe(
-                    Effect.match({
-                        onSuccess: providerSuccessToAttemptResult,
-                        onFailure: providerFailureToAttemptResult,
+        return yield* Effect.raceFirst(
+            processProviderEvent(input.processors)(claim.admissions, execution).pipe(
+                Effect.match({
+                    /** A provider's success as the attempt's result. */
+                    onSuccess: (result) =>
+                        Match.value(result).pipe(
+                            Match.tagsExhaustive({
+                                ProviderEventHandled: () => MailboxProcessingAttemptCompleted.make({}),
+                                ProviderEventIgnored: ({ reason }) =>
+                                    MailboxProcessingAttemptCompleted.make({ ignoredReason: reason }),
+                            }),
+                        ),
+                    /** A provider's failure as the attempt's result. */
+                    onFailure: (error) =>
+                        Match.value(error).pipe(
+                            Match.tagsExhaustive({
+                                ProviderEventProcessorNotFound: () =>
+                                    MailboxProcessingAttemptRetryableFailure.make({
+                                        safeCode: 'processor_not_found',
+                                    }),
+                                ProviderEventInvalid: ({ reason }) =>
+                                    MailboxProcessingAttemptTerminalFailure.make({ safeCode: reason }),
+                                ProviderEventExecutionFailed: ({ retryable, retryAfterMs, safeCode }) =>
+                                    Match.value(retryable).pipe(
+                                        Match.when(true, () =>
+                                            Predicate.isUndefined(retryAfterMs)
+                                                ? MailboxProcessingAttemptRetryableFailure.make({ safeCode })
+                                                : MailboxProcessingAttemptRetryableFailure.make({
+                                                      safeCode,
+                                                      retryAfterMs,
+                                                  }),
+                                        ),
+                                        Match.when(false, () =>
+                                            MailboxProcessingAttemptTerminalFailure.make({ safeCode }),
+                                        ),
+                                        Match.exhaustive,
+                                    ),
+                            }),
+                        ),
+                }),
+            ),
+            keepClaimLeaseAlive,
+        );
+    }).pipe(
+        Effect.catchTag('PlatformError', (error) =>
+            Effect.logError('Delivery idempotency key could not be made', error).pipe(
+                Effect.annotateLogs(claimAnnotations),
+                Effect.as(
+                    MailboxProcessingAttemptRetryableFailure.make({
+                        safeCode: 'idempotency_key_unavailable',
                     }),
                 ),
-                keepClaimLeaseAlive({ claim, leaseMs }),
-            );
-        }).pipe(
-            Effect.catchTag('PlatformError', (error) =>
-                Effect.logError('Delivery idempotency key could not be made', error).pipe(
-                    Effect.annotateLogs(claimAnnotations),
-                    Effect.as(
-                        MailboxProcessingAttemptRetryableFailure.make({
-                            safeCode: 'idempotency_key_unavailable',
-                        }),
-                    ),
-                ),
             ),
-            Effect.tapError((error) =>
-                Effect.logWarning('Mailbox claim was lost while its callback ran; callback interrupted', error).pipe(
-                    Effect.annotateLogs(claimAnnotations),
-                ),
+        ),
+        Effect.tapError((error) =>
+            Effect.logWarning('Mailbox claim was lost while its callback ran; callback interrupted', error).pipe(
+                Effect.annotateLogs(claimAnnotations),
             ),
-        );
+        ),
+    );
 
-        const providerResult =
-            claim.attempt > maxAttempts
+    const providerResult =
+        claim.attempt > maxAttempts
+            ? MailboxProcessingAttemptTerminalFailure.make({ safeCode: 'attempts_exhausted' })
+            : !isRoutableMailboxKey(claim.mailboxKey)
+              ? MailboxProcessingAttemptTerminalFailure.make({ safeCode: 'mailbox_key_unroutable' })
+              : yield* runCallbackUnderLease;
+
+    const processingResult = Match.value(providerResult).pipe(
+        Match.tag('RetryableFailure', (result) =>
+            claim.attempt >= maxAttempts
                 ? MailboxProcessingAttemptTerminalFailure.make({ safeCode: 'attempts_exhausted' })
-                : !isRoutableMailboxKey(claim.mailboxKey)
-                  ? MailboxProcessingAttemptTerminalFailure.make({ safeCode: 'mailbox_key_unroutable' })
-                  : yield* runCallbackUnderLease;
+                : result,
+        ),
+        Match.orElse((result) => result),
+    );
 
-        const processingResult = Match.value(providerResult).pipe(
-            Match.tag('RetryableFailure', (result) =>
-                claim.attempt >= maxAttempts
-                    ? MailboxProcessingAttemptTerminalFailure.make({ safeCode: 'attempts_exhausted' })
-                    : result,
-            ),
-            Match.orElse((result) => result),
+    const processingFinishedAt = yield* Clock.currentTimeMillis;
+    yield* backend.recordProcessingAttemptResult({
+        claim,
+        result: processingResult,
+        finishedAt: Timestamp.make(processingFinishedAt),
+    });
+    const recordedAt = yield* Clock.currentTimeMillis;
+
+    const recordedAnnotations = {
+        ...claimAnnotations,
+        result: processingResult._tag,
+        duration_ms: recordedAt - startedAt,
+    };
+
+    /** After a handoff the store waits for the remote worker, whatever the callback returned. */
+    if (yield* Ref.get(handedOff)) {
+        yield* Effect.logInfo('Mailbox delivery handed off; waiting for its remote worker').pipe(
+            Effect.annotateLogs({ ...recordedAnnotations, handed_off: true }),
         );
 
-        const processingFinishedAt = yield* Clock.currentTimeMillis;
-        yield* backend.recordProcessingAttemptResult({
-            claim,
-            result: processingResult,
-            finishedAt: Timestamp.make(processingFinishedAt),
-        });
-        const recordedAt = yield* Clock.currentTimeMillis;
+        return;
+    }
 
-        const recordedAnnotations = {
-            ...claimAnnotations,
-            result: processingResult._tag,
-            duration_ms: recordedAt - startedAt,
-        };
+    yield* Match.value(processingResult).pipe(
+        Match.tagsExhaustive({
+            Completed: ({ ignoredReason }) => {
+                const log = Effect.logInfo('Mailbox processing completed');
 
-        /** After a handoff the store waits for the remote worker, whatever the callback returned. */
-        if (yield* Ref.get(handedOff)) {
-            return yield* Effect.logInfo('Mailbox delivery handed off; waiting for its remote worker').pipe(
-                Effect.annotateLogs({ ...recordedAnnotations, handed_off: true }),
-            );
-        }
+                return Predicate.isUndefined(ignoredReason)
+                    ? log
+                    : log.pipe(Effect.annotateLogs({ ignored_reason: ignoredReason }));
+            },
+            RetryableFailure: ({ retryAfterMs, safeCode }) => {
+                const log = Effect.logWarning('Mailbox processing scheduled for retry').pipe(
+                    Effect.annotateLogs({ safe_code: safeCode }),
+                );
 
-        yield* Match.value(processingResult).pipe(
-            Match.tagsExhaustive({
-                Completed: ({ ignoredReason }) => {
-                    const log = Effect.logInfo('Mailbox processing completed');
-
-                    return Predicate.isUndefined(ignoredReason)
-                        ? log
-                        : log.pipe(Effect.annotateLogs({ ignored_reason: ignoredReason }));
-                },
-                RetryableFailure: ({ retryAfterMs, safeCode }) => {
-                    const log = Effect.logWarning('Mailbox processing scheduled for retry').pipe(
-                        Effect.annotateLogs({ safe_code: safeCode }),
-                    );
-
-                    return Predicate.isUndefined(retryAfterMs)
-                        ? log
-                        : log.pipe(Effect.annotateLogs({ retry_after_ms: retryAfterMs }));
-                },
-                TerminalFailure: ({ safeCode }) =>
-                    Effect.logWarning('Mailbox processing permanently failed').pipe(
-                        Effect.annotateLogs({ safe_code: safeCode }),
-                    ),
-            }),
-            Effect.annotateLogs(recordedAnnotations),
-        );
-    }).pipe(Effect.withSpan('delivery.process_mailbox_claim'));
+                return Predicate.isUndefined(retryAfterMs)
+                    ? log
+                    : log.pipe(Effect.annotateLogs({ retry_after_ms: retryAfterMs }));
+            },
+            TerminalFailure: ({ safeCode }) =>
+                Effect.logWarning('Mailbox processing permanently failed').pipe(
+                    Effect.annotateLogs({ safe_code: safeCode }),
+                ),
+        }),
+        Effect.annotateLogs(recordedAnnotations),
+    );
+});
 
 /** How many times one output operation is tried before it fails for good. */
 export const DEFAULT_OUTPUT_MAX_ATTEMPTS = 8;
@@ -828,31 +808,131 @@ export const OUTPUT_RETRY_INITIAL_MS = 1_000;
 
 export const OUTPUT_RETRY_MAX_MS = 5 * 60 * 1_000;
 
-/** The wait before retry `attempt + 1`: doubling from one second, capped, then spread over its upper half. */
-const outputRetryDelayMs = (attempt: number) =>
-    Effect.gen(function* () {
-        const ceiling = Math.min(OUTPUT_RETRY_INITIAL_MS * 2 ** Math.max(0, attempt - 1), OUTPUT_RETRY_MAX_MS);
-
-        return Math.round(ceiling / 2 + (ceiling / 2) * (yield* Random.next));
-    });
-
 /** A saved operation that cannot be given to its provider; it fails with `safeCode` without a call. */
-class OutputNotSendable extends Data.TaggedError('OutputNotSendable')<{
-    readonly safeCode: string;
-}> {}
+class OutputNotSendable extends Schema.TaggedError<OutputNotSendable, { readonly brand: unique symbol }>()(
+    'OutputNotSendable',
+    { safeCode: Schema.String },
+) {}
+
+export type ProcessOutputClaimInput<R = never> = {
+    readonly claim: ClaimedDeliveryOutput;
+    readonly maxAttempts: number;
+    readonly leaseMs: number;
+    readonly processors: ReadonlyArray<ProviderOutputProcessor<R>>;
+};
 
 /**
- * The operation as its provider receives it. An update or deletion, or a reaction on a message, takes
- * the provider's reference to its message; there is none when the message's create failed, so it cannot
- * be sent. A reaction removal also takes the receipt of the add it undoes, when there is one. A plan
- * takes the plan the provider last showed.
+ * Send one claimed output operation through its provider, then record how it went.
+ *
+ * The provider call and the lease renewal race, as for callbacks. A retryable failure is tried again
+ * after a doubling wait, until `maxAttempts`; anything else fails the operation for good. Either way
+ * the delivery's result stands: a failed output never changes `completed` to `failed`.
  */
-const providerOperation = (claim: ClaimedDeliveryOutput): Effect.Effect<ProviderOutputOperation, OutputNotSendable> => {
-    const messageReference = Effect.fromOption(Option.fromUndefinedOr(claim.messageReference)).pipe(
-        Effect.mapError(() => new OutputNotSendable({ safeCode: 'message_not_created' })),
+export const processOutputClaim = Effect.fn('delivery.process_output_claim')(function* <R>(
+    input: ProcessOutputClaimInput<R>,
+) {
+    const backend = yield* MailboxProcessingBackend;
+    const { claim, maxAttempts, leaseMs } = input;
+    const startedAt = yield* Clock.currentTimeMillis;
+
+    const deliveryId = formatDeliveryId({
+        mailboxKey: claim.mailboxKey,
+        batchId: claim.batchId,
+        callbackIndex: claim.callbackIndex,
+    });
+
+    const annotations = {
+        mailbox_key: claim.mailboxKey,
+        batch_id: claim.batchId,
+        delivery_id: deliveryId,
+        operation_id: claim.operationId,
+        operation: claim.operation._tag,
+        attempt: claim.attempt,
+        had_ambiguous_attempt: claim.hadAmbiguousAttempt,
+        provider: claim.provider,
+    };
+
+    const failed = (safeCode: string) => DeliveryOutputSettlement.cases.Failed.make({ safeCode });
+
+    /** Tell the store "still sending" for as long as the provider call runs, as for callbacks. */
+    const keepOutputLeaseAlive = Effect.sleep(Duration.millis(Math.max(1, Math.floor(leaseMs / 3)))).pipe(
+        Effect.andThen(
+            backend.renewDeliveryOutput({
+                mailboxKey: claim.mailboxKey,
+                operationId: claim.operationId,
+                claimId: claim.claimId,
+                leaseMs,
+            }),
+        ),
+        Effect.catchTag('MailboxProcessingUnavailable', (error) =>
+            Effect.logWarning('Delivery output lease renewal failed; will try again', error),
+        ),
+        Effect.forever,
     );
 
-    return Match.value(claim.operation).pipe(
+    const sendUnderLease = (prepared: PreparedDeliveryCallback, operation: ProviderOutputOperation) =>
+        Effect.raceFirst(
+            processProviderOutput(input.processors)({
+                namespace: claim.namespace,
+                provider: claim.provider,
+                attempt: ProviderOutputAttempt.make({
+                    deliveryId,
+                    operationId: claim.operationId,
+                    attempt: claim.attempt,
+                    hadAmbiguousAttempt: claim.hadAmbiguousAttempt,
+                    idempotencyKey: claim.idempotencyKey,
+                    prepared,
+                    operation,
+                }),
+            }).pipe(
+                Effect.map(({ receipt }) =>
+                    DeliveryOutputSettlement.cases.Applied.make(Predicate.isUndefined(receipt) ? {} : { receipt }),
+                ),
+                Effect.catchTags({
+                    ProviderOutputProcessorNotFound: () => Effect.succeed(failed('output_processor_not_found')),
+                    DeliveryOutputFailed: ({ retryable, retryAfterMs, safeCode }) =>
+                        Effect.gen(function* () {
+                            if (!retryable) return failed(safeCode);
+
+                            if (claim.attempt >= maxAttempts) return failed('attempts_exhausted');
+                            const now = yield* Clock.currentTimeMillis;
+
+                            /** The wait before retry `attempt + 1`: doubling from one second, capped, then spread over its upper half. */
+                            const ceiling = Math.min(
+                                OUTPUT_RETRY_INITIAL_MS * 2 ** Math.max(0, claim.attempt - 1),
+                                OUTPUT_RETRY_MAX_MS,
+                            );
+
+                            const waitMs =
+                                retryAfterMs ?? Math.round(ceiling / 2 + (ceiling / 2) * (yield* Random.next));
+
+                            return DeliveryOutputSettlement.cases.Retry.make({
+                                readyAt: Timestamp.make(now + waitMs),
+                            });
+                        }),
+                }),
+            ),
+            keepOutputLeaseAlive,
+        ).pipe(
+            Effect.tapError((error) =>
+                Effect.logWarning(
+                    'Delivery output lease was lost while its provider call ran; call interrupted',
+                    error,
+                ).pipe(Effect.annotateLogs(annotations)),
+            ),
+        );
+
+    /**
+     * The operation as its provider receives it. An update or deletion, or a reaction on a message, takes
+     * the provider's reference to its message; there is none when the message's create failed, so it cannot
+     * be sent. A reaction removal also takes the receipt of the add it undoes, when there is one. A plan
+     * takes the plan the provider last showed.
+     */
+    const messageReference = Effect.fromOption(Option.fromUndefinedOr(claim.messageReference)).pipe(
+        Effect.mapError(() => OutputNotSendable.make({ safeCode: 'message_not_created' })),
+    );
+
+    const providerOperation = Match.value(claim.operation).pipe(
         Match.withReturnType<Effect.Effect<ProviderOutputOperation, OutputNotSendable>>(),
         Match.tagsExhaustive({
             PresentOutcome: (operation) =>
@@ -886,7 +966,7 @@ const providerOperation = (claim: ClaimedDeliveryOutput): Effect.Effect<Provider
                                     ProviderReactionTarget.cases.MessageTarget.make({ messageId, reference }),
                                 ),
                             PlanTarget: () =>
-                                Effect.fail(new OutputNotSendable({ safeCode: 'reaction_target_unavailable' })),
+                                Effect.fail(OutputNotSendable.make({ safeCode: 'reaction_target_unavailable' })),
                         }),
                     );
 
@@ -900,164 +980,57 @@ const providerOperation = (claim: ClaimedDeliveryOutput): Effect.Effect<Provider
                 }),
         }),
     );
-};
 
-export type ProcessOutputClaimInput<R = never> = {
-    readonly claim: ClaimedDeliveryOutput;
-    readonly maxAttempts: number;
-    readonly leaseMs: number;
-    readonly processors: ReadonlyArray<ProviderOutputProcessor<R>>;
-};
+    yield* Effect.logInfo('Delivery output started').pipe(Effect.annotateLogs(annotations));
 
-/** Tell the store "still sending" for as long as the provider call runs. See `keepClaimLeaseAlive`. */
-const keepOutputLeaseAlive = (input: { readonly claim: ClaimedDeliveryOutput; readonly leaseMs: number }) =>
-    Effect.gen(function* () {
-        const backend = yield* MailboxProcessingBackend;
+    if (
+        Predicate.isTagged(claim.operation, 'PresentOutcome') &&
+        Predicate.isTagged(claim.operation.outcome, 'Failed') &&
+        claim.operation.outcome.reason === 'TimedOut' &&
+        claim.attempt === 1
+    ) {
+        yield* Effect.logWarning(
+            'Delivery timed out: its remote worker sent no request within the handoff time limit',
+        ).pipe(Effect.annotateLogs(annotations));
+    }
 
-        return yield* Effect.sleep(Duration.millis(Math.max(1, Math.floor(input.leaseMs / 3)))).pipe(
-            Effect.andThen(
-                backend.renewDeliveryOutput({
-                    mailboxKey: input.claim.mailboxKey,
-                    operationId: input.claim.operationId,
-                    claimId: input.claim.claimId,
-                    leaseMs: input.leaseMs,
-                }),
-            ),
-            Effect.catchTag('MailboxProcessingUnavailable', (error) =>
-                Effect.logWarning('Delivery output lease renewal failed; will try again', error),
-            ),
-            Effect.forever,
-        );
+    const prepared = claim.prepared;
+
+    const settlement =
+        claim.attempt > maxAttempts
+            ? failed('attempts_exhausted')
+            : Predicate.isUndefined(prepared)
+              ? failed('destination_missing')
+              : yield* providerOperation.pipe(
+                    Effect.flatMap((operation) => sendUnderLease(prepared, operation)),
+                    Effect.catchTag('OutputNotSendable', ({ safeCode }) => Effect.succeed(failed(safeCode))),
+                );
+
+    const settledAt = Timestamp.make(yield* Clock.currentTimeMillis);
+    yield* backend.settleDeliveryOutput({
+        mailboxKey: claim.mailboxKey,
+        operationId: claim.operationId,
+        claimId: claim.claimId,
+        settlement,
+        settledAt,
     });
 
-/**
- * Send one claimed output operation through its provider, then record how it went.
- *
- * The provider call and the lease renewal race, as for callbacks. A retryable failure is tried again
- * after a doubling wait, until `maxAttempts`; anything else fails the operation for good. Either way
- * the delivery's result stands: a failed output never changes `completed` to `failed`.
- */
-export const processOutputClaim = <R>(input: ProcessOutputClaimInput<R>) =>
-    Effect.gen(function* () {
-        const backend = yield* MailboxProcessingBackend;
-        const { claim, maxAttempts, leaseMs } = input;
-        const startedAt = yield* Clock.currentTimeMillis;
+    const settledAnnotations = {
+        ...annotations,
+        result: settlement._tag,
+        duration_ms: settledAt - startedAt,
+    };
 
-        const deliveryId = makeDeliveryId({
-            mailboxKey: claim.mailboxKey,
-            batchId: claim.batchId,
-            callbackIndex: claim.callbackIndex,
-        });
-
-        const annotations = {
-            mailbox_key: claim.mailboxKey,
-            batch_id: claim.batchId,
-            delivery_id: deliveryId,
-            operation_id: claim.operationId,
-            operation: claim.operation._tag,
-            attempt: claim.attempt,
-            had_ambiguous_attempt: claim.hadAmbiguousAttempt,
-            provider: claim.provider,
-        };
-
-        const failed = (safeCode: string) => DeliveryOutputSettlement.cases.Failed.make({ safeCode });
-
-        const sendUnderLease = (prepared: PreparedDeliveryCallback, operation: ProviderOutputOperation) =>
-            Effect.raceFirst(
-                processProviderOutput(input.processors)({
-                    namespace: claim.namespace,
-                    provider: claim.provider,
-                    attempt: ProviderOutputAttempt.make({
-                        deliveryId,
-                        operationId: claim.operationId,
-                        attempt: claim.attempt,
-                        hadAmbiguousAttempt: claim.hadAmbiguousAttempt,
-                        idempotencyKey: claim.idempotencyKey,
-                        prepared,
-                        operation,
-                    }),
-                }).pipe(
-                    Effect.map(({ receipt }) =>
-                        DeliveryOutputSettlement.cases.Applied.make(Predicate.isUndefined(receipt) ? {} : { receipt }),
-                    ),
-                    Effect.catchTags({
-                        ProviderOutputProcessorNotFound: () => Effect.succeed(failed('output_processor_not_found')),
-                        DeliveryOutputFailed: ({ retryable, retryAfterMs, safeCode }) =>
-                            Effect.gen(function* () {
-                                if (!retryable) return failed(safeCode);
-
-                                if (claim.attempt >= maxAttempts) return failed('attempts_exhausted');
-                                const now = yield* Clock.currentTimeMillis;
-                                const waitMs = retryAfterMs ?? (yield* outputRetryDelayMs(claim.attempt));
-
-                                return DeliveryOutputSettlement.cases.Retry.make({
-                                    readyAt: Timestamp.make(now + waitMs),
-                                });
-                            }),
-                    }),
-                ),
-                keepOutputLeaseAlive({ claim, leaseMs }),
-            ).pipe(
-                Effect.tapError((error) =>
-                    Effect.logWarning(
-                        'Delivery output lease was lost while its provider call ran; call interrupted',
-                        error,
-                    ).pipe(Effect.annotateLogs(annotations)),
-                ),
-            );
-
-        yield* Effect.logInfo('Delivery output started').pipe(Effect.annotateLogs(annotations));
-
-        if (
-            Predicate.isTagged(claim.operation, 'PresentOutcome') &&
-            Predicate.isTagged(claim.operation.outcome, 'Failed') &&
-            claim.operation.outcome.reason === 'TimedOut' &&
-            claim.attempt === 1
-        ) {
-            yield* Effect.logWarning(
-                'Delivery timed out: its remote worker sent no request within the handoff time limit',
-            ).pipe(Effect.annotateLogs(annotations));
-        }
-
-        const prepared = claim.prepared;
-
-        const settlement =
-            claim.attempt > maxAttempts
-                ? failed('attempts_exhausted')
-                : Predicate.isUndefined(prepared)
-                  ? failed('destination_missing')
-                  : yield* providerOperation(claim).pipe(
-                        Effect.flatMap((operation) => sendUnderLease(prepared, operation)),
-                        Effect.catchTag('OutputNotSendable', ({ safeCode }) => Effect.succeed(failed(safeCode))),
-                    );
-
-        const settledAt = Timestamp.make(yield* Clock.currentTimeMillis);
-        yield* backend.settleDeliveryOutput({
-            mailboxKey: claim.mailboxKey,
-            operationId: claim.operationId,
-            claimId: claim.claimId,
-            settlement,
-            settledAt,
-        });
-
-        const settledAnnotations = {
-            ...annotations,
-            result: settlement._tag,
-            duration_ms: settledAt - startedAt,
-        };
-
-        yield* DeliveryOutputSettlement.match(settlement, {
-            Applied: () => Effect.logInfo('Delivery output applied'),
-            Retry: ({ readyAt }) =>
-                Effect.logWarning('Delivery output scheduled for retry').pipe(
-                    Effect.annotateLogs({ retry_after_ms: readyAt - settledAt }),
-                ),
-            Failed: ({ safeCode }) =>
-                Effect.logWarning('Delivery output permanently failed').pipe(
-                    Effect.annotateLogs({ safe_code: safeCode }),
-                ),
-        }).pipe(Effect.annotateLogs(settledAnnotations));
-    }).pipe(Effect.withSpan('delivery.process_output_claim'));
+    yield* DeliveryOutputSettlement.match(settlement, {
+        Applied: () => Effect.logInfo('Delivery output applied'),
+        Retry: ({ readyAt }) =>
+            Effect.logWarning('Delivery output scheduled for retry').pipe(
+                Effect.annotateLogs({ retry_after_ms: readyAt - settledAt }),
+            ),
+        Failed: ({ safeCode }) =>
+            Effect.logWarning('Delivery output permanently failed').pipe(Effect.annotateLogs({ safe_code: safeCode })),
+    }).pipe(Effect.annotateLogs(settledAnnotations));
+});
 
 export type MailboxProcessingOptions = {
     /** How many mailboxes one pass works on at the same time. */
@@ -1080,15 +1053,15 @@ export type MailboxProcessingOptions = {
 };
 
 /** What one pass did with one ready mailbox. */
-type ReadyMailboxOutcome = Data.TaggedEnum<{
-    Claimed: { readonly claim: ClaimedMailboxBatch };
-    Output: { readonly claim: ClaimedDeliveryOutput };
-    Deferred: {};
-    /** Another worker got there first, or the store could not be reached for this mailbox. */
-    Skipped: {};
-}>;
-
-const ReadyMailboxOutcome = Data.taggedEnum<ReadyMailboxOutcome>();
+const ReadyMailboxOutcome = Data.taggedEnum<
+    Data.TaggedEnum<{
+        Claimed: { readonly claim: ClaimedMailboxBatch };
+        Output: { readonly claim: ClaimedDeliveryOutput };
+        Deferred: {};
+        /** Another worker got there first, or the store could not be reached for this mailbox. */
+        Skipped: {};
+    }>
+>();
 
 const claimedOrSkipped = (claimed: Option.Option<ClaimedMailboxBatch>) =>
     Option.match(claimed, {
@@ -1100,200 +1073,173 @@ const claimedOrSkipped = (claimed: Option.Option<ClaimedMailboxBatch>) =>
  * Look at one ready mailbox and either take a batch from it or put it off until later.
  * A frozen batch is always taken as it is. For waiting events the delivery mode decides.
  */
-export const claimOrDeferReadyMailbox = (input: {
+export const claimOrDeferReadyMailbox = Effect.fn('delivery.claim_or_defer_ready_mailbox')(function* (input: {
     readonly mailbox: ReadyMailbox;
     readonly leaseMs: number;
     readonly deliveryModeFor: (provider: string) => DeliveryMode;
-}) =>
-    Effect.gen(function* () {
-        const mailboxProcessingBackend = yield* MailboxProcessingBackend;
-        const crypto = yield* Crypto.Crypto;
-        const { leaseMs } = input;
+}) {
+    const mailboxProcessingBackend = yield* MailboxProcessingBackend;
+    const crypto = yield* Crypto.Crypto;
+    const { leaseMs } = input;
 
-        return yield* Match.value(input.mailbox).pipe(
-            Match.tagsExhaustive({
-                OutputReadyMailbox: ({ mailboxKey }) =>
-                    Effect.gen(function* () {
-                        const idempotencyKey = yield* crypto.randomUUIDv4();
+    return yield* Match.value(input.mailbox).pipe(
+        Match.tagsExhaustive({
+            OutputReadyMailbox: ({ mailboxKey }) =>
+                Effect.gen(function* () {
+                    const idempotencyKey = yield* crypto.randomUUIDv4();
 
-                        const claimed = yield* mailboxProcessingBackend.claimDeliveryOutput(
-                            ClaimDeliveryOutput.make({ mailboxKey, leaseMs, idempotencyKey }),
-                        );
+                    const claimed = yield* mailboxProcessingBackend.claimDeliveryOutput(
+                        ClaimDeliveryOutput.make({ mailboxKey, leaseMs, idempotencyKey }),
+                    );
 
-                        return Option.match(claimed, {
-                            onNone: () => ReadyMailboxOutcome.Skipped(),
-                            onSome: (claim) => ReadyMailboxOutcome.Output({ claim }),
-                        });
-                    }).pipe(
-                        Effect.catchTag('PlatformError', (error) =>
-                            Effect.logError('Random output idempotency key could not be made', error).pipe(
-                                Effect.andThen(
-                                    Effect.fail(new MailboxProcessingUnavailable({ reason: 'random_unavailable' })),
-                                ),
+                    return Option.match(claimed, {
+                        onNone: () => ReadyMailboxOutcome.Skipped(),
+                        onSome: (claim) => ReadyMailboxOutcome.Output({ claim }),
+                    });
+                }).pipe(
+                    Effect.catchTag('PlatformError', (error) =>
+                        Effect.logError('Random output idempotency key could not be made', error).pipe(
+                            Effect.andThen(
+                                Effect.fail(MailboxProcessingUnavailable.make({ reason: 'random_unavailable' })),
                             ),
                         ),
                     ),
-                RecoverableMailbox: ({ mailboxKey }) =>
-                    mailboxProcessingBackend
-                        .claimMailbox(ClaimFrozenBatch.make({ mailboxKey, leaseMs }))
-                        .pipe(Effect.map(claimedOrSkipped)),
-                WaitingMailbox: ({ mailboxKey, provider, waiting }) =>
-                    Effect.gen(function* () {
-                        const now = Timestamp.make(yield* Clock.currentTimeMillis);
+                ),
+            RecoverableMailbox: ({ mailboxKey }) =>
+                mailboxProcessingBackend
+                    .claimMailbox(ClaimFrozenBatch.make({ mailboxKey, leaseMs }))
+                    .pipe(Effect.map(claimedOrSkipped)),
+            WaitingMailbox: ({ mailboxKey, provider, waiting }) =>
+                Effect.gen(function* () {
+                    const now = Timestamp.make(yield* Clock.currentTimeMillis);
 
-                        const decision = decideMailboxClaim({
-                            waiting,
-                            mode: input.deliveryModeFor(provider),
-                            now,
-                        });
+                    const decision = decideMailboxClaim({
+                        waiting,
+                        mode: input.deliveryModeFor(provider),
+                        now,
+                    });
 
-                        return yield* MailboxClaimDecision.$match(decision, {
-                            ClaimUpTo: ({ upToSequence }) =>
-                                Effect.gen(function* () {
-                                    const batchId = yield* makeBatchId;
-                                    const accessToken = yield* makeDeliveryAccessToken;
+                    return yield* MailboxClaimDecision.$match(decision, {
+                        ClaimUpTo: ({ upToSequence }) =>
+                            Effect.gen(function* () {
+                                const batchId = yield* randomBatchId;
+                                const accessToken = yield* randomDeliveryAccessToken;
 
-                                    const claimed = yield* mailboxProcessingBackend.claimMailbox(
-                                        ClaimWaitingEvents.make({
-                                            mailboxKey,
-                                            upToSequence,
-                                            leaseMs,
-                                            batchId,
-                                            accessToken,
-                                        }),
-                                    );
+                                const claimed = yield* mailboxProcessingBackend.claimMailbox(
+                                    ClaimWaitingEvents.make({
+                                        mailboxKey,
+                                        upToSequence,
+                                        leaseMs,
+                                        batchId,
+                                        accessToken,
+                                    }),
+                                );
 
-                                    return claimedOrSkipped(claimed);
-                                }).pipe(
-                                    Effect.catchTag('PlatformError', (error) =>
-                                        Effect.logError('Random batch identity could not be made', error).pipe(
-                                            Effect.andThen(
-                                                Effect.fail(
-                                                    new MailboxProcessingUnavailable({ reason: 'random_unavailable' }),
-                                                ),
+                                return claimedOrSkipped(claimed);
+                            }).pipe(
+                                Effect.catchTag('PlatformError', (error) =>
+                                    Effect.logError('Random batch identity could not be made', error).pipe(
+                                        Effect.andThen(
+                                            Effect.fail(
+                                                MailboxProcessingUnavailable.make({ reason: 'random_unavailable' }),
                                             ),
                                         ),
                                     ),
                                 ),
-                            WaitUntil: ({ until }) =>
-                                mailboxProcessingBackend
-                                    .deferMailbox({ mailboxKey, until, lastSequenceSeen: waiting.lastSequence })
-                                    .pipe(Effect.as(ReadyMailboxOutcome.Deferred())),
-                        });
-                    }),
-            }),
-        );
-    }).pipe(Effect.withSpan('delivery.claim_or_defer_ready_mailbox'));
+                            ),
+                        WaitUntil: ({ until }) =>
+                            mailboxProcessingBackend
+                                .deferMailbox({ mailboxKey, until, lastSequenceSeen: waiting.lastSequence })
+                                .pipe(Effect.as(ReadyMailboxOutcome.Deferred())),
+                    });
+                }),
+        }),
+    );
+});
 
 /** Run one claimed piece of work. A failure is logged here so one mailbox cannot stop the pass. */
 const runLogged = <E, R>(
     work: Effect.Effect<void, E, R>,
     annotations: { readonly mailbox_key: string; readonly claim_id: string },
 ) =>
-    Effect.gen(function* () {
-        const result = yield* work.pipe(Effect.exit);
-
-        if (Exit.isSuccess(result)) return;
-
-        if (Cause.hasInterruptsOnly(result.cause)) return yield* Effect.failCause(result.cause);
-        yield* Effect.logError('Mailbox claim processing failed', result.cause).pipe(Effect.annotateLogs(annotations));
-    });
-
-/**
- * Each mailbox is claimed right before its callback runs, never ahead of time,
- * so a claim does not sit unrenewed while it waits for a free concurrency slot.
- */
-const processReadyMailbox = <R>(
-    options: MailboxProcessingOptions,
-    processors: MailboxProcessors<R>,
-    mailbox: ReadyMailbox,
-) =>
-    Effect.gen(function* () {
-        const outcome = yield* claimOrDeferReadyMailbox({
-            mailbox,
-            leaseMs: options.leaseMs,
-            deliveryModeFor: options.deliveryModeFor,
-        }).pipe(
-            Effect.catchTag('MailboxProcessingUnavailable', (error) =>
-                Effect.logError('Mailbox could not be claimed or deferred', error).pipe(
-                    Effect.annotateLogs({ mailbox_key: mailbox.mailboxKey }),
-                    Effect.as(ReadyMailboxOutcome.Skipped()),
-                ),
-            ),
-        );
-
-        yield* ReadyMailboxOutcome.$match(outcome, {
-            Deferred: () => Effect.void,
-            Skipped: () => Effect.void,
-            Claimed: ({ claim }) =>
-                runLogged(
-                    processClaim({
-                        claim,
-                        maxAttempts: options.maxAttempts ?? 5,
-                        leaseMs: options.leaseMs,
-                        processors: processors.events,
-                    }),
-                    { mailbox_key: claim.mailboxKey, claim_id: claim.claimId },
-                ),
-            Output: ({ claim }) =>
-                runLogged(
-                    processOutputClaim({
-                        claim,
-                        maxAttempts: options.outputMaxAttempts ?? DEFAULT_OUTPUT_MAX_ATTEMPTS,
-                        leaseMs: options.leaseMs,
-                        processors: processors.outputs,
-                    }),
-                    { mailbox_key: claim.mailboxKey, claim_id: claim.claimId },
-                ),
-        });
-
-        return outcome;
-    });
+    work.pipe(
+        Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) => Effect.logError('Mailbox claim processing failed', cause).pipe(Effect.annotateLogs(annotations)),
+        ),
+    );
 
 /** One pass: work on every mailbox the store reports as due. */
-const processReady = <R>(options: MailboxProcessingOptions, processors: MailboxProcessors<R>) =>
-    Effect.gen(function* () {
-        const backend = yield* MailboxProcessingBackend;
-        const ready = yield* backend.findReadyMailboxes;
+const processReady = Effect.fn('delivery.process_ready')(function* <R>(
+    options: MailboxProcessingOptions,
+    processors: MailboxProcessors<R>,
+) {
+    const backend = yield* MailboxProcessingBackend;
+    const ready = yield* backend.findReadyMailboxes;
 
-        const outcomes = yield* Effect.forEach(ready, (mailbox) => processReadyMailbox(options, processors, mailbox), {
-            concurrency: options.concurrency,
-        });
+    /**
+     * Each mailbox is claimed right before its callback runs, never ahead of time,
+     * so a claim does not sit unrenewed while it waits for a free concurrency slot.
+     */
+    const outcomes = yield* Effect.forEach(
+        ready,
+        (mailbox) =>
+            Effect.gen(function* () {
+                const outcome = yield* claimOrDeferReadyMailbox({
+                    mailbox,
+                    leaseMs: options.leaseMs,
+                    deliveryModeFor: options.deliveryModeFor,
+                }).pipe(
+                    Effect.catchTag('MailboxProcessingUnavailable', (error) =>
+                        Effect.logError('Mailbox could not be claimed or deferred', error).pipe(
+                            Effect.annotateLogs({ mailbox_key: mailbox.mailboxKey }),
+                            Effect.as(ReadyMailboxOutcome.Skipped()),
+                        ),
+                    ),
+                );
 
-        const summary = MailboxProcessingSummary.make({
-            claimed: outcomes.filter(ReadyMailboxOutcome.$is('Claimed')).length,
-            deferred: outcomes.filter(ReadyMailboxOutcome.$is('Deferred')).length,
-            output: outcomes.filter(ReadyMailboxOutcome.$is('Output')).length,
-        });
+                yield* ReadyMailboxOutcome.$match(outcome, {
+                    Deferred: () => Effect.void,
+                    Skipped: () => Effect.void,
+                    Claimed: ({ claim }) =>
+                        runLogged(
+                            processClaim({
+                                claim,
+                                maxAttempts: options.maxAttempts ?? 5,
+                                leaseMs: options.leaseMs,
+                                processors: processors.events,
+                            }),
+                            { mailbox_key: claim.mailboxKey, claim_id: claim.claimId },
+                        ),
+                    Output: ({ claim }) =>
+                        runLogged(
+                            processOutputClaim({
+                                claim,
+                                maxAttempts: options.outputMaxAttempts ?? DEFAULT_OUTPUT_MAX_ATTEMPTS,
+                                leaseMs: options.leaseMs,
+                                processors: processors.outputs,
+                            }),
+                            { mailbox_key: claim.mailboxKey, claim_id: claim.claimId },
+                        ),
+                });
 
-        if (summary.claimed > 0 || summary.output > 0) {
-            yield* Effect.logInfo('Mailbox processing claimed ready work').pipe(Effect.annotateLogs(summary));
-        }
+                return outcome;
+            }),
+        { concurrency: options.concurrency },
+    );
 
-        return summary;
-    }).pipe(Effect.withSpan('delivery.process_ready'));
-
-/**
- * Call `processReady` for as long as the enclosing scope lives.
- *
- * A pass that found work is followed by another at once, since more may be waiting behind
- * the store's claim limit. A pass that found nothing waits one interval. A failed pass is
- * logged and the loop carries on; only interruption stops it.
- */
-const pollReadyMailboxes = (intervalMs: number) =>
-    Effect.gen(function* () {
-        const processing = yield* MailboxProcessing;
-
-        return yield* processing.processReady.pipe(
-            Effect.map((summary) => summary.claimed > 0 || summary.output > 0),
-            Effect.catchCauseIf(
-                (cause) => !Cause.hasInterruptsOnly(cause),
-                (cause) => Effect.logError('Mailbox polling pass failed', cause).pipe(Effect.as(false)),
-            ),
-            Effect.flatMap((foundWork) => (foundWork ? Effect.void : Effect.sleep(Duration.millis(intervalMs)))),
-            Effect.forever,
-        );
+    const summary = MailboxProcessingSummary.make({
+        claimed: Arr.filter(outcomes, ReadyMailboxOutcome.$is('Claimed')).length,
+        deferred: Arr.filter(outcomes, ReadyMailboxOutcome.$is('Deferred')).length,
+        output: Arr.filter(outcomes, ReadyMailboxOutcome.$is('Output')).length,
     });
+
+    if (summary.claimed > 0 || summary.output > 0) {
+        yield* Effect.logInfo('Mailbox processing claimed ready work').pipe(Effect.annotateLogs(summary));
+    }
+
+    return summary;
+});
 
 export class MailboxProcessing extends Context.Service<MailboxProcessing, MailboxProcessingOperations>()(
     '@stegosaurus/channels-delivery/MailboxProcessing',
@@ -1335,8 +1281,26 @@ export class MailboxProcessing extends Context.Service<MailboxProcessing, Mailbo
                     yield* Effect.logInfo('Mailbox polling started').pipe(
                         Effect.annotateLogs({ interval_ms: options.polling.intervalMs }),
                     );
-                    yield* pollReadyMailboxes(options.polling.intervalMs).pipe(
-                        Effect.provideService(MailboxProcessing, processing),
+
+                    /**
+                     * Call `processReady` for as long as the layer's scope lives.
+                     *
+                     * A pass that found work is followed by another at once, since more may be waiting behind
+                     * the store's claim limit. A pass that found nothing waits one interval. A failed pass is
+                     * logged and the loop carries on; only interruption stops it.
+                     */
+                    const { intervalMs } = options.polling;
+
+                    yield* processing.processReady.pipe(
+                        Effect.map((summary) => summary.claimed > 0 || summary.output > 0),
+                        Effect.catchCauseIf(
+                            (cause) => !Cause.hasInterruptsOnly(cause),
+                            (cause) => Effect.logError('Mailbox polling pass failed', cause).pipe(Effect.as(false)),
+                        ),
+                        Effect.flatMap((foundWork) =>
+                            foundWork ? Effect.void : Effect.sleep(Duration.millis(intervalMs)),
+                        ),
+                        Effect.forever,
                         Effect.forkScoped,
                     );
                 }

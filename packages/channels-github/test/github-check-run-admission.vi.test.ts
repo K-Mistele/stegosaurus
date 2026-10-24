@@ -1,10 +1,10 @@
 import { describe, it } from '@effect/vitest';
 import {
-    DeliveryAdmission,
     ProviderWebhookEvent,
     ProviderWebhookEvents,
     ProviderWebhookIgnored,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Effect } from 'effect';
 
 import { checkRunPayload, makeGitHubTestProvider, signedGitHubInput } from './fixtures';

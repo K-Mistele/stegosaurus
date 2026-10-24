@@ -1,22 +1,24 @@
 import { NodeCrypto } from '@effect/platform-node';
 import { describe, it } from '@effect/vitest';
+import { ProviderWebhookEvent } from '@stegosaurus/channels-delivery/ProviderWebhooks';
 import {
-    DeliveryAdmission,
     DeliveryAdmissionBatch,
-    type DeliveryOperationKind,
-    DeliveryPreparationConflict,
-    DeliveryPreparationUnavailable,
-    MailboxSubscriptions,
-    PreparedDeliveryInvocation,
-    ProviderDeliveryExecution,
     processProviderEvent,
     ProviderEventExecutionFailed,
     ProviderEventHandled,
     ProviderEventIgnored,
     ProviderEventInvalid,
-    ProviderWebhookEvent,
-    MailboxSubscriptionsMemory,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptionsMemory } from '@stegosaurus/channels-delivery/MailboxSubscriptionsMemory';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import {
+    type DeliveryOperationKind,
+    DeliveryPreparationConflict,
+    DeliveryPreparationUnavailable,
+    PreparedDeliveryInvocation,
+    ProviderDeliveryExecution,
+} from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Cause, Effect, Exit, Layer, Option, Redacted, Ref, Schema } from 'effect';
 import { vi } from 'vite-plus/test';
 

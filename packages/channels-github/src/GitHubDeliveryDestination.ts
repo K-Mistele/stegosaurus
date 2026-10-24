@@ -3,7 +3,8 @@
  * worker can reach the same issue or pull request. The delivery core stores these as opaque JSON; only
  * GitHub reads them.
  */
-import type { DeliveryOperationKind, DeliveryReactionTargetKind } from '@stegosaurus/channels-delivery';
+import type { DeliveryReactionTargetKind } from '@stegosaurus/channels-delivery/DeliveryReaction';
+import type { DeliveryOperationKind } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Option, Schema } from 'effect';
 
 import { GitHubIssueCommentRef, GitHubIssueRef, GitHubPullRequestRef, GitHubReviewCommentRef } from './GitHubModels';

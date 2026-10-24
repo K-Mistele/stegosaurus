@@ -1,5 +1,7 @@
 import { describe, it } from '@effect/vitest';
-import { DeliveryAdmission, MailboxSubscriptions, ProviderEventHandled } from '@stegosaurus/channels-delivery';
+import { ProviderEventHandled } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Effect, Layer, Queue, Schema, Stream } from 'effect';
 
 import { LinearApi } from '../src/LinearApi';

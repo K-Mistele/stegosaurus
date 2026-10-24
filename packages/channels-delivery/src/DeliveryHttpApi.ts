@@ -7,7 +7,7 @@
  *
  * Paths are relative. `Channels.make` mounts them under the same `basePath` as the provider webhooks.
  */
-import { Schema } from 'effect';
+import { Schema, String as Str } from 'effect';
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/http-api';
 
 import { DeliveryActivity } from './DeliveryActivity';
@@ -33,10 +33,10 @@ import { DeliveryPlan } from './DeliveryPlan';
 import { DeliveryReactionTarget, PortableReaction } from './DeliveryReaction';
 
 /** The request had no `Authorization: Bearer` token. */
-export class DeliveryCredentialMissing extends Schema.TaggedError<DeliveryCredentialMissing>()(
-    'DeliveryCredentialMissing',
-    {},
-) {}
+export class DeliveryCredentialMissing extends Schema.TaggedError<
+    DeliveryCredentialMissing,
+    { readonly brand: unique symbol }
+>()('DeliveryCredentialMissing', {}) {}
 
 const Params = Schema.Struct({ deliveryId: Schema.String });
 
@@ -192,7 +192,7 @@ export const DeliveryHttpApi = HttpApi.make('ChannelsDeliveryApi').add(
 
 /** The mount prefix for a `basePath`, in the form `HttpApi.prefix` takes. `/` adds nothing. */
 export const deliveryApiPrefix = (basePath: string | undefined): `/${string}` =>
-    `/${(basePath ?? '').replace(/^\/+|\/+$/g, '')}`;
+    `/${Str.replace(/^\/+|\/+$/g, '')(basePath ?? '')}`;
 
 /** The delivery API under a `basePath`. */
 export const prefixedDeliveryHttpApi = (basePath: string | undefined) =>

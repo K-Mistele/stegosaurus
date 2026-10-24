@@ -1,12 +1,14 @@
 import { describe, it } from '@effect/vitest';
 import {
-    DeliveryAdmission,
-    MailboxSubscriptionCreatedResult,
-    MailboxSubscriptions,
     ProviderEventHandled,
     ProviderEventIgnored,
     ProviderEventInvalid,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import {
+    MailboxSubscriptionCreatedResult,
+    MailboxSubscriptions,
+} from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Effect, Layer } from 'effect';
 import { vi } from 'vite-plus/test';
 

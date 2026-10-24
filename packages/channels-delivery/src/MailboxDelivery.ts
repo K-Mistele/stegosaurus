@@ -5,22 +5,25 @@
  * saving or routing them to the appropriate "mailbox"
  */
 
-import { Context, Effect, Schema } from 'effect';
+import { Array as Arr, Context, Effect, Schema } from 'effect';
 
 /**
  * Mailbox was unavailable for network/storage reasons, webhook should receive 503
  */
-export class MailboxDeliveryUnavailable extends Schema.TaggedError<MailboxDeliveryUnavailable>()(
-    'MailboxDeliveryUnavailable',
-    {
-        reason: Schema.String,
-    },
-) {}
+export class MailboxDeliveryUnavailable extends Schema.TaggedError<
+    MailboxDeliveryUnavailable,
+    { readonly brand: unique symbol }
+>()('MailboxDeliveryUnavailable', {
+    reason: Schema.String,
+}) {}
 
 /**
  * admission cannot be accepted e.g. capacity exhaustion
  */
-export class MailboxDeliveryRejected extends Schema.TaggedError<MailboxDeliveryRejected>()('MailboxDeliveryRejected', {
+export class MailboxDeliveryRejected extends Schema.TaggedError<
+    MailboxDeliveryRejected,
+    { readonly brand: unique symbol }
+>()('MailboxDeliveryRejected', {
     reason: Schema.String,
 }) {}
 
@@ -48,7 +51,7 @@ export const DeliveryAdmission = Schema.TaggedStruct('DeliveryAdmission', {
     interrupt: Schema.optionalKey(Schema.Literal(true)),
 });
 
-export type DeliveryAdmission = Schema.Schema.Type<typeof DeliveryAdmission>;
+export type DeliveryAdmission = typeof DeliveryAdmission.Type;
 
 /** An admission as JSON text, for stores that keep it as a string. */
 export const DeliveryAdmissionJson = Schema.fromJsonString(DeliveryAdmission);
@@ -60,9 +63,13 @@ export type DeliveryMailboxAddress = Pick<
 >;
 
 export const deliveryMailboxKey = (admission: DeliveryMailboxAddress) =>
-    [admission.namespace, admission.provider, admission.installationId, admission.resourceId]
-        .map((segment) => `${segment.length}:${segment}`)
-        .join('|');
+    Arr.join(
+        Arr.map(
+            [admission.namespace, admission.provider, admission.installationId, admission.resourceId],
+            (segment) => `${segment.length}:${segment}`,
+        ),
+        '|',
+    );
 
 /**
  * Indicates that an event was delivered to a mailbox correctly

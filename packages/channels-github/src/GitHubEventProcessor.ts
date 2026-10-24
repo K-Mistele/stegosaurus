@@ -1,20 +1,21 @@
 /** GitHub post-admission batch identity validation, normalization, and callback routing. */
 import {
-    deliveryMailboxKey,
-    type DeliveryAdmission,
     type DeliveryAdmissionBatch,
-    type DeliveryCallbackResult,
-    type DeliveryContext,
-    MailboxSubscriptions,
-    PreparedDeliveryCallback,
-    PreparedDeliveryInvocation,
-    type ProviderDeliveryExecution,
     ProviderEventExecutionFailed,
     ProviderEventHandled,
     ProviderEventIgnored,
     ProviderEventInvalid,
     type ProviderEventProcessor,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { deliveryMailboxKey, type DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import {
+    type DeliveryCallbackResult,
+    type DeliveryContext,
+    PreparedDeliveryCallback,
+    PreparedDeliveryInvocation,
+    type ProviderDeliveryExecution,
+} from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Array as Arr, Data, Effect, Match, Option, Predicate, Schema } from 'effect';
 
 import { reviewComment } from './api/GitHubApiProjections';

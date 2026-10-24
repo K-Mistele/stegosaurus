@@ -1,12 +1,12 @@
+import { Timestamp } from '@stegosaurus/channels-delivery/MailboxPolicy';
 import {
     deliveryMailboxKey,
     DeliveryAdmission,
     DeliveryReceipt,
     MailboxDelivery,
     MailboxDeliveryUnavailable,
-    Timestamp,
-    requestDeliveryInterrupt,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { requestDeliveryInterrupt } from '@stegosaurus/channels-delivery/DeliveryLifecycle';
 import { Clock, Context, Effect, Layer, Predicate, Schema } from 'effect';
 
 import type { DeliveryRequest, DeliveryResponse } from './DeliveryControl';

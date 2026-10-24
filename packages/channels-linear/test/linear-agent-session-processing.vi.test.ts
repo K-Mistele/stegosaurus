@@ -1,10 +1,10 @@
 import { describe, it } from '@effect/vitest';
 import {
-    MailboxSubscriptions,
     ProviderEventHandled,
     ProviderEventIgnored,
     ProviderEventInvalid,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
 import { Effect, Layer, Ref } from 'effect';
 
 import {

@@ -5,8 +5,8 @@ import {
     DeliveryReceipt,
     MailboxDelivery,
     MailboxDeliveryUnavailable,
-    requestDeliveryInterrupt,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { requestDeliveryInterrupt } from '@stegosaurus/channels-delivery/DeliveryLifecycle';
 import { Clock, Effect, Layer, Option, Schema } from 'effect';
 import * as SqlClient from 'effect/sql/SqlClient';
 import * as SqlError from 'effect/sql/SqlError';

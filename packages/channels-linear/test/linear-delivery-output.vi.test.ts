@@ -1,26 +1,26 @@
 import { describe, it } from '@effect/vitest';
 import {
-    BatchId,
-    DeliveryActivity,
-    DeliveryOperationId,
-    DeliveryOutcome,
     DeliveryOutputApplied,
-    ExternalLink,
-    MessageId,
-    PreparedDeliveryCallback,
     ProviderOutputAttempt,
     ProviderPresentOutcome,
-    ProviderReactionTarget,
+    type ProviderOutputOperation,
+} from '@stegosaurus/channels-delivery/ProviderOutput';
+import { BatchId, formatDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
+import { ProviderReactionTarget, ProviderSetMessageReaction } from '@stegosaurus/channels-delivery/DeliveryReaction';
+import {
     ProviderRenderPlan,
-    ProviderSetMessageReaction,
     RenderedDeliveryPlan,
     DeliveryPlan,
     DeliveryPlanItem,
     DeliveryPlanItemId,
     DeliveryPlanItemState,
-    makeDeliveryId,
-    type ProviderOutputOperation,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryPlan';
+import { DeliveryOutcome } from '@stegosaurus/channels-delivery/DeliveryOutcome';
+import { DeliveryOperationId } from '@stegosaurus/channels-delivery/DeliveryOperation';
+import { MessageId } from '@stegosaurus/channels-delivery/DeliveryMessage';
+import { ExternalLink } from '@stegosaurus/channels-delivery/DeliveryLink';
+import { PreparedDeliveryCallback } from '@stegosaurus/channels-delivery/DeliveryContext';
+import { DeliveryActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
 import { Effect, Layer, Match, Ref, Result, Schema } from 'effect';
 
 import {
@@ -115,7 +115,7 @@ const attempt = (
     activationTarget?: LinearActivationTarget,
 ) =>
     ProviderOutputAttempt.make({
-        deliveryId: makeDeliveryId({
+        deliveryId: formatDeliveryId({
             mailboxKey: 'linear:v1:agent-session:x',
             batchId: BatchId.make('batch-1'),
         }),

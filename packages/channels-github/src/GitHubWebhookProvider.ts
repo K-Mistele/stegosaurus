@@ -1,5 +1,4 @@
 import {
-    DeliveryAdmission,
     ProviderWebhookEvent,
     ProviderWebhookEvents,
     ProviderWebhookIgnored,
@@ -7,7 +6,8 @@ import {
     WebhookPayloadInvalidError,
     type ProviderWebhookOutcome,
     type WebhookProvider,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Array as Arr, Crypto, Effect, Match, Redacted, Schema } from 'effect';
 
 import { githubDiscussionResourceId, type GitHubId } from './GitHubIdentity';

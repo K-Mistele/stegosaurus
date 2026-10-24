@@ -1,11 +1,11 @@
 import { describe, it } from '@effect/vitest';
 import {
-    DeliveryAdmission,
     ProviderWebhookEvent,
     ProviderWebhookIgnored,
     WebhookAuthenticationError,
     WebhookPayloadInvalidError,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Effect } from 'effect';
 import { Headers } from 'effect/http';
 

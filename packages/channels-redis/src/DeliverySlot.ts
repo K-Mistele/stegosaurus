@@ -22,23 +22,21 @@
  * - the finished deliveries are one JSON list under the mailbox's retained key. The key expires when
  *   the last of them leaves its retention period; deleting them earlier is left to the lifecycle's limit.
  */
+import { DeliveryAdmissionBatch } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { Timestamp } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { DeliveryAdmission, DeliveryAdmissionJson } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { BatchId, DeliveryAccessToken } from '@stegosaurus/channels-delivery/DeliveryReference';
 import {
     ActiveDelivery,
     ActiveDeliveryStage,
-    BatchId,
-    DeliveryAccessToken,
-    DeliveryAdmission,
-    DeliveryAdmissionBatch,
-    DeliveryAdmissionJson,
     DeliverySlot,
     MailboxSchedulerStatus,
-    PreparedDeliveryInvocationJson,
     RetainedDelivery,
     StoredActiveDelivery,
-    Timestamp,
     emptyDeliverySlot,
     mailboxSchedulerStatus,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryLifecycle';
+import { PreparedDeliveryInvocationJson } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Array as Arr, Clock, Effect, Option, Predicate, Schedule, Schema, Struct } from 'effect';
 import * as Redis from 'effect/persistence/Redis';
 

@@ -4,27 +4,25 @@
  */
 import { describe, it } from '@effect/vitest';
 import {
-    BatchId,
-    CreateMessage,
-    DeliveryActivity,
-    DeliveryOperationId,
-    DeliveryOutcome,
-    PreparedDeliveryCallback,
     ProviderOutputAttempt,
     ProviderPresentOutcome,
-    ProviderReactionTarget,
+    type ProviderOutputOperation,
+} from '@stegosaurus/channels-delivery/ProviderOutput';
+import { BatchId, formatDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
+import { ProviderReactionTarget, ProviderSetMessageReaction } from '@stegosaurus/channels-delivery/DeliveryReaction';
+import {
     ProviderRenderPlan,
-    ProviderSetMessageReaction,
     RenderedDeliveryPlan,
     DeliveryPlan,
     DeliveryPlanItem,
     DeliveryPlanItemId,
     DeliveryPlanItemState,
-    SetActivity,
-    makeDeliveryId,
-    MessageId,
-    type ProviderOutputOperation,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryPlan';
+import { DeliveryOutcome } from '@stegosaurus/channels-delivery/DeliveryOutcome';
+import { DeliveryOperationId } from '@stegosaurus/channels-delivery/DeliveryOperation';
+import { CreateMessage, MessageId } from '@stegosaurus/channels-delivery/DeliveryMessage';
+import { PreparedDeliveryCallback } from '@stegosaurus/channels-delivery/DeliveryContext';
+import { DeliveryActivity, SetActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
 import { Effect, Layer, Match, Option, Ref, Result, Schema } from 'effect';
 
 import {
@@ -100,7 +98,7 @@ const prepared = (input: {
 
 const attempt = (operation: ProviderOutputOperation, invocation: PreparedDeliveryCallback) =>
     ProviderOutputAttempt.make({
-        deliveryId: makeDeliveryId({
+        deliveryId: formatDeliveryId({
             mailboxKey: 'github:v1:mailbox',
             batchId: BatchId.make('batch-1'),
         }),

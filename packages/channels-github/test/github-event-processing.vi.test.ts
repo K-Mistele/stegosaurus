@@ -1,21 +1,22 @@
 import { describe, it } from '@effect/vitest';
 import {
-    DeliveryAdmission,
     type DeliveryAdmissionBatch,
-    deliveryMailboxKey,
-    type DeliveryOperationKind,
-    DeliveryPreparationConflict,
-    DeliveryPreparationUnavailable,
-    MailboxSubscriptions,
-    MailboxSubscriptionsMemory,
-    PreparedDeliveryCallback,
-    PreparedDeliveryInvocation,
-    ProviderDeliveryExecution,
     ProviderEventExecutionFailed,
     ProviderEventHandled,
     ProviderEventIgnored,
     ProviderEventInvalid,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptionsMemory } from '@stegosaurus/channels-delivery/MailboxSubscriptionsMemory';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { DeliveryAdmission, deliveryMailboxKey } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import {
+    type DeliveryOperationKind,
+    DeliveryPreparationConflict,
+    DeliveryPreparationUnavailable,
+    PreparedDeliveryCallback,
+    PreparedDeliveryInvocation,
+    ProviderDeliveryExecution,
+} from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Cause, Context, Effect, Exit, Layer, Match, Option, Ref } from 'effect';
 import { vi } from 'vite-plus/test';
 

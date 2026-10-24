@@ -4,133 +4,145 @@
  * output processor records what it is asked to send.
  */
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
-import { describe, it } from '@effect/vitest';
-import { Clock, Effect, Layer, Option, Queue, Redacted, Ref, Schedule, type Schema } from 'effect';
-import { FetchHttpClient } from 'effect/http';
+import { assert, describe, it } from '@effect/vitest';
+import { Array as Arr, Clock, Context, Effect, Layer, Option, Queue, Redacted, Ref, Schedule, Schema } from 'effect';
+import { FetchHttpClient, HttpClient } from 'effect/http';
 
+import { ProviderWebhookEvent } from '../src/ProviderWebhooks';
 import {
-    Channels,
-    ChannelsMemory,
-    DeliveryAdmission,
     DeliveryOutputApplied,
-    DeliveryActivity,
     DeliveryOutputFailed,
+    ProviderPresentOutcome,
+    type ProviderOutputAttempt,
+} from '../src/ProviderOutput';
+import { ProviderEventHandled } from '../src/ProviderEventProcessing';
+import { QueueDeliveryMode } from '../src/MailboxPolicy';
+import { DeliveryAdmission } from '../src/MailboxDelivery';
+import { DeliveryReactionTarget, ProviderReactionTarget, ProviderSetMessageReaction } from '../src/DeliveryReaction';
+import {
     DeliveryPlan,
     DeliveryPlanItem,
     DeliveryPlanItemId,
     DeliveryPlanItemState,
-    DeliveryReactionTarget,
-    MessageId,
-    PreparedDeliveryInvocation,
-    ProviderEventHandled,
-    ProviderWebhookEvent,
-    QueueDeliveryMode,
-    makeDeliveryClient,
-    type ChannelsProvider,
-    type DeliveryClient,
-    type DeliveryClientTarget,
-    type DeliveryContext,
-    type DeliveryOperationKind,
-    type ProviderOutputAttempt,
-} from '../src';
+    DeliveryPlanRevision,
+    ProviderRenderPlan,
+    RenderedDeliveryPlan,
+} from '../src/DeliveryPlan';
+import { CreateMessage, MessageId, ProviderDeleteMessage, ProviderUpdateMessage } from '../src/DeliveryMessage';
+import { type DeliveryClient, type DeliveryClientTarget } from '../src/DeliveryHttpClient';
+import * as DeliveryHttpClient from '../src/DeliveryHttpClient';
+import { PreparedDeliveryInvocation, type DeliveryContext, type DeliveryOperationKind } from '../src/DeliveryContext';
+import { DeliveryActivity, SetActivity } from '../src/DeliveryActivity';
+import { DeliveryOutcome } from '../src/DeliveryOutcome';
+import { AddExternalLink, ExternalLink } from '../src/DeliveryLink';
+import { DeliveryOperationUnsupported, DeliveryReactionTargetUnavailable } from '../src/DeliveryControl';
+import { type ChannelsProvider } from '../src/ChannelsProvider';
+import * as Channels from '../src/Channels';
+import * as ChannelsMemory from '../src/ChannelsMemory';
 
 const basePath = '/api/channels';
 
-/**
- * Accepts any webhook as one event, named by its `x-event-id` header. Every batch hands itself off.
- * Its output processor records each attempt, and fails the first `failuresLeft` of them.
- */
-const handingOffProvider = (
-    contexts: Queue.Queue<DeliveryContext>,
-    output: Queue.Queue<ProviderOutputAttempt>,
-    failuresLeft: Ref.Ref<number>,
+const JsonText = Schema.fromJsonString(Schema.Json);
+
+/** A JSON request body, as a remote worker sends it. */
+const jsonText = Schema.encodeEffect(JsonText);
+
+/** A JSON value parsed from text, for bodies no schema here can make. */
+const jsonValue = Schema.decodeEffect(JsonText);
+
+const startBotWith = (
     supportedOperations: ReadonlyArray<DeliveryOperationKind>,
-    reactions: ReactionPreparation,
-): ChannelsProvider => ({
-    providerName: 'example',
-    deliveryMode: QueueDeliveryMode.make({}),
-    webhookProvider: ({ namespace }) =>
-        Effect.succeed({
-            providerName: 'example',
-            handle: ({ headers }) =>
-                Effect.succeed(
-                    ProviderWebhookEvent.make({
-                        event: DeliveryAdmission.make({
-                            namespace,
-                            provider: 'example',
-                            installationId: 'installation',
-                            resourceId: 'resource',
-                            eventId: headers['x-event-id'] ?? 'event',
-                            payload: null,
-                        }),
-                    }),
-                ),
-        }),
-    eventProcessor: ({ namespace }) =>
-        Effect.succeed({
-            namespace,
-            providerName: 'example',
-            process: (_admissions, execution) =>
-                Effect.gen(function* () {
-                    if (Option.isNone(execution.prepared)) {
-                        yield* execution.prepare(
-                            PreparedDeliveryInvocation.make({
-                                callbacks: [
-                                    {
-                                        name: 'onEvent',
-                                        presentationVersion: 1,
-                                        destination: { resource: 'resource' },
-                                        supportedOperations,
-                                        ...reactions,
-                                    },
-                                ],
-                            }),
-                        );
-                    }
-
-                    yield* Queue.offer(contexts, execution.context);
-                    yield* execution.context.handoff();
-
-                    return ProviderEventHandled.make({});
-                }).pipe(Effect.orDie),
-        }),
-    outputProcessor: ({ namespace }) =>
-        Effect.succeed({
-            namespace,
-            providerName: 'example',
-            process: (attempt) =>
-                Effect.gen(function* () {
-                    yield* Queue.offer(output, attempt);
-
-                    const failing = yield* Ref.modify(failuresLeft, (left) => [left > 0, Math.max(0, left - 1)]);
-
-                    if (failing) {
-                        return yield* new DeliveryOutputFailed({
-                            provider: 'example',
-                            retryable: true,
-                            safeCode: 'example_unavailable',
-                            retryAfterMs: 0,
-                        });
-                    }
-
-                    return DeliveryOutputApplied.make({ receipt: { sent: attempt.operationId } });
-                }),
-        }),
-});
-
-/** What the test provider saves for reactions: what started the delivery, and what reactions can go on. */
-type ReactionPreparation = Pick<PreparedDeliveryInvocation['callbacks'][0], 'activationTarget' | 'reactionTargets'>;
-
-const startBotWith = (supportedOperations: ReadonlyArray<DeliveryOperationKind>, reactions: ReactionPreparation = {}) =>
+    /** What the test provider saves for reactions: what started the delivery, and what reactions can go on. */
+    reactions: Pick<PreparedDeliveryInvocation['callbacks'][0], 'activationTarget' | 'reactionTargets'> = {},
+) =>
     Effect.gen(function* () {
         const contexts = yield* Queue.unbounded<DeliveryContext>();
         const output = yield* Queue.unbounded<ProviderOutputAttempt>();
         const outputFailuresLeft = yield* Ref.make(0);
 
+        /**
+         * Accepts any webhook as one event, named by its `x-event-id` header. Every batch hands itself off.
+         * Its output processor records each attempt, and fails the first `outputFailuresLeft` of them.
+         */
+        const provider: ChannelsProvider = {
+            providerName: 'example',
+            deliveryMode: QueueDeliveryMode.make({}),
+            webhookProvider: ({ namespace }) =>
+                Effect.succeed({
+                    providerName: 'example',
+                    handle: ({ headers }) =>
+                        Effect.succeed(
+                            ProviderWebhookEvent.make({
+                                event: DeliveryAdmission.make({
+                                    namespace,
+                                    provider: 'example',
+                                    installationId: 'installation',
+                                    resourceId: 'resource',
+                                    eventId: headers['x-event-id'] ?? 'event',
+                                    payload: null,
+                                }),
+                            }),
+                        ),
+                }),
+            eventProcessor: ({ namespace }) =>
+                Effect.succeed({
+                    namespace,
+                    providerName: 'example',
+                    process: (_admissions, execution) =>
+                        Effect.gen(function* () {
+                            if (Option.isNone(execution.prepared)) {
+                                yield* execution.prepare(
+                                    PreparedDeliveryInvocation.make({
+                                        callbacks: [
+                                            {
+                                                name: 'onEvent',
+                                                presentationVersion: 1,
+                                                destination: { resource: 'resource' },
+                                                supportedOperations,
+                                                ...reactions,
+                                            },
+                                        ],
+                                    }),
+                                );
+                            }
+
+                            yield* Queue.offer(contexts, execution.context);
+                            yield* execution.context.handoff();
+
+                            return ProviderEventHandled.make({});
+                        }).pipe(Effect.orDie),
+                }),
+            outputProcessor: ({ namespace }) =>
+                Effect.succeed({
+                    namespace,
+                    providerName: 'example',
+                    process: (attempt) =>
+                        Effect.gen(function* () {
+                            yield* Queue.offer(output, attempt);
+
+                            const failing = yield* Ref.modify(outputFailuresLeft, (left) => [
+                                left > 0,
+                                Math.max(0, left - 1),
+                            ]);
+
+                            if (failing) {
+                                return yield* DeliveryOutputFailed.make({
+                                    provider: 'example',
+                                    retryable: true,
+                                    safeCode: 'example_unavailable',
+                                    retryAfterMs: 0,
+                                });
+                            }
+
+                            return DeliveryOutputApplied.make({ receipt: { sent: attempt.operationId } });
+                        }),
+                }),
+        };
+
         const bot = Channels.make({
             namespace: 'channels-test',
             basePath,
-            providers: [handingOffProvider(contexts, output, outputFailuresLeft, supportedOperations, reactions)],
+            providers: [provider],
             eventProcessing: { concurrency: 1, leaseMs: 30_000 },
             storage: ChannelsMemory.make({ polling: { intervalMs: 10 } }),
         });
@@ -149,17 +161,22 @@ const startBotWith = (supportedOperations: ReadonlyArray<DeliveryOperationKind>,
             );
 
         /** The generated client, sending its requests straight to the bot's handler. */
-        const client = yield* makeDeliveryClient({ baseUrl: 'http://localhost', basePath }).pipe(
-            Effect.provide(
+        const httpClient = Context.get(
+            yield* Layer.build(
                 FetchHttpClient.layer.pipe(
                     Layer.provide(
                         Layer.succeed(FetchHttpClient.Fetch, (input, init) => started.handle(new Request(input, init))),
                     ),
                 ),
             ),
+            HttpClient.HttpClient,
         );
 
-        const raw = (path: string, init?: RequestInit) =>
+        const client = yield* DeliveryHttpClient.make({ baseUrl: 'http://localhost', basePath }).pipe(
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+        );
+
+        const raw = (path: string, init: RequestInit = {}) =>
             Effect.promise(() => started.handle(new Request(`http://localhost${basePath}${path}`, init)));
 
         return { contexts, output, outputFailuresLeft, webhook, client, raw };
@@ -205,12 +222,13 @@ describe('delivery API', () => {
                 expect((yield* client.fail(delivery).pipe(Effect.flip))._tag).toBe('DeliveryTerminalConflict');
                 const presented = yield* Queue.take(output);
                 expect(presented.deliveryId).toBe(first.deliveryId);
-                expect(presented.operation).toEqual({
-                    _tag: 'PresentOutcome',
-                    outcome: { _tag: 'Completed' },
-                    markdown: 'done',
-                    clearActivity: false,
-                });
+                expect(presented.operation).toEqual(
+                    ProviderPresentOutcome.make({
+                        outcome: DeliveryOutcome.cases.Completed.make({}),
+                        markdown: 'done',
+                        clearActivity: false,
+                    }),
+                );
                 expect(presented.prepared.destination).toEqual({ resource: 'resource' });
                 const retired = yield* awaitRetired(client, delivery);
                 expect(retired.outcome?._tag).toBe('Completed');
@@ -270,7 +288,7 @@ describe('delivery API output', () => {
 
             const attempts = [yield* Queue.take(output), yield* Queue.take(output), yield* Queue.take(output)];
 
-            expect(attempts.map(({ operationId, attempt }) => [operationId, attempt])).toEqual([
+            expect(Arr.map(attempts, ({ operationId, attempt }) => [operationId, attempt])).toEqual([
                 ['outcome', 1],
                 ['outcome', 2],
                 ['outcome', 3],
@@ -303,10 +321,7 @@ describe('delivery API output', () => {
                 'already_recorded',
             );
             const sent = yield* Queue.take(output);
-            expect(sent.operation).toEqual({
-                _tag: 'AddExternalLink',
-                link: { _tag: 'ExternalLink', ...pullRequest },
-            });
+            expect(sent.operation).toEqual(AddExternalLink.make({ link: ExternalLink.make(pullRequest) }));
 
             const plainHttp = yield* raw(`/deliveries/${encodeURIComponent(context.deliveryId)}/links`, {
                 method: 'POST',
@@ -314,7 +329,7 @@ describe('delivery API output', () => {
                     'content-type': 'application/json',
                     authorization: `Bearer ${Redacted.value(context.accessToken)}`,
                 },
-                body: JSON.stringify({ label: 'Run', url: 'http://example.com/run' }),
+                body: yield* jsonText({ label: 'Run', url: 'http://example.com/run' }),
             });
 
             expect(plainHttp.status).toBe(400);
@@ -373,18 +388,17 @@ describe('delivery API messages', () => {
 
             const sent = [yield* Queue.take(output), yield* Queue.take(output), yield* Queue.take(output)];
 
-            expect(sent.map(({ operation }) => operation)).toEqual([
-                { _tag: 'CreateMessage', messageId, markdown: 'Working' },
-                {
-                    _tag: 'UpdateMessage',
+            expect(Arr.map(sent, ({ operation }) => operation)).toEqual([
+                CreateMessage.make({ messageId, markdown: 'Working' }),
+                ProviderUpdateMessage.make({
                     messageId,
                     markdown: 'Almost',
                     reference: { sent: 'message-1' },
-                },
-                { _tag: 'DeleteMessage', messageId, reference: { sent: 'message-1' } },
+                }),
+                ProviderDeleteMessage.make({ messageId, reference: { sent: 'message-1' } }),
             ]);
             const status = yield* client.status(delivery);
-            expect(status.output.map(({ kind, messageId, state }) => [kind, messageId, state])).toEqual([
+            expect(Arr.map(status.output, ({ kind, messageId, state }) => [kind, messageId, state])).toEqual([
                 ['CreateMessage', 'progress', 'Delivered'],
                 ['UpdateMessage', 'progress', 'Delivered'],
                 ['DeleteMessage', 'progress', 'Delivered'],
@@ -414,10 +428,7 @@ describe('delivery API messages', () => {
                 .update({ ...delivery, messageId, message: { markdown: 'Almost' } })
                 .pipe(Effect.flip);
 
-            expect(refused).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'UpdateMessage',
-            });
+            expect(refused).toEqual(DeliveryOperationUnsupported.make({ operation: 'UpdateMessage' }));
             const messages = `/deliveries/${encodeURIComponent(context.deliveryId)}/messages`;
             const authorization = `Bearer ${Redacted.value(context.accessToken)}`;
 
@@ -431,7 +442,7 @@ describe('delivery API messages', () => {
             const badId = yield* raw(messages, {
                 method: 'POST',
                 headers: { authorization, 'content-type': 'application/json' },
-                body: JSON.stringify({ messageId: 'has spaces', markdown: 'x' }),
+                body: yield* jsonText({ messageId: 'has spaces', markdown: 'x' }),
             });
 
             expect(badId.status).toBe(400);
@@ -439,11 +450,11 @@ describe('delivery API messages', () => {
             const empty = yield* raw(messages, {
                 method: 'POST',
                 headers: { authorization, 'content-type': 'application/json' },
-                body: JSON.stringify({ messageId: 'other', markdown: '' }),
+                body: yield* jsonText({ messageId: 'other', markdown: '' }),
             });
 
             expect(empty.status).toBe(400);
-            expect((yield* client.status(delivery)).output.map(({ kind }) => kind)).toEqual(['CreateMessage']);
+            expect(Arr.map((yield* client.status(delivery)).output, ({ kind }) => kind)).toEqual(['CreateMessage']);
         }),
     );
 });
@@ -461,14 +472,19 @@ describe('delivery API activity and supported operations', () => {
             expect((yield* client.activity.set({ ...delivery, activity: working })).status).toBe('accepted');
             expect((yield* client.activity.set({ ...delivery, activity: working })).status).toBe('already_recorded');
             const shown = yield* Queue.take(output);
-            expect(shown.operation).toEqual({ _tag: 'SetActivity', activity: working });
+            expect(shown.operation).toEqual(SetActivity.make({ activity: working }));
             expect((yield* client.status(delivery)).activity).toEqual(working);
 
             yield* client.complete(delivery);
             const presented = yield* Queue.take(output);
-            expect(presented.operation).toMatchObject({ _tag: 'PresentOutcome', clearActivity: true });
+            expect(presented.operation).toEqual(
+                ProviderPresentOutcome.make({
+                    outcome: DeliveryOutcome.cases.Completed.make({}),
+                    clearActivity: true,
+                }),
+            );
             const retired = yield* awaitRetired(client, delivery);
-            expect(retired.output.map(({ kind }) => kind)).toEqual(['SetActivity', 'PresentOutcome']);
+            expect(Arr.map(retired.output, ({ kind }) => kind)).toEqual(['SetActivity', 'PresentOutcome']);
         }),
     );
 
@@ -485,7 +501,7 @@ describe('delivery API activity and supported operations', () => {
                     'content-type': 'application/json',
                     authorization: `Bearer ${Redacted.value(context.accessToken)}`,
                 },
-                body: JSON.stringify({ label: 'Run', url: 'https://example.com/run/1' }),
+                body: yield* jsonText({ label: 'Run', url: 'https://example.com/run/1' }),
             });
 
             expect(link.status).toBe(409);
@@ -494,10 +510,7 @@ describe('delivery API activity and supported operations', () => {
                 .set({ ...delivery, activity: DeliveryActivity.cases.Working.make({ message: 'x' }) })
                 .pipe(Effect.flip);
 
-            expect(activity).toMatchObject({
-                _tag: 'DeliveryOperationUnsupported',
-                operation: 'SetActivity',
-            });
+            expect(activity).toEqual(DeliveryOperationUnsupported.make({ operation: 'SetActivity' }));
             expect((yield* client.status(delivery)).output).toEqual([]);
         }),
     );
@@ -529,21 +542,23 @@ describe('delivery API reactions', () => {
 
                 const add = { ...delivery, target: activation, reaction: 'eyes' as const, active: true };
                 expect((yield* client.reactions.set(add)).status).toBe('accepted');
-                expect((yield* Queue.take(output)).operation).toEqual({
-                    _tag: 'SetMessageReaction',
-                    target: { _tag: 'ActivationTarget' },
-                    reaction: 'eyes',
-                    active: true,
-                });
+                expect((yield* Queue.take(output)).operation).toEqual(
+                    ProviderSetMessageReaction.make({
+                        target: ProviderReactionTarget.cases.ActivationTarget.make({}),
+                        reaction: 'eyes',
+                        active: true,
+                    }),
+                );
                 expect((yield* client.reactions.set(add)).status).toBe('already_recorded');
                 expect((yield* client.reactions.set({ ...add, active: false })).status).toBe('accepted');
-                expect((yield* Queue.take(output)).operation).toEqual({
-                    _tag: 'SetMessageReaction',
-                    target: { _tag: 'ActivationTarget' },
-                    reaction: 'eyes',
-                    active: false,
-                    addedReference: { sent: 'reaction-1' },
-                });
+                expect((yield* Queue.take(output)).operation).toEqual(
+                    ProviderSetMessageReaction.make({
+                        target: ProviderReactionTarget.cases.ActivationTarget.make({}),
+                        reaction: 'eyes',
+                        active: false,
+                        addedReference: { sent: 'reaction-1' },
+                    }),
+                );
 
                 yield* client.messages.create({ ...delivery, message: { messageId, markdown: 'Summary' } });
                 yield* client.reactions.set({
@@ -553,12 +568,16 @@ describe('delivery API reactions', () => {
                     active: true,
                 });
                 yield* Queue.take(output);
-                expect((yield* Queue.take(output)).operation).toEqual({
-                    _tag: 'SetMessageReaction',
-                    target: { _tag: 'MessageTarget', messageId, reference: { sent: 'message-1' } },
-                    reaction: 'hooray',
-                    active: true,
-                });
+                expect((yield* Queue.take(output)).operation).toEqual(
+                    ProviderSetMessageReaction.make({
+                        target: ProviderReactionTarget.cases.MessageTarget.make({
+                            messageId,
+                            reference: { sent: 'message-1' },
+                        }),
+                        reaction: 'hooray',
+                        active: true,
+                    }),
+                );
 
                 yield* client.complete(delivery);
                 yield* awaitRetired(client, delivery);
@@ -588,10 +607,7 @@ describe('delivery API reactions', () => {
                     })
                     .pipe(Effect.flip);
 
-                expect(refused).toMatchObject({
-                    _tag: 'DeliveryReactionTargetUnavailable',
-                    target: 'ActivationTarget',
-                });
+                expect(refused).toEqual(DeliveryReactionTargetUnavailable.make({ target: 'ActivationTarget' }));
 
                 const missing = yield* client.reactions
                     .set({
@@ -610,20 +626,30 @@ describe('delivery API reactions', () => {
 
                 const request = (
                     reaction: string,
-                    body: { readonly target: { readonly _tag: string }; readonly active: boolean },
+                    body: { readonly target: DeliveryReactionTarget; readonly active: boolean },
                 ) =>
-                    raw(`${reactions}/${reaction}`, {
-                        method: 'PUT',
-                        headers: {
-                            authorization: `Bearer ${Redacted.value(context.accessToken)}`,
-                            'content-type': 'application/json',
-                        },
-                        body: JSON.stringify(body),
-                    });
+                    Effect.flatMap(jsonText(body), (text) =>
+                        raw(`${reactions}/${reaction}`, {
+                            method: 'PUT',
+                            headers: {
+                                authorization: `Bearer ${Redacted.value(context.accessToken)}`,
+                                'content-type': 'application/json',
+                            },
+                            body: text,
+                        }),
+                    );
 
-                expect((yield* request('eyes', { target: { _tag: 'PlanTarget' }, active: true })).status).toBe(409);
                 expect(
-                    (yield* request('party_parrot', { target: { _tag: 'ActivationTarget' }, active: true })).status,
+                    (yield* request('eyes', {
+                        target: DeliveryReactionTarget.cases.PlanTarget.make({}),
+                        active: true,
+                    })).status,
+                ).toBe(409);
+                expect(
+                    (yield* request('party_parrot', {
+                        target: DeliveryReactionTarget.cases.ActivationTarget.make({}),
+                        active: true,
+                    })).status,
                 ).toBe(400);
                 expect((yield* client.status(delivery)).output).toEqual([]);
             }),
@@ -661,19 +687,22 @@ describe('delivery API plan', () => {
                 const delivery = { deliveryId: context.deliveryId, accessToken: context.accessToken };
 
                 expect((yield* client.plan.put({ ...delivery, plan: first })).status).toBe('accepted');
-                expect((yield* Queue.take(output)).operation).toEqual({
-                    _tag: 'RenderPlan',
-                    revision: 1,
-                    plan: first,
-                });
+                expect((yield* Queue.take(output)).operation).toEqual(
+                    ProviderRenderPlan.make({ revision: DeliveryPlanRevision.make(1), plan: first }),
+                );
                 expect((yield* client.plan.put({ ...delivery, plan: first })).status).toBe('already_recorded');
                 expect((yield* client.plan.put({ ...delivery, plan: second })).status).toBe('accepted');
-                expect((yield* Queue.take(output)).operation).toEqual({
-                    _tag: 'RenderPlan',
-                    revision: 2,
-                    plan: second,
-                    rendered: { revision: 1, plan: first, presentation: { sent: 'plan-1' } },
-                });
+                expect((yield* Queue.take(output)).operation).toEqual(
+                    ProviderRenderPlan.make({
+                        revision: DeliveryPlanRevision.make(2),
+                        plan: second,
+                        rendered: RenderedDeliveryPlan.make({
+                            revision: DeliveryPlanRevision.make(1),
+                            plan: first,
+                            presentation: { sent: 'plan-1' },
+                        }),
+                    }),
+                );
 
                 yield* client.complete(delivery);
                 const retired = yield* awaitRetired(client, delivery);
@@ -699,23 +728,33 @@ describe('delivery API plan', () => {
                 expect(kept.output).toEqual([]);
 
                 const put = (plan: Schema.Json) =>
-                    raw(`/deliveries/${encodeURIComponent(context.deliveryId)}/plan`, {
-                        method: 'PUT',
-                        headers: {
-                            authorization: `Bearer ${Redacted.value(context.accessToken)}`,
-                            'content-type': 'application/json',
-                        },
-                        body: JSON.stringify({ plan }),
-                    });
+                    Effect.flatMap(jsonText({ plan }), (text) =>
+                        raw(`/deliveries/${encodeURIComponent(context.deliveryId)}/plan`, {
+                            method: 'PUT',
+                            headers: {
+                                authorization: `Bearer ${Redacted.value(context.accessToken)}`,
+                                'content-type': 'application/json',
+                            },
+                            body: text,
+                        }),
+                    );
 
-                const item = { id: 'a', title: 'Step a', state: { _tag: 'Pending' } };
+                const item = {
+                    id: 'a',
+                    title: 'Step a',
+                    state: DeliveryPlanItemState.cases.Pending.make({}),
+                };
+
                 expect((yield* put({ items: [item, item] })).status).toBe(400);
                 expect(
                     (yield* put({
                         items: Array.from({ length: 51 }, (_, index) => ({ ...item, id: `a${index}` })),
                     })).status,
                 ).toBe(400);
-                expect((yield* put({ items: [{ ...item, state: { _tag: 'Skipped' } }] })).status).toBe(400);
+
+                /** A state no plan item has, as a remote worker could send it. */
+                const skipped = yield* jsonValue('{"_tag":"Skipped"}');
+                expect((yield* put({ items: [{ ...item, state: skipped }] })).status).toBe(400);
                 expect((yield* client.status(delivery)).plan).toEqual({ revision: 1, plan: first });
             }),
     );
@@ -735,7 +774,7 @@ describe('delivery API time limit', () => {
                 const day = 24 * 60 * 60 * 1_000;
                 const first = (yield* client.status(delivery)).failAt;
 
-                if (first === undefined) return expect.unreachable();
+                assert.isDefined(first);
                 expect(first).toBeGreaterThanOrEqual(before + day);
                 expect(first).toBeLessThanOrEqual((yield* Clock.currentTimeMillis) + day);
 
@@ -746,7 +785,7 @@ describe('delivery API time limit', () => {
                 });
                 const moved = (yield* client.status(delivery)).failAt;
 
-                if (moved === undefined) return expect.unreachable();
+                assert.isDefined(moved);
                 expect(moved).toBeGreaterThan(first);
             }),
     );

@@ -22,7 +22,7 @@
  * one at a time, in the order they were saved. A delivery retires once its callback has returned and
  * every operation is delivered or has failed.
  */
-import { Array as Arr, Data, Effect, Match, Predicate, Schema, Struct } from 'effect';
+import { Array as Arr, Data, Effect, Match, Option, Predicate, Schema, Struct } from 'effect';
 
 import { DeliveryActivity, SetActivity, sameDeliveryActivity } from './DeliveryActivity';
 import { DeliveryOperationKind, PreparedDeliveryInvocation, type DeliveryStage } from './DeliveryContext';
@@ -39,11 +39,17 @@ import {
     DeliveryTerminalConflict,
     sameDeliveryTerminal,
     terminalFromMutation,
+    type AddDeliveryLink,
+    type CompleteDelivery,
+    type CreateDeliveryMessage,
+    type DeleteDeliveryMessage,
     type DeliveryMessageMutation,
     type DeliveryMutation,
+    type FailDelivery,
     type PutDeliveryPlan,
     type SetDeliveryActivity,
     type SetDeliveryReaction,
+    type UpdateDeliveryMessage,
 } from './DeliveryControl';
 import { AddExternalLink, ExternalLink } from './DeliveryLink';
 import {
@@ -214,12 +220,16 @@ export type DeliverySlotClaim = {
 };
 
 /** The claim does not own the batch, or the batch is not in a stage the operation allows. */
-export class ClaimNotOwned extends Data.TaggedError('ClaimNotOwned')<{}> {}
+export class ClaimNotOwned extends Schema.TaggedError<ClaimNotOwned, { readonly brand: unique symbol }>()(
+    'ClaimNotOwned',
+    {},
+) {}
 
 /** A different preparation is already saved. */
-export class PreparationMismatch extends Data.TaggedError('PreparationMismatch')<{
-    readonly batchId: BatchId;
-}> {}
+export class PreparationMismatch extends Schema.TaggedError<PreparationMismatch, { readonly brand: unique symbol }>()(
+    'PreparationMismatch',
+    { batchId: BatchId },
+) {}
 
 /**
  * What due work the active delivery has: its callback to run, or output to send. Takes only the
@@ -229,7 +239,8 @@ export const activeDeliveryWork = (active: { readonly stage: ActiveDeliveryStage
     active.stage === 'ExternalWaiting' || active.stage === 'Finishing' ? 'Output' : 'Callback';
 
 /** The operation that runs next. Operations run in order, so a later one waits for this one to settle. */
-const nextOperation = (active: ActiveDelivery) => active.operations.find(isUnsettledOperation);
+const nextOperation = (active: ActiveDelivery) =>
+    Option.getOrUndefined(Arr.findFirst(active.operations, isUnsettledOperation));
 
 /** When the next operation is due: when it is ready, or when its attempt's lease runs out. */
 const nextOutputAt = (active: ActiveDelivery): number | null => {
@@ -254,33 +265,10 @@ const deadline = (active: ActiveDelivery): number | null =>
 
 /** When the delivery next needs processing: its next output, or its time limit, whichever is first. */
 const nextDueAt = (active: ActiveDelivery): number | null =>
-    Arr.match([nextOutputAt(active), deadline(active)].filter(Predicate.isNotNull), {
+    Arr.match(Arr.filter([nextOutputAt(active), deadline(active)], Predicate.isNotNull), {
         onEmpty: () => null,
         onNonEmpty: (times) => Math.min(...times),
     });
-
-/**
- * Fail a handed-off delivery whose remote worker sent nothing before its time limit: save the `Failed`
- * result, with reason `TimedOut`, and the `PresentOutcome` that shows it. Any other delivery is unchanged.
- */
-const failIfOverdue = (active: ActiveDelivery, now: number): ActiveDelivery => {
-    const due = deadline(active);
-
-    if (due === null || due > now) return active;
-
-    const terminal = DeliveryTerminal.make({
-        outcome: DeliveryOutcome.cases.Failed.make({ reason: 'TimedOut' }),
-        markdown: DELIVERY_TIMED_OUT_MARKDOWN,
-    });
-
-    const failed = withOperations(
-        ActiveDelivery.make({ ...active, terminal }),
-        [PresentOutcome.make({ outcome: terminal.outcome, markdown: DELIVERY_TIMED_OUT_MARKDOWN })],
-        now,
-    );
-
-    return ActiveDelivery.make({ ...failed, stage: 'Finishing' });
-};
 
 /** Start a handed-off delivery's time limit again from `now`, after a request from its remote worker. */
 const withDeadlineFrom = (active: ActiveDelivery, now: number): ActiveDelivery =>
@@ -288,7 +276,11 @@ const withDeadlineFrom = (active: ActiveDelivery, now: number): ActiveDelivery =
         ? active
         : ActiveDelivery.make({ ...active, failAt: Timestamp.make(now + active.failAfterMs) });
 
-const retire = (slot: DeliverySlot, active: ActiveDelivery, facts: MailboxFacts): DeliverySlot => {
+/** Only the current step may control provider output or remote mutations. */
+export const currentPreparedCallback = (active: ActiveDelivery) => active.prepared?.callbacks[active.callbackIndex];
+
+/** Retain the completed step and rotate its identity before making the next step claimable. */
+const finishStep = (slot: DeliverySlot, active: ActiveDelivery, facts: MailboxFacts): DeliverySlot => {
     const entry = {
         batchId: active.batchId,
         callbackIndex: active.callbackIndex,
@@ -297,7 +289,7 @@ const retire = (slot: DeliverySlot, active: ActiveDelivery, facts: MailboxFacts)
         interruptRequested: active.interruptRequestedAt !== undefined,
         retainUntil: Timestamp.make(facts.now + DELIVERY_RETENTION_MS),
         links: active.links,
-        output: active.operations.map(deliveryOutputStatus),
+        output: Arr.map(active.operations, deliveryOutputStatus),
     };
 
     const withTerminal = Predicate.isUndefined(active.terminal) ? entry : { ...entry, terminal: active.terminal };
@@ -306,23 +298,18 @@ const retire = (slot: DeliverySlot, active: ActiveDelivery, facts: MailboxFacts)
         Predicate.isUndefined(active.plan) ? withTerminal : { ...withTerminal, plan: deliveryPlanStatus(active.plan) },
     );
 
-    const retained = [...slot.retained.filter(({ retainUntil }) => retainUntil > facts.now), retiredEntry].slice(
-        -MAX_RETAINED_DELIVERIES,
+    const retained = Arr.takeRight(
+        [...Arr.filter(slot.retained, ({ retainUntil }) => retainUntil > facts.now), retiredEntry],
+        MAX_RETAINED_DELIVERIES,
     );
 
-    return DeliverySlot.make({
+    /** The step retired, waking the events waiting behind it. */
+    const retired = DeliverySlot.make({
         active: null,
         readyAt: facts.hasWaiting ? Timestamp.make(facts.now) : null,
         retained,
     });
-};
 
-/** Only the current step may control provider output or remote mutations. */
-export const currentPreparedCallback = (active: ActiveDelivery) => active.prepared?.callbacks[active.callbackIndex];
-
-/** Retain the completed step and rotate its identity before making the next step claimable. */
-const finishStep = (slot: DeliverySlot, active: ActiveDelivery, facts: MailboxFacts): DeliverySlot => {
-    const retired = retire(slot, active, facts);
     const callbackIndex = active.callbackIndex + 1;
     const accessToken = active.callbackAccessTokens?.[callbackIndex];
 
@@ -334,7 +321,7 @@ const finishStep = (slot: DeliverySlot, active: ActiveDelivery, facts: MailboxFa
     if (
         active.continuationAllowed !== true ||
         !remoteSucceeded ||
-        active.operations.some(({ state }) => Predicate.isTagged(state, 'Failed')) ||
+        Arr.some(active.operations, ({ state }) => Predicate.isTagged(state, 'Failed')) ||
         active.prepared?.callbacks[callbackIndex] === undefined ||
         accessToken === undefined
     )
@@ -387,17 +374,26 @@ const withOperations = (
     operations: ReadonlyArray<DeliveryOutputOperation>,
     now: number,
 ): ActiveDelivery => {
-    const added = operations.reduce<ReadonlyArray<DeliveryOperation>>((saved, operation) => {
-        const links = () => saved.filter(({ operation }) => Predicate.isTagged(operation, 'AddExternalLink')).length;
+    const added = Arr.reduce(operations, active.operations, (saved, operation) => {
+        const links = () =>
+            Arr.filter(saved, ({ operation }) => Predicate.isTagged(operation, 'AddExternalLink')).length;
 
-        const messages = () => saved.filter(({ operation }) => isMessageOperation(operation)).length;
+        const messages = () =>
+            Arr.filter(
+                saved,
+                ({ operation }) =>
+                    Predicate.isTagged(operation, 'CreateMessage') ||
+                    Predicate.isTagged(operation, 'UpdateMessage') ||
+                    Predicate.isTagged(operation, 'DeleteMessage'),
+            ).length;
 
-        const activities = () => saved.filter(({ operation }) => Predicate.isTagged(operation, 'SetActivity')).length;
+        const activities = () =>
+            Arr.filter(saved, ({ operation }) => Predicate.isTagged(operation, 'SetActivity')).length;
 
         const reactions = () =>
-            saved.filter(({ operation }) => Predicate.isTagged(operation, 'SetMessageReaction')).length;
+            Arr.filter(saved, ({ operation }) => Predicate.isTagged(operation, 'SetMessageReaction')).length;
 
-        const plans = () => saved.filter(({ operation }) => Predicate.isTagged(operation, 'RenderPlan')).length;
+        const plans = () => Arr.filter(saved, ({ operation }) => Predicate.isTagged(operation, 'RenderPlan')).length;
 
         const operationId = Match.value(operation).pipe(
             Match.tagsExhaustive({
@@ -422,20 +418,18 @@ const withOperations = (
                 hadAmbiguousAttempt: false,
             }),
         ];
-    }, active.operations);
+    });
 
     return ActiveDelivery.make({ ...active, operations: added });
 };
 
-const isMessageOperation = (operation: DeliveryOutputOperation) =>
-    Predicate.isTagged(operation, 'CreateMessage') ||
-    Predicate.isTagged(operation, 'UpdateMessage') ||
-    Predicate.isTagged(operation, 'DeleteMessage');
-
 /** The saved `CreateMessage` of a message, if the delivery has created it. */
 const messageCreation = (active: ActiveDelivery, messageId: MessageId) =>
-    active.operations.find(
-        ({ operation }) => Predicate.isTagged(operation, 'CreateMessage') && operation.messageId === messageId,
+    Option.getOrUndefined(
+        Arr.findFirst(
+            active.operations,
+            ({ operation }) => Predicate.isTagged(operation, 'CreateMessage') && operation.messageId === messageId,
+        ),
     );
 
 /**
@@ -453,7 +447,9 @@ export const sentMessageReference = (
 
 /** The last saved `SetActivity`, which holds the activity the remote worker last asked for. */
 const lastActivityOperation = (active: ActiveDelivery) =>
-    active.operations.findLast(({ operation }) => Predicate.isTagged(operation, 'SetActivity'));
+    Option.getOrUndefined(
+        Arr.findLast(active.operations, ({ operation }) => Predicate.isTagged(operation, 'SetActivity')),
+    );
 
 /** The activity the remote worker last asked for. `Idle` when it never asked. */
 const desiredActivity = (active: ActiveDelivery): DeliveryActivity => {
@@ -467,38 +463,15 @@ const desiredActivity = (active: ActiveDelivery): DeliveryActivity => {
 /** Whether the delivery's last activity request was `Working`, so ending it must clear the provider's activity. */
 export const activityToClear = (active: ActiveDelivery) => Predicate.isTagged(desiredActivity(active), 'Working');
 
-/** The last saved `RenderPlan`, which holds the latest plan sent to the provider or waiting to be. */
-const lastPlanOperation = (active: ActiveDelivery) =>
-    active.operations.findLast(({ operation }) => Predicate.isTagged(operation, 'RenderPlan'));
-
 /** The plan the provider last showed, with its presentation. None until a `RenderPlan` has been applied. */
 export const renderedDeliveryPlan = (active: ActiveDelivery): RenderedDeliveryPlan | undefined => active.plan?.rendered;
-
-/**
- * Record what an applied `RenderPlan` showed: exactly the plan it sent, never a newer desired plan that
- * arrived while it ran, and the provider's presentation from its receipt.
- */
-const withRenderedPlan = (active: ActiveDelivery, request: RenderPlan, presentation: Schema.Json | undefined) => {
-    const { plan } = active;
-
-    if (plan === undefined || (plan.rendered !== undefined && plan.rendered.revision >= request.revision))
-        return active;
-
-    const rendered = RenderedDeliveryPlan.make(
-        Predicate.isUndefined(presentation)
-            ? { revision: request.revision, plan: request.plan }
-            : { revision: request.revision, plan: request.plan, presentation },
-    );
-
-    return ActiveDelivery.make({ ...active, plan: DeliveryPlanState.make({ ...plan, rendered }) });
-};
 
 /** The saved `SetMessageReaction` operations for one reaction on one target, oldest first. */
 const reactionsOn = (
     operations: ReadonlyArray<DeliveryOperation>,
     key: { readonly target: DeliveryReactionTarget; readonly reaction: PortableReaction },
 ) =>
-    operations.flatMap((saved) => {
+    Arr.flatMap(operations, (saved) => {
         const { operation } = saved;
 
         return Predicate.isTagged(operation, 'SetMessageReaction') &&
@@ -520,30 +493,27 @@ export const reactionAddedReference = (
 
     if (!Predicate.isTagged(request, 'SetMessageReaction') || request.active) return undefined;
 
-    const earlier = active.operations.slice(
-        0,
-        active.operations.findIndex(({ operationId }) => operationId === operation.operationId),
+    const earlier = Arr.takeWhile(active.operations, ({ operationId }) => operationId !== operation.operationId);
+
+    /** The last change the provider applied decides: an add leaves its receipt, a removal leaves none. */
+    const lastApplied = Arr.findLast(reactionsOn(earlier, request), ({ saved }) =>
+        Predicate.isTagged(saved.state, 'Delivered'),
     );
 
-    return reactionsOn(earlier, request).reduce<ProviderMessageReference | undefined>(
-        (added, { saved, request: change }) =>
-            Predicate.isTagged(saved.state, 'Delivered') ? (change.active ? saved.state.receipt : undefined) : added,
-        undefined,
+    return Option.getOrUndefined(
+        Option.flatMap(lastApplied, ({ saved, request: change }) =>
+            change.active && Predicate.isTagged(saved.state, 'Delivered')
+                ? Option.fromNullishOr(saved.state.receipt)
+                : Option.none(),
+        ),
     );
 };
-
-/** Links not already saved, each once. A repeat of a saved URL is a replay. */
-const newLinks = (saved: ReadonlyArray<ExternalLink>, links: ReadonlyArray<ExternalLink>) =>
-    links.reduce<ReadonlyArray<ExternalLink>>(
-        (fresh, link) => ([...saved, ...fresh].some(({ url }) => url === link.url) ? fresh : [...fresh, link]),
-        [],
-    );
 
 /** Save links and an `AddExternalLink` operation for each. */
 const withLinks = (active: ActiveDelivery, links: ReadonlyArray<ExternalLink>, now: number) =>
     withOperations(
         ActiveDelivery.make({ ...active, links: [...active.links, ...links] }),
-        links.map((link) => AddExternalLink.make({ link })),
+        Arr.map(links, (link) => AddExternalLink.make({ link })),
         now,
     );
 
@@ -624,7 +594,7 @@ export const renewDeliveryClaim = Effect.fn('delivery.lifecycle.renew_claim')(fu
 ) {
     const active = owned(slot, input.claimId);
 
-    if (active === null) return yield* new ClaimNotOwned();
+    if (active === null) return yield* ClaimNotOwned.make();
 
     return withActive(slot, active, input.now + input.leaseMs);
 });
@@ -643,11 +613,11 @@ export const prepareDeliverySlot = Effect.fn('delivery.lifecycle.prepare')(funct
 > {
     const active = owned(slot, input.claimId);
 
-    if (active === null) return yield* new ClaimNotOwned();
+    if (active === null) return yield* ClaimNotOwned.make();
 
     if (active.prepared !== undefined) {
         if (!Schema.toEquivalence(PreparedDeliveryInvocation)(active.prepared, input.prepared)) {
-            return yield* new PreparationMismatch({ batchId: active.batchId });
+            return yield* PreparationMismatch.make({ batchId: active.batchId });
         }
 
         return { slot, prepared: active.prepared };
@@ -658,7 +628,7 @@ export const prepareDeliverySlot = Effect.fn('delivery.lifecycle.prepare')(funct
         input.callbackAccessTokens[0] !== active.accessToken ||
         new Set(input.callbackAccessTokens).size !== input.callbackAccessTokens.length
     ) {
-        return yield* new PreparationMismatch({ batchId: active.batchId });
+        return yield* PreparationMismatch.make({ batchId: active.batchId });
     }
 
     const next = ActiveDelivery.make({
@@ -686,7 +656,7 @@ export const handOffDeliverySlot = Effect.fn('delivery.lifecycle.hand_off')(func
 ) {
     const active = owned(slot, input.claimId);
 
-    if (active === null) return yield* new ClaimNotOwned();
+    if (active === null) return yield* ClaimNotOwned.make();
 
     if (active.stage === 'ExternalCleaning') return slot;
 
@@ -700,7 +670,12 @@ export const handOffDeliverySlot = Effect.fn('delivery.lifecycle.hand_off')(func
         ? handedOff
         : withDeadlineFrom(ActiveDelivery.make({ ...handedOff, failAfterMs: input.failAfterMs }), input.handedOffAt);
 
-    const next = withLinks(limited, newLinks(active.links, input.links), input.handedOffAt);
+    /** Links not already saved, each once. A repeat of a saved URL is a replay. */
+    const newLinks = Arr.reduce(input.links, Arr.empty<ExternalLink>(), (fresh, link) =>
+        Arr.some([...active.links, ...fresh], ({ url }) => url === link.url) ? fresh : [...fresh, link],
+    );
+
+    const next = withLinks(limited, newLinks, input.handedOffAt);
 
     return withActive(slot, next, slot.readyAt);
 });
@@ -719,7 +694,7 @@ export const recordDeliveryAttempt = Effect.fn('delivery.lifecycle.record_attemp
 ) {
     const active = owned(slot, input.claimId);
 
-    if (active === null) return yield* new ClaimNotOwned();
+    if (active === null) return yield* ClaimNotOwned.make();
 
     if (active.terminal === undefined && active.stage === 'Local' && input.retryAfterMs !== null) {
         const next = ActiveDelivery.make({ ...active, stage: 'Retry', claimId: null });
@@ -773,7 +748,34 @@ export const claimDeliveryOutput = (
     const active = slot.active;
 
     if (active === null || activeDeliveryWork(active) !== 'Output') return { slot, claimed: null };
-    const current = failIfOverdue(active, input.now);
+    /**
+     * Fail a handed-off delivery whose remote worker sent nothing before its time limit: save the `Failed`
+     * result, with reason `TimedOut`, and the `PresentOutcome` that shows it. Any other delivery is unchanged.
+     */
+    const due = deadline(active);
+
+    const timedOut = DeliveryTerminal.make({
+        outcome: DeliveryOutcome.cases.Failed.make({ reason: 'TimedOut' }),
+        markdown: DELIVERY_TIMED_OUT_MARKDOWN,
+    });
+
+    const current =
+        due === null || due > input.now
+            ? active
+            : ActiveDelivery.make({
+                  ...withOperations(
+                      ActiveDelivery.make({ ...active, terminal: timedOut }),
+                      [
+                          PresentOutcome.make({
+                              outcome: timedOut.outcome,
+                              markdown: DELIVERY_TIMED_OUT_MARKDOWN,
+                          }),
+                      ],
+                      input.now,
+                  ),
+                  stage: 'Finishing',
+              });
+
     const next = nextOperation(current);
     const dueAt = nextOutputAt(current);
 
@@ -804,9 +806,11 @@ const ownedOperation = (slot: DeliverySlot, input: { readonly operationId: strin
     const active = slot.active;
 
     if (active === null) return null;
-    const operation = active.operations.find(({ operationId }) => operationId === input.operationId);
 
-    if (operation === undefined) return null;
+    const found = Arr.findFirst(active.operations, ({ operationId }) => operationId === input.operationId);
+
+    if (Option.isNone(found)) return null;
+    const operation = found.value;
     const { state } = operation;
 
     return Predicate.isTagged(state, 'Delivering') && state.claimId === input.claimId ? { active, operation } : null;
@@ -815,7 +819,9 @@ const ownedOperation = (slot: DeliverySlot, input: { readonly operationId: strin
 const replaceOperation = (active: ActiveDelivery, operation: DeliveryOperation) =>
     ActiveDelivery.make({
         ...active,
-        operations: active.operations.map((saved) => (saved.operationId === operation.operationId ? operation : saved)),
+        operations: Arr.map(active.operations, (saved) =>
+            saved.operationId === operation.operationId ? operation : saved,
+        ),
     });
 
 /** Move a live output attempt's lease forward. */
@@ -830,7 +836,7 @@ export const renewDeliveryOutput = Effect.fn('delivery.lifecycle.renew_output')(
 ) {
     const owner = ownedOperation(slot, input);
 
-    if (owner === null) return yield* new ClaimNotOwned();
+    if (owner === null) return yield* ClaimNotOwned.make();
 
     const active = replaceOperation(
         owner.active,
@@ -860,7 +866,7 @@ export const settleDeliveryOutput = Effect.fn('delivery.lifecycle.settle_output'
 ) {
     const owner = ownedOperation(slot, input);
 
-    if (owner === null) return yield* new ClaimNotOwned();
+    if (owner === null) return yield* ClaimNotOwned.make();
 
     const state = Match.value(input.settlement).pipe(
         Match.tagsExhaustive({
@@ -875,19 +881,34 @@ export const settleDeliveryOutput = Effect.fn('delivery.lifecycle.settle_output'
 
     const request = owner.operation.operation;
 
+    /**
+     * Record what an applied `RenderPlan` showed: exactly the plan it sent, never a newer desired plan that
+     * arrived while it ran, and the provider's presentation from its receipt.
+     */
+    const shownPlan = settled.plan;
+
     const active =
-        Predicate.isTagged(request, 'RenderPlan') && Predicate.isTagged(state, 'Delivered')
-            ? withRenderedPlan(settled, request, state.receipt)
+        Predicate.isTagged(request, 'RenderPlan') &&
+        Predicate.isTagged(state, 'Delivered') &&
+        shownPlan !== undefined &&
+        (shownPlan.rendered === undefined || shownPlan.rendered.revision < request.revision)
+            ? ActiveDelivery.make({
+                  ...settled,
+                  plan: DeliveryPlanState.make({
+                      ...shownPlan,
+                      rendered: RenderedDeliveryPlan.make(
+                          Predicate.isUndefined(state.receipt)
+                              ? { revision: request.revision, plan: request.plan }
+                              : { revision: request.revision, plan: request.plan, presentation: state.receipt },
+                      ),
+                  }),
+              })
             : settled;
 
     if (active.stage === 'Finishing' && nextOperation(active) === undefined) return finishStep(slot, active, input);
 
     return withActive(slot, active, nextDueAt(active));
 });
-
-/** The stage a remote worker sees. A delivery with a result whose callback is still returning is finishing. */
-const publicStage = (active: ActiveDelivery): DeliveryStage =>
-    active.terminal !== undefined ? 'Finishing' : active.stage;
 
 type Located = Data.TaggedEnum<{
     Active: { readonly active: ActiveDelivery };
@@ -915,14 +936,17 @@ const locate = (
         return matches(slot.active.accessToken) ? Located.Active({ active: slot.active }) : null;
     }
 
-    const retained = slot.retained.find(
+    const retained = Arr.findFirst(
+        slot.retained,
         ({ batchId, callbackIndex, retainUntil }) =>
             batchId === input.reference.batchId &&
             callbackIndex === input.reference.callbackIndex &&
             retainUntil > input.now,
     );
 
-    return retained !== undefined && matches(retained.accessToken) ? Located.Retained({ retained }) : null;
+    return Option.isSome(retained) && matches(retained.value.accessToken)
+        ? Located.Retained({ retained: retained.value })
+        : null;
 };
 
 /** A status with the outcome and plan the delivery has, when it has them. */
@@ -947,28 +971,35 @@ export const readDeliverySlotStatus = Effect.fn('delivery.lifecycle.read_status'
 ): Effect.fn.Return<DeliveryStatus, DeliveryNotFound> {
     const located = locate(slot, input);
 
-    if (located === null) return yield* new DeliveryNotFound();
+    if (located === null) return yield* DeliveryNotFound.make();
 
     return Located.$match(located, {
-        Active: ({ active }) =>
-            statusWith(
-                {
-                    deliveryId: input.reference.deliveryId,
-                    stage: publicStage(active),
-                    /** A result clears the activity, so a finishing delivery shows `Idle`. */
-                    activity:
-                        active.terminal === undefined ? desiredActivity(active) : DeliveryActivity.cases.Idle.make({}),
-                    interruptRequested: active.interruptRequestedAt !== undefined,
-                    supportedOperations: currentPreparedCallback(active)?.supportedOperations ?? [],
-                    reactionTargets: currentPreparedCallback(active)?.reactionTargets ?? [],
-                    ...(active.terminal === undefined && active.failAt !== undefined
-                        ? { failAt: active.failAt }
-                        : undefined),
-                    output: active.operations.map(deliveryOutputStatus),
-                },
+        Active: ({ active }) => {
+            const stage: DeliveryStage =
+                /** A delivery with a result whose callback is still returning is finishing. */
+                active.terminal === undefined ? active.stage : 'Finishing';
+
+            const status = {
+                deliveryId: input.reference.deliveryId,
+                stage,
+                /** A result clears the activity, so a finishing delivery shows `Idle`. */
+                activity:
+                    active.terminal === undefined ? desiredActivity(active) : DeliveryActivity.cases.Idle.make({}),
+                interruptRequested: active.interruptRequestedAt !== undefined,
+                supportedOperations: currentPreparedCallback(active)?.supportedOperations ?? [],
+                reactionTargets: currentPreparedCallback(active)?.reactionTargets ?? [],
+                output: Arr.map(active.operations, deliveryOutputStatus),
+            };
+
+            /** Only a delivery still waiting for its result has a time limit. */
+            const failAt = active.terminal === undefined ? active.failAt : undefined;
+
+            return statusWith(
+                Predicate.isUndefined(failAt) ? status : { ...status, failAt },
                 active.terminal,
                 Predicate.isUndefined(active.plan) ? undefined : deliveryPlanStatus(active.plan),
-            ),
+            );
+        },
         Retained: ({ retained }) =>
             statusWith(
                 {
@@ -997,6 +1028,13 @@ type MutationChange = Effect.Effect<
     | DeliveryReactionTargetUnavailable
 >;
 
+/** What every change needs: the slot, the delivery it names, and how to answer. */
+type MutationContext = {
+    readonly slot: DeliverySlot;
+    readonly located: Located;
+    readonly receipt: (status: DeliveryMutationReceipt['status']) => DeliveryMutationReceipt;
+} & MailboxFacts;
+
 /**
  * Record a remote worker's final result, and the `PresentOutcome` that shows it, in one change.
  *
@@ -1005,83 +1043,37 @@ type MutationChange = Effect.Effect<
  * - A delivery whose callback is still running keeps the result and finishes when the callback returns.
  * - A delivery that ended without a remote result is closed.
  */
-const recordTerminal = (
-    slot: DeliverySlot,
-    located: Located,
-    input: {
-        readonly terminal: DeliveryTerminal;
-        readonly receipt: (status: DeliveryMutationReceipt['status']) => DeliveryMutationReceipt;
-    } & MailboxFacts,
-): MutationChange => {
-    const replay = (saved: DeliveryTerminal | undefined) => {
-        if (saved === undefined) return Effect.fail(new DeliveryClosed());
+const recordTerminal = (context: MutationContext, terminal: DeliveryTerminal): MutationChange => {
+    const { slot } = context;
 
-        return sameDeliveryTerminal(saved, input.terminal)
-            ? Effect.succeed({ slot, receipt: input.receipt('already_recorded') })
-            : Effect.fail(new DeliveryTerminalConflict());
+    const replay = (saved: DeliveryTerminal | undefined) => {
+        if (saved === undefined) return Effect.fail(DeliveryClosed.make());
+
+        return sameDeliveryTerminal(saved, terminal)
+            ? Effect.succeed({ slot, receipt: context.receipt('already_recorded') })
+            : Effect.fail(DeliveryTerminalConflict.make());
     };
 
-    return Located.$match(located, {
+    return Located.$match(context.located, {
         Retained: ({ retained }) => replay(retained.terminal),
         Active: ({ active }) => {
             if (active.terminal !== undefined || active.stage === 'Finishing') return replay(active.terminal);
 
             const present = PresentOutcome.make(
-                Predicate.isUndefined(input.terminal.markdown)
-                    ? { outcome: input.terminal.outcome }
-                    : { outcome: input.terminal.outcome, markdown: input.terminal.markdown },
+                Predicate.isUndefined(terminal.markdown)
+                    ? { outcome: terminal.outcome }
+                    : { outcome: terminal.outcome, markdown: terminal.markdown },
             );
 
-            const next = withOperations(
-                ActiveDelivery.make({ ...active, terminal: input.terminal }),
-                [present],
-                input.now,
-            );
+            const next = withOperations(ActiveDelivery.make({ ...active, terminal }), [present], context.now);
 
             /** No callback code is running in these stages, so the output can start now. */
             const nextSlot =
                 active.stage === 'ExternalWaiting' || active.stage === 'Retry'
-                    ? afterCallback(slot, next, input)
+                    ? afterCallback(slot, next, context)
                     : withActive(slot, next, slot.readyAt);
 
-            return Effect.succeed({ slot: nextSlot, receipt: input.receipt('accepted') });
-        },
-    });
-};
-
-/**
- * Add a link, and the `AddExternalLink` that shows it, in one change. A URL already added is a replay,
- * even after the delivery ended. A new link after the delivery ended is refused.
- */
-const addLink = (
-    slot: DeliverySlot,
-    located: Located,
-    input: {
-        readonly link: ExternalLink;
-        readonly receipt: (status: DeliveryMutationReceipt['status']) => DeliveryMutationReceipt;
-    } & MailboxFacts,
-): MutationChange => {
-    const saved = Located.$match(located, {
-        Active: ({ active }) => active.links,
-        Retained: ({ retained }) => retained.links,
-    });
-
-    if (saved.some(({ url }) => url === input.link.url)) {
-        return Effect.succeed({ slot, receipt: input.receipt('already_recorded') });
-    }
-
-    return Located.$match(located, {
-        Retained: () => Effect.fail(new DeliveryClosed()),
-        Active: ({ active }) => {
-            if (active.terminal !== undefined || active.stage === 'Finishing') return Effect.fail(new DeliveryClosed());
-            const next = withLinks(active, [input.link], input.now);
-            /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
-            const readyAt = active.stage === 'ExternalWaiting' ? nextDueAt(next) : slot.readyAt;
-
-            return Effect.succeed({
-                slot: withActive(slot, next, readyAt),
-                receipt: input.receipt('accepted'),
-            });
+            return Effect.succeed({ slot: nextSlot, receipt: context.receipt('accepted') });
         },
     });
 };
@@ -1093,89 +1085,87 @@ type MessageDecision = Effect.Effect<
 >;
 
 /**
- * Decide a message change against the operations already saved.
+ * Save a message change and the operation that shows it, in one change. A retired delivery takes none.
  *
  * - A repeat of a change already saved is a replay, even after the delivery ended.
  * - Any other change after the delivery ended is refused.
  * - A change to a message never created, or whose create failed, names no message.
  * - An update or deletion of a message whose create has not run yet is saved behind it.
  */
-const decideMessageChange = (active: ActiveDelivery, mutation: DeliveryMessageMutation): MessageDecision => {
-    const closed = active.terminal !== undefined || active.stage === 'Finishing';
-    const { messageId } = mutation;
+const changeMessage = (context: MutationContext, mutation: DeliveryMessageMutation): MutationChange =>
+    Located.$match(context.located, {
+        Retained: () => Effect.fail(DeliveryClosed.make()),
+        Active: ({ active }) => {
+            const closed = active.terminal !== undefined || active.stage === 'Finishing';
+            const { messageId } = mutation;
 
-    const operations = active.operations
-        .map(({ operation }) => operation)
-        .filter((operation) => operationMessageId(operation) === messageId);
+            const operations = Arr.filter(
+                Arr.map(active.operations, ({ operation }) => operation),
+                (operation) => operationMessageId(operation) === messageId,
+            );
 
-    const creation = messageCreation(active, messageId);
-    const deleted = operations.some((operation) => Predicate.isTagged(operation, 'DeleteMessage'));
-    const refuse = <E>(error: E) => Effect.fail(closed ? new DeliveryClosed() : error);
+            const creation = messageCreation(active, messageId);
 
-    const accept = (operation: DeliveryOutputOperation): MessageDecision =>
-        closed ? Effect.fail(new DeliveryClosed()) : Effect.succeed(operation);
+            const deleted = Arr.some(operations, (operation) => Predicate.isTagged(operation, 'DeleteMessage'));
 
-    const replay: MessageDecision = Effect.succeed('Replay');
+            const refuse = <E>(error: E) => Effect.fail(closed ? DeliveryClosed.make() : error);
 
-    return Match.value(mutation).pipe(
-        Match.tagsExhaustive({
-            CreateDeliveryMessage: ({ markdown }): MessageDecision => {
-                if (creation === undefined) return accept(CreateMessage.make({ messageId, markdown }));
+            const accept = (operation: DeliveryOutputOperation): MessageDecision =>
+                closed ? Effect.fail(DeliveryClosed.make()) : Effect.succeed(operation);
 
-                return Predicate.isTagged(creation.operation, 'CreateMessage') &&
-                    creation.operation.markdown === markdown
-                    ? replay
-                    : Effect.fail(new DeliveryMessageConflict({ messageId }));
-            },
-            UpdateDeliveryMessage: ({ markdown }): MessageDecision => {
-                if (creation === undefined || Predicate.isTagged(creation.state, 'Failed')) {
-                    return refuse(new DeliveryMessageNotFound({ messageId }));
-                }
+            const replay: MessageDecision = Effect.succeed('Replay');
 
-                if (deleted) return refuse(new DeliveryMessageDeleted({ messageId }));
+            const decision = Match.value(mutation).pipe(
+                Match.tagsExhaustive({
+                    CreateDeliveryMessage: ({ markdown }): MessageDecision => {
+                        if (creation === undefined) return accept(CreateMessage.make({ messageId, markdown }));
 
-                const latestMarkdown = operations.reduce<string | undefined>(
-                    (text, operation) =>
-                        Match.value(operation).pipe(
-                            Match.tag('CreateMessage', 'UpdateMessage', (change) => change.markdown),
-                            Match.orElse(() => text),
-                        ),
-                    undefined,
-                );
+                        return Predicate.isTagged(creation.operation, 'CreateMessage') &&
+                            creation.operation.markdown === markdown
+                            ? replay
+                            : Effect.fail(DeliveryMessageConflict.make({ messageId }));
+                    },
+                    UpdateDeliveryMessage: ({ markdown }): MessageDecision => {
+                        if (creation === undefined || Predicate.isTagged(creation.state, 'Failed')) {
+                            return refuse(DeliveryMessageNotFound.make({ messageId }));
+                        }
 
-                if (latestMarkdown === markdown) return replay;
+                        if (deleted) return refuse(DeliveryMessageDeleted.make({ messageId }));
 
-                return accept(UpdateMessage.make({ messageId, markdown }));
-            },
-            DeleteDeliveryMessage: (): MessageDecision => {
-                if (creation === undefined || Predicate.isTagged(creation.state, 'Failed')) {
-                    return refuse(new DeliveryMessageNotFound({ messageId }));
-                }
+                        const latestMarkdown = Arr.reduce(operations, Option.none<string>(), (text, operation) =>
+                            Match.value(operation).pipe(
+                                Match.tag('CreateMessage', 'UpdateMessage', (change) => Option.some(change.markdown)),
+                                Match.orElse(() => text),
+                            ),
+                        );
 
-                return deleted ? replay : accept(DeleteMessage.make({ messageId }));
-            },
-        }),
-    );
-};
+                        if (Option.contains(latestMarkdown, markdown)) return replay;
 
-/**
- * The output operation a change needs its destination to support. A plan needs none: a destination
- * that cannot show it still keeps it.
- */
-const requiredOperation = (mutation: DeliveryMutation): DeliveryOperationKind | undefined =>
-    Match.value(mutation).pipe(
-        Match.tagsExhaustive({
-            CompleteDelivery: () => 'PresentOutcome' as const,
-            FailDelivery: () => 'PresentOutcome' as const,
-            AddDeliveryLink: () => 'AddExternalLink' as const,
-            CreateDeliveryMessage: () => 'CreateMessage' as const,
-            UpdateDeliveryMessage: () => 'UpdateMessage' as const,
-            DeleteDeliveryMessage: () => 'DeleteMessage' as const,
-            SetDeliveryActivity: () => 'SetActivity' as const,
-            SetDeliveryReaction: () => 'SetMessageReaction' as const,
-            PutDeliveryPlan: () => undefined,
-        }),
-    );
+                        return accept(UpdateMessage.make({ messageId, markdown }));
+                    },
+                    DeleteDeliveryMessage: (): MessageDecision => {
+                        if (creation === undefined || Predicate.isTagged(creation.state, 'Failed')) {
+                            return refuse(DeliveryMessageNotFound.make({ messageId }));
+                        }
+
+                        return deleted ? replay : accept(DeleteMessage.make({ messageId }));
+                    },
+                }),
+            );
+
+            return Effect.map(decision, (decided) => {
+                if (decided === 'Replay') return { slot: context.slot, receipt: context.receipt('already_recorded') };
+                const next = withOperations(active, [decided], context.now);
+                /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
+                const readyAt = active.stage === 'ExternalWaiting' ? nextDueAt(next) : context.slot.readyAt;
+
+                return {
+                    slot: withActive(context.slot, next, readyAt),
+                    receipt: context.receipt('accepted'),
+                };
+            });
+        },
+    });
 
 /**
  * A waiting desired-state operation, such as `SetActivity`, given a new request. It drops its
@@ -1191,209 +1181,230 @@ const replacedRequest = (saved: DeliveryOperation, operation: DeliveryOutputOper
         hadAmbiguousAttempt: saved.hadAmbiguousAttempt,
     });
 
-/**
- * Save the activity the remote worker wants shown. The activity already desired is a replay. A new
- * one replaces a `SetActivity` still waiting to be sent, so only the latest is sent; one already being
- * sent is followed by a new operation. A delivery with a result takes no new activity.
- */
-const changeActivity = (
-    slot: DeliverySlot,
-    located: Located,
-    input: {
-        readonly mutation: SetDeliveryActivity;
-        readonly receipt: (status: DeliveryMutationReceipt['status']) => DeliveryMutationReceipt;
-    } & MailboxFacts,
-): MutationChange =>
-    Located.$match(located, {
-        Retained: () => Effect.fail(new DeliveryClosed()),
-        Active: ({ active }) => {
-            const { activity } = input.mutation;
-
-            if (sameDeliveryActivity(desiredActivity(active), activity)) {
-                return Effect.succeed({ slot, receipt: input.receipt('already_recorded') });
-            }
-
-            if (active.terminal !== undefined || active.stage === 'Finishing') return Effect.fail(new DeliveryClosed());
-            const last = lastActivityOperation(active);
-
-            const next =
-                last !== undefined && Predicate.isTagged(last.state, 'Pending')
-                    ? replaceOperation(active, replacedRequest(last, SetActivity.make({ activity })))
-                    : withOperations(active, [SetActivity.make({ activity })], input.now);
-
-            /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
-            const readyAt = active.stage === 'ExternalWaiting' ? nextDueAt(next) : slot.readyAt;
-
-            return Effect.succeed({
-                slot: withActive(slot, next, readyAt),
-                receipt: input.receipt('accepted'),
-            });
-        },
-    });
-
 type ReactionTargetCheck = Effect.Effect<
     void,
     DeliveryReactionTargetUnavailable | DeliveryMessageNotFound | DeliveryMessageDeleted
 >;
 
 /**
- * Check that a reaction's target is one the destination can react on, and that it exists: the delivery
- * has an activation target, or the message was created and not removed. A message whose create has not
- * run yet is fine; the reaction runs after it. No provider reacts on its plan yet.
+ * How each change applies to the delivery it names, by the change's tag. Each entry takes the change,
+ * then the context it runs in, so `Match.tagsExhaustive` over a mutation picks the entry for it.
  */
-const checkReactionTarget = (active: ActiveDelivery, target: DeliveryReactionTarget): ReactionTargetCheck => {
-    const kind = deliveryReactionTargetKind(target);
+const mutationChanges = {
+    CompleteDelivery: (mutation: CompleteDelivery) => (context: MutationContext) =>
+        recordTerminal(context, terminalFromMutation(mutation)),
+    FailDelivery: (mutation: FailDelivery) => (context: MutationContext) =>
+        recordTerminal(context, terminalFromMutation(mutation)),
+    /**
+     * Add a link, and the `AddExternalLink` that shows it, in one change. A URL already added is a replay,
+     * even after the delivery ended. A new link after the delivery ended is refused.
+     */
+    AddDeliveryLink:
+        ({ link }: AddDeliveryLink) =>
+        (context: MutationContext): MutationChange => {
+            const { slot } = context;
 
-    const unavailable: ReactionTargetCheck = Effect.fail(new DeliveryReactionTargetUnavailable({ target: kind }));
-
-    if (!(currentPreparedCallback(active)?.reactionTargets ?? []).includes(kind)) return unavailable;
-
-    return DeliveryReactionTarget.match(target, {
-        ActivationTarget: (): ReactionTargetCheck =>
-            currentPreparedCallback(active)?.activationTarget === undefined ? unavailable : Effect.void,
-        PlanTarget: (): ReactionTargetCheck => unavailable,
-        MessageTarget: ({ messageId }): ReactionTargetCheck => {
-            const creation = messageCreation(active, messageId);
-
-            if (creation === undefined || Predicate.isTagged(creation.state, 'Failed')) {
-                return Effect.fail(new DeliveryMessageNotFound({ messageId }));
-            }
-
-            const deleted = active.operations.some(
-                ({ operation }) => Predicate.isTagged(operation, 'DeleteMessage') && operation.messageId === messageId,
-            );
-
-            return deleted ? Effect.fail(new DeliveryMessageDeleted({ messageId })) : Effect.void;
-        },
-    });
-};
-
-/**
- * Save whether the bot's reaction should be on a target. The state already asked for is a replay, even
- * after a result. A change replaces a `SetMessageReaction` for the same reaction and target still
- * waiting to be sent; one already being sent is followed by a new operation. A delivery with a result
- * takes no new change.
- */
-const changeReaction = (
-    slot: DeliverySlot,
-    located: Located,
-    input: {
-        readonly mutation: SetDeliveryReaction;
-        readonly receipt: (status: DeliveryMutationReceipt['status']) => DeliveryMutationReceipt;
-    } & MailboxFacts,
-): MutationChange =>
-    Located.$match(located, {
-        Retained: () => Effect.fail(new DeliveryClosed()),
-        Active: ({ active }) =>
-            Effect.gen(function* () {
-                const { target, reaction } = input.mutation;
-                const last = reactionsOn(active.operations, input.mutation).at(-1);
-
-                if (last !== undefined && last.request.active === input.mutation.active) {
-                    return { slot, receipt: input.receipt('already_recorded') };
-                }
-
-                if (active.terminal !== undefined || active.stage === 'Finishing') return yield* new DeliveryClosed();
-                yield* checkReactionTarget(active, target);
-
-                const request = SetMessageReaction.make({
-                    target,
-                    reaction,
-                    active: input.mutation.active,
-                });
-
-                const next =
-                    last !== undefined && Predicate.isTagged(last.saved.state, 'Pending')
-                        ? replaceOperation(active, replacedRequest(last.saved, request))
-                        : withOperations(active, [request], input.now);
-
-                /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
-                const readyAt = active.stage === 'ExternalWaiting' ? nextDueAt(next) : slot.readyAt;
-
-                return { slot: withActive(slot, next, readyAt), receipt: input.receipt('accepted') };
-            }),
-    });
-
-/**
- * Save the remote worker's whole plan as the desired plan, advancing its revision. The plan already
- * desired is a replay, even after the delivery ended. A new plan replaces a `RenderPlan` still waiting
- * to be sent, so only the latest is sent; one already being sent is followed by a new operation. A
- * destination that cannot show plans keeps the plan with no operation. A delivery with a result takes no
- * new plan.
- */
-const changePlan = (
-    slot: DeliverySlot,
-    located: Located,
-    input: {
-        readonly mutation: PutDeliveryPlan;
-        readonly receipt: (status: DeliveryMutationReceipt['status']) => DeliveryMutationReceipt;
-    } & MailboxFacts,
-): MutationChange => {
-    const { plan } = input.mutation;
-    const replay = Effect.succeed({ slot, receipt: input.receipt('already_recorded') });
-
-    return Located.$match(located, {
-        Retained: ({ retained }) =>
-            retained.plan !== undefined && sameDeliveryPlan(retained.plan.plan, plan)
-                ? replay
-                : Effect.fail(new DeliveryClosed()),
-        Active: ({ active }) => {
-            if (active.plan !== undefined && sameDeliveryPlan(active.plan.desired.plan, plan)) return replay;
-
-            if (active.terminal !== undefined || active.stage === 'Finishing') return Effect.fail(new DeliveryClosed());
-            const revision = DeliveryPlanRevision.make((active.plan?.desired.revision ?? 0) + 1);
-            const desired = { revision, plan };
-
-            const planned = ActiveDelivery.make({
-                ...active,
-                plan: DeliveryPlanState.make(
-                    active.plan?.rendered === undefined ? { desired } : { desired, rendered: active.plan.rendered },
-                ),
+            const saved = Located.$match(context.located, {
+                Active: ({ active }) => active.links,
+                Retained: ({ retained }) => retained.links,
             });
 
-            const accepted = (next: ActiveDelivery, readyAt: number | null) =>
-                Effect.succeed({
-                    slot: withActive(slot, next, readyAt),
-                    receipt: input.receipt('accepted'),
-                });
+            if (Arr.some(saved, ({ url }) => url === link.url)) {
+                return Effect.succeed({ slot, receipt: context.receipt('already_recorded') });
+            }
 
-            if (!(currentPreparedCallback(active)?.supportedOperations ?? []).includes('RenderPlan'))
-                return accepted(planned, slot.readyAt);
-            const request = RenderPlan.make({ revision, plan });
-            const last = lastPlanOperation(active);
+            return Located.$match(context.located, {
+                Retained: () => Effect.fail(DeliveryClosed.make()),
+                Active: ({ active }) => {
+                    if (active.terminal !== undefined || active.stage === 'Finishing')
+                        return Effect.fail(DeliveryClosed.make());
+                    const next = withLinks(active, [link], context.now);
+                    /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
+                    const readyAt = active.stage === 'ExternalWaiting' ? nextDueAt(next) : slot.readyAt;
 
-            const next =
-                last !== undefined && Predicate.isTagged(last.state, 'Pending')
-                    ? replaceOperation(planned, replacedRequest(last, request))
-                    : withOperations(planned, [request], input.now);
-
-            /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
-            return accepted(next, active.stage === 'ExternalWaiting' ? nextDueAt(next) : slot.readyAt);
+                    return Effect.succeed({
+                        slot: withActive(slot, next, readyAt),
+                        receipt: context.receipt('accepted'),
+                    });
+                },
+            });
         },
-    });
-};
+    CreateDeliveryMessage: (mutation: CreateDeliveryMessage) => (context: MutationContext) =>
+        changeMessage(context, mutation),
+    UpdateDeliveryMessage: (mutation: UpdateDeliveryMessage) => (context: MutationContext) =>
+        changeMessage(context, mutation),
+    DeleteDeliveryMessage: (mutation: DeleteDeliveryMessage) => (context: MutationContext) =>
+        changeMessage(context, mutation),
+    /**
+     * Save the activity the remote worker wants shown. The activity already desired is a replay. A new
+     * one replaces a `SetActivity` still waiting to be sent, so only the latest is sent; one already being
+     * sent is followed by a new operation. A delivery with a result takes no new activity.
+     */
+    SetDeliveryActivity:
+        ({ activity }: SetDeliveryActivity) =>
+        (context: MutationContext): MutationChange =>
+            Located.$match(context.located, {
+                Retained: () => Effect.fail(DeliveryClosed.make()),
+                Active: ({ active }) => {
+                    const { slot } = context;
 
-/** Save a message change and the operation that shows it, in one change. A retired delivery takes none. */
-const changeMessage = (
-    slot: DeliverySlot,
-    located: Located,
-    input: {
-        readonly mutation: DeliveryMessageMutation;
-        readonly receipt: (status: DeliveryMutationReceipt['status']) => DeliveryMutationReceipt;
-    } & MailboxFacts,
-): MutationChange => {
-    return Located.$match(located, {
-        Retained: () => Effect.fail(new DeliveryClosed()),
-        Active: ({ active }) =>
-            Effect.map(decideMessageChange(active, input.mutation), (decision) => {
-                if (decision === 'Replay') return { slot, receipt: input.receipt('already_recorded') };
-                const next = withOperations(active, [decision], input.now);
-                /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
-                const readyAt = active.stage === 'ExternalWaiting' ? nextDueAt(next) : slot.readyAt;
+                    if (sameDeliveryActivity(desiredActivity(active), activity)) {
+                        return Effect.succeed({ slot, receipt: context.receipt('already_recorded') });
+                    }
 
-                return { slot: withActive(slot, next, readyAt), receipt: input.receipt('accepted') };
+                    if (active.terminal !== undefined || active.stage === 'Finishing')
+                        return Effect.fail(DeliveryClosed.make());
+                    const last = lastActivityOperation(active);
+
+                    const next =
+                        last !== undefined && Predicate.isTagged(last.state, 'Pending')
+                            ? replaceOperation(active, replacedRequest(last, SetActivity.make({ activity })))
+                            : withOperations(active, [SetActivity.make({ activity })], context.now);
+
+                    /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
+                    const readyAt = active.stage === 'ExternalWaiting' ? nextDueAt(next) : slot.readyAt;
+
+                    return Effect.succeed({
+                        slot: withActive(slot, next, readyAt),
+                        receipt: context.receipt('accepted'),
+                    });
+                },
             }),
-    });
+    /**
+     * Save whether the bot's reaction should be on a target. The state already asked for is a replay, even
+     * after a result. A change replaces a `SetMessageReaction` for the same reaction and target still
+     * waiting to be sent; one already being sent is followed by a new operation. A delivery with a result
+     * takes no new change.
+     */
+    SetDeliveryReaction:
+        (mutation: SetDeliveryReaction) =>
+        (context: MutationContext): MutationChange =>
+            Located.$match(context.located, {
+                Retained: () => Effect.fail(DeliveryClosed.make()),
+                Active: ({ active }) =>
+                    Effect.gen(function* () {
+                        const { slot } = context;
+                        const { target, reaction } = mutation;
+                        const last = Option.getOrUndefined(Arr.last(reactionsOn(active.operations, mutation)));
+
+                        if (last !== undefined && last.request.active === mutation.active) {
+                            return { slot, receipt: context.receipt('already_recorded') };
+                        }
+
+                        if (active.terminal !== undefined || active.stage === 'Finishing')
+                            return yield* DeliveryClosed.make();
+
+                        /**
+                         * Check that the target is one the destination can react on, and that it exists: the delivery
+                         * has an activation target, or the message was created and not removed. A message whose create
+                         * has not run yet is fine; the reaction runs after it. No provider reacts on its plan yet.
+                         */
+                        const kind = deliveryReactionTargetKind(target);
+
+                        const unavailable: ReactionTargetCheck = Effect.fail(
+                            DeliveryReactionTargetUnavailable.make({ target: kind }),
+                        );
+
+                        if (!Arr.contains(currentPreparedCallback(active)?.reactionTargets ?? [], kind))
+                            return yield* DeliveryReactionTargetUnavailable.make({ target: kind });
+
+                        yield* DeliveryReactionTarget.match(target, {
+                            ActivationTarget: (): ReactionTargetCheck =>
+                                currentPreparedCallback(active)?.activationTarget === undefined
+                                    ? unavailable
+                                    : Effect.void,
+                            PlanTarget: (): ReactionTargetCheck => unavailable,
+                            MessageTarget: ({ messageId }): ReactionTargetCheck => {
+                                const creation = messageCreation(active, messageId);
+
+                                if (creation === undefined || Predicate.isTagged(creation.state, 'Failed')) {
+                                    return Effect.fail(DeliveryMessageNotFound.make({ messageId }));
+                                }
+
+                                const deleted = Arr.some(
+                                    active.operations,
+                                    ({ operation }) =>
+                                        Predicate.isTagged(operation, 'DeleteMessage') &&
+                                        operation.messageId === messageId,
+                                );
+
+                                return deleted ? Effect.fail(DeliveryMessageDeleted.make({ messageId })) : Effect.void;
+                            },
+                        });
+
+                        const request = SetMessageReaction.make({ target, reaction, active: mutation.active });
+
+                        const next =
+                            last !== undefined && Predicate.isTagged(last.saved.state, 'Pending')
+                                ? replaceOperation(active, replacedRequest(last.saved, request))
+                                : withOperations(active, [request], context.now);
+
+                        /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
+                        const readyAt = active.stage === 'ExternalWaiting' ? nextDueAt(next) : slot.readyAt;
+
+                        return { slot: withActive(slot, next, readyAt), receipt: context.receipt('accepted') };
+                    }),
+            }),
+    /**
+     * Save the remote worker's whole plan as the desired plan, advancing its revision. The plan already
+     * desired is a replay, even after the delivery ended. A new plan replaces a `RenderPlan` still waiting
+     * to be sent, so only the latest is sent; one already being sent is followed by a new operation. A
+     * destination that cannot show plans keeps the plan with no operation. A delivery with a result takes no
+     * new plan.
+     */
+    PutDeliveryPlan:
+        ({ plan }: PutDeliveryPlan) =>
+        (context: MutationContext): MutationChange => {
+            const { slot } = context;
+            const replay = Effect.succeed({ slot, receipt: context.receipt('already_recorded') });
+
+            return Located.$match(context.located, {
+                Retained: ({ retained }) =>
+                    retained.plan !== undefined && sameDeliveryPlan(retained.plan.plan, plan)
+                        ? replay
+                        : Effect.fail(DeliveryClosed.make()),
+                Active: ({ active }) => {
+                    if (active.plan !== undefined && sameDeliveryPlan(active.plan.desired.plan, plan)) return replay;
+
+                    if (active.terminal !== undefined || active.stage === 'Finishing')
+                        return Effect.fail(DeliveryClosed.make());
+                    const revision = DeliveryPlanRevision.make((active.plan?.desired.revision ?? 0) + 1);
+                    const desired = { revision, plan };
+
+                    const planned = ActiveDelivery.make({
+                        ...active,
+                        plan: DeliveryPlanState.make(
+                            active.plan?.rendered === undefined
+                                ? { desired }
+                                : { desired, rendered: active.plan.rendered },
+                        ),
+                    });
+
+                    const accepted = (next: ActiveDelivery, readyAt: number | null) =>
+                        Effect.succeed({
+                            slot: withActive(slot, next, readyAt),
+                            receipt: context.receipt('accepted'),
+                        });
+
+                    if (!Arr.contains(currentPreparedCallback(active)?.supportedOperations ?? [], 'RenderPlan'))
+                        return accepted(planned, slot.readyAt);
+                    const request = RenderPlan.make({ revision, plan });
+
+                    /** The last saved `RenderPlan`, which holds the latest plan sent to the provider or waiting to be. */
+                    const last = Option.getOrUndefined(
+                        Arr.findLast(active.operations, ({ operation }) => Predicate.isTagged(operation, 'RenderPlan')),
+                    );
+
+                    const next =
+                        last !== undefined && Predicate.isTagged(last.state, 'Pending')
+                            ? replaceOperation(planned, replacedRequest(last, request))
+                            : withOperations(planned, [request], context.now);
+
+                    /** A delivery waiting for its remote worker has no callback running, so the output can start now. */
+                    return accepted(next, active.stage === 'ExternalWaiting' ? nextDueAt(next) : slot.readyAt);
+                },
+            });
+        },
 };
 
 /** Apply a remote worker's change: check its token, then change the delivery and save the output it needs. */
@@ -1407,55 +1418,68 @@ export const applyDeliverySlotMutation = Effect.fn('delivery.lifecycle.apply_mut
 ) {
     const located = locate(slot, input);
 
-    if (located === null) return yield* new DeliveryNotFound();
-    /** A destination that cannot show the change refuses it before anything is saved. */
-    const operation = requiredOperation(input.mutation);
+    if (located === null) return yield* DeliveryNotFound.make();
+
+    /**
+     * A destination that cannot show the change refuses it before anything is saved. A plan needs no
+     * operation: a destination that cannot show it still keeps it.
+     */
+    const operation: DeliveryOperationKind | undefined = Match.value(input.mutation).pipe(
+        Match.tagsExhaustive({
+            CompleteDelivery: () => 'PresentOutcome' as const,
+            FailDelivery: () => 'PresentOutcome' as const,
+            AddDeliveryLink: () => 'AddExternalLink' as const,
+            CreateDeliveryMessage: () => 'CreateMessage' as const,
+            UpdateDeliveryMessage: () => 'UpdateMessage' as const,
+            DeleteDeliveryMessage: () => 'DeleteMessage' as const,
+            SetDeliveryActivity: () => 'SetActivity' as const,
+            SetDeliveryReaction: () => 'SetMessageReaction' as const,
+            PutDeliveryPlan: () => undefined,
+        }),
+    );
 
     const supported = Located.$match(located, {
         Active: ({ active }) => currentPreparedCallback(active)?.supportedOperations ?? [],
         Retained: ({ retained }) => retained.supportedOperations,
     });
 
-    if (operation !== undefined && !supported.includes(operation)) {
-        return yield* new DeliveryOperationUnsupported({ operation });
+    if (operation !== undefined && !Arr.contains(supported, operation)) {
+        return yield* DeliveryOperationUnsupported.make({ operation });
     }
 
     const receipt = (status: DeliveryMutationReceipt['status']) =>
         DeliveryMutationReceipt.make({ deliveryId: input.reference.deliveryId, status });
 
-    const facts = { now: input.now, hasWaiting: input.hasWaiting, receipt };
+    const changed = yield* Match.value(input.mutation).pipe(Match.tagsExhaustive(mutationChanges))({
+        slot,
+        located,
+        now: input.now,
+        hasWaiting: input.hasWaiting,
+        receipt,
+    });
 
-    const changed = yield* Match.value(input.mutation).pipe(
-        Match.tagsExhaustive({
-            CompleteDelivery: (mutation) =>
-                recordTerminal(slot, located, { ...facts, terminal: terminalFromMutation(mutation) }),
-            FailDelivery: (mutation) =>
-                recordTerminal(slot, located, { ...facts, terminal: terminalFromMutation(mutation) }),
-            AddDeliveryLink: ({ link }) => addLink(slot, located, { ...facts, link }),
-            CreateDeliveryMessage: (mutation) => changeMessage(slot, located, { ...facts, mutation }),
-            UpdateDeliveryMessage: (mutation) => changeMessage(slot, located, { ...facts, mutation }),
-            DeleteDeliveryMessage: (mutation) => changeMessage(slot, located, { ...facts, mutation }),
-            SetDeliveryActivity: (mutation) => changeActivity(slot, located, { ...facts, mutation }),
-            SetDeliveryReaction: (mutation) => changeReaction(slot, located, { ...facts, mutation }),
-            PutDeliveryPlan: (mutation) => changePlan(slot, located, { ...facts, mutation }),
-        }),
-    );
+    /**
+     * Any request the store took from a remote worker, a repeat included, shows it is still working, so the
+     * time limit of its delivery starts again. A delivery with a result has no time limit left to restart.
+     */
+    const active = changed.slot.active;
 
-    return { ...changed, slot: restartDeadline(changed.slot, input.reference, input.now) };
+    if (
+        active === null ||
+        active.batchId !== input.reference.batchId ||
+        active.callbackIndex !== input.reference.callbackIndex
+    )
+        return changed;
+    const restarted = withDeadlineFrom(active, input.now);
+
+    if (restarted === active) return changed;
+
+    return {
+        ...changed,
+        slot: withActive(
+            changed.slot,
+            restarted,
+            restarted.stage === 'ExternalWaiting' ? nextDueAt(restarted) : changed.slot.readyAt,
+        ),
+    };
 });
-
-/**
- * Any request the store took from a remote worker, a repeat included, shows it is still working, so the
- * time limit of its delivery starts again. A delivery with a result has no time limit left to restart.
- */
-const restartDeadline = (slot: DeliverySlot, reference: DeliveryReference, now: number): DeliverySlot => {
-    const active = slot.active;
-
-    if (active === null || active.batchId !== reference.batchId || active.callbackIndex !== reference.callbackIndex)
-        return slot;
-    const restarted = withDeadlineFrom(active, now);
-
-    if (restarted === active) return slot;
-
-    return withActive(slot, restarted, restarted.stage === 'ExternalWaiting' ? nextDueAt(restarted) : slot.readyAt);
-};

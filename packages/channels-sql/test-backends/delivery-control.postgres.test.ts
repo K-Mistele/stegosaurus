@@ -5,33 +5,30 @@
  */
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { describe, it } from '@effect/vitest';
+import { DeliveryOutputApplied, type ProviderOutputAttempt } from '@stegosaurus/channels-delivery/ProviderOutput';
+import { ProviderEventHandled } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
 import {
-    BatchId,
     ClaimFrozenBatch,
     ClaimWaitingEvents,
-    CompleteDelivery,
-    DeliveryAccessToken,
-    DeliveryAdmission,
-    DeliveryControlBackend,
-    DeliveryOutputApplied,
-    DeliveryOutputSettlement,
-    MailboxDelivery,
     MailboxProcessing,
     MailboxProcessingAttemptCompleted,
     MailboxProcessingBackend,
-    PreparedDeliveryInvocation,
-    ProviderEventHandled,
-    QueueDeliveryMode,
     RecoverableMailbox,
-    Timestamp,
-    deliveryMailboxKey,
-    makeDeliveryId,
-    parseDeliveryId,
     type ClaimedMailboxBatch,
-    type DeliveryId,
     type MailboxProcessingBackendError,
-    type ProviderOutputAttempt,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxProcessing';
+import { QueueDeliveryMode, Timestamp } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { DeliveryAdmission, MailboxDelivery, deliveryMailboxKey } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import {
+    BatchId,
+    DeliveryAccessToken,
+    formatDeliveryId,
+    parseDeliveryId,
+    type DeliveryId,
+} from '@stegosaurus/channels-delivery/DeliveryReference';
+import { DeliveryOutputSettlement } from '@stegosaurus/channels-delivery/DeliveryOperation';
+import { CompleteDelivery, DeliveryControlBackend } from '@stegosaurus/channels-delivery/DeliveryControl';
+import { PreparedDeliveryInvocation } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Array as Arr, Clock, Context, Deferred, Effect, Fiber, Layer, Option, Queue, Redacted, Schema } from 'effect';
 import * as SqlClient from 'effect/sql/SqlClient';
 import { TestClock } from 'effect/testing';
@@ -122,7 +119,7 @@ const recordCompleted = (claim: ClaimedMailboxBatch) =>
     });
 
 const referenceOf = (claim: { readonly mailboxKey: string; readonly batchId: ClaimedMailboxBatch['batchId'] }) =>
-    Option.getOrThrow(parseDeliveryId(makeDeliveryId(claim)));
+    Option.getOrThrow(parseDeliveryId(formatDeliveryId(claim)));
 
 /** Deliver one event, then claim, prepare, and hand off its batch, and let the callback return. */
 const handedOffDelivery = (resourceId: string) =>
@@ -523,7 +520,7 @@ describe('sql store: several processes', () => {
 
                 expect((yield* processReady(recovering)).claimed).toBe(1);
                 const followUp = yield* Queue.take(handedOff);
-                expect(followUp.deliveryId === makeDeliveryId(claim)).toBe(false);
+                expect(followUp.deliveryId === formatDeliveryId(claim)).toBe(false);
             }).pipe(Effect.scoped),
     );
 });

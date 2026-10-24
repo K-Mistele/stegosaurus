@@ -1,9 +1,9 @@
 import { describe, it } from '@effect/vitest';
+import { MailboxSubscriptionsMemory } from '@stegosaurus/channels-delivery/MailboxSubscriptionsMemory';
 import {
     MailboxSubscriptionAlreadyExistsResult,
     MailboxSubscriptionCreatedResult,
-    MailboxSubscriptionsMemory,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/MailboxSubscriptions';
 import { Effect, Layer, Option, Queue, Stream } from 'effect';
 
 import { SlackApi } from '../src/SlackApi';

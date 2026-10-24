@@ -1,10 +1,7 @@
 import { describe, it } from '@effect/vitest';
-import {
-    DeliveryReceipt,
-    type DeliveryAdmission,
-    ProviderEventHandled,
-    MailboxSubscriptionsMemory,
-} from '@stegosaurus/channels-delivery';
+import { ProviderEventHandled } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptionsMemory } from '@stegosaurus/channels-delivery/MailboxSubscriptionsMemory';
+import { DeliveryReceipt, type DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Effect, Layer, Predicate } from 'effect';
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http';
 import { vi } from 'vite-plus/test';

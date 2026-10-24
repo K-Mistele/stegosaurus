@@ -41,7 +41,7 @@ export type DeliveryClientTarget = {
  * A client for one application's delivery API. Takes the `HttpClient` from its environment when it is
  * built, such as `FetchHttpClient.layer`; its calls need nothing further.
  */
-export const makeDeliveryClient = Effect.fn('delivery.client.make')(function* (options: DeliveryClientOptions) {
+export const make = Effect.fn('delivery.client.make')(function* (options: DeliveryClientOptions) {
     const httpClient = yield* HttpClient.HttpClient;
     const api = prefixedDeliveryHttpApi(options.basePath);
 
@@ -194,4 +194,4 @@ export const makeDeliveryClient = Effect.fn('delivery.client.make')(function* (o
     };
 });
 
-export type DeliveryClient = Effect.Success<ReturnType<typeof makeDeliveryClient>>;
+export type DeliveryClient = Effect.Success<ReturnType<typeof make>>;

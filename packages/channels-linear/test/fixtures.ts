@@ -1,14 +1,12 @@
 import { createHmac } from 'node:crypto';
 
 import { NodeCrypto } from '@effect/platform-node';
+import { type RawWebhookInput } from '@stegosaurus/channels-delivery/ProviderWebhooks';
 import {
-    DeliveryAdmission,
-    DeliveryReceipt,
-    MailboxDelivery,
     processProviderEvent,
     type ProviderEventProcessor,
-    type RawWebhookInput,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { DeliveryAdmission, DeliveryReceipt, MailboxDelivery } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Effect, Match, Queue, Redacted, Schema } from 'effect';
 import { Headers } from 'effect/http';
 

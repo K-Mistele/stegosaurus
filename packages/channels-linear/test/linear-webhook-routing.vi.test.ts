@@ -1,6 +1,7 @@
 import { NodeCrypto } from '@effect/platform-node';
 import { describe, it } from '@effect/vitest';
-import { DeliveryReceipt, MailboxDelivery, webhookRoutes } from '@stegosaurus/channels-delivery';
+import { webhookRoutes } from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { DeliveryReceipt, MailboxDelivery } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Clock, Context, Effect, Redacted } from 'effect';
 import { HttpRouter } from 'effect/http';
 
@@ -24,9 +25,12 @@ const makeApp = Effect.gen(function* () {
         maxBodyBytes: 4096,
     });
 
-    const web = HttpRouter.toWebHandler(webhookRoutes([provider]).pipe(HttpRouter.provideRequest(NodeCrypto.layer)), {
-        disableLogger: true,
-    });
+    const web = HttpRouter.toWebHandler(
+        webhookRoutes([provider], {}).pipe(HttpRouter.provideRequest(NodeCrypto.layer)),
+        {
+            disableLogger: true,
+        },
+    );
 
     yield* Effect.addFinalizer(() => Effect.promise(web.dispose));
 

@@ -5,7 +5,9 @@
  */
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { it } from '@effect/vitest';
-import { DeliveryAdmission, QueueDeliveryMode, type DeliveryContext } from '@stegosaurus/channels-delivery';
+import { QueueDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
 import {
     GitHubApi,
     GitHubBot,

@@ -6,6 +6,6 @@
 npm install @stegosaurus/channels-delivery effect
 ```
 
-It includes `Channels.make`, the delivery modes, in-memory storage for tests (`ChannelsMemory.make`), the delivery API routes, and `makeDeliveryClient` for remote workers. Add a provider ([Slack](https://www.npmjs.com/package/@stegosaurus/channels-slack), [GitHub](https://www.npmjs.com/package/@stegosaurus/channels-github), [Linear](https://www.npmjs.com/package/@stegosaurus/channels-linear)) and a store ([Postgres](https://www.npmjs.com/package/@stegosaurus/channels-sql), [Redis](https://www.npmjs.com/package/@stegosaurus/channels-redis), [Cloudflare](https://www.npmjs.com/package/@stegosaurus/channels-alchemy-cloudflare)).
+It includes `Channels.make`, the delivery modes, in-memory storage for tests (`ChannelsMemory.make`), the delivery API routes, and `DeliveryHttpClient.make` for remote workers. Add a provider ([Slack](https://www.npmjs.com/package/@stegosaurus/channels-slack), [GitHub](https://www.npmjs.com/package/@stegosaurus/channels-github), [Linear](https://www.npmjs.com/package/@stegosaurus/channels-linear)) and a store ([Postgres](https://www.npmjs.com/package/@stegosaurus/channels-sql), [Redis](https://www.npmjs.com/package/@stegosaurus/channels-redis), [Cloudflare](https://www.npmjs.com/package/@stegosaurus/channels-alchemy-cloudflare)).
 
 See the [main README](https://github.com/humanlayer/effect-channels#readme) for a full walkthrough.

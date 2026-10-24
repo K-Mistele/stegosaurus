@@ -1,27 +1,23 @@
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
-import { describe, it } from '@effect/vitest';
+import { describe, it, layer } from '@effect/vitest';
 import { Context, Deferred, Effect, Layer, Queue, Ref } from 'effect';
 import { HttpRouter } from 'effect/http';
 import { TestClock } from 'effect/testing';
 
-import {
-    Channels,
-    ChannelsMemory,
-    DeliveryAdmission,
-    MailboxDelivery,
-    ProviderEventHandled,
-    ProviderWebhookEvent,
-    QueueDeliveryMode,
-    type ChannelsProvider,
-    type DeliveryAdmissionBatch,
-} from '../src';
+import { ProviderWebhookEvent } from '../src/ProviderWebhooks';
+import { ProviderEventHandled, type DeliveryAdmissionBatch } from '../src/ProviderEventProcessing';
+import { QueueDeliveryMode } from '../src/MailboxPolicy';
+import { DeliveryAdmission, MailboxDelivery } from '../src/MailboxDelivery';
+import { type ChannelsProvider } from '../src/ChannelsProvider';
+import * as Channels from '../src/Channels';
+import * as ChannelsMemory from '../src/ChannelsMemory';
 
 /** A provider that accepts any webhook as one event and hands each batch to `onBatch`. */
 const makeExampleProvider = (
     onBatch: (input: {
         readonly namespace: string;
         readonly admissions: DeliveryAdmissionBatch;
-    }) => Effect.Effect<void>,
+    }) => Effect.Effect<unknown>,
 ): ChannelsProvider => ({
     providerName: 'example',
     deliveryMode: QueueDeliveryMode.make({}),
@@ -68,7 +64,7 @@ describe('Channels.make', () => {
                 basePath: '/api/channels',
                 providers: [
                     makeExampleProvider(({ namespace, admissions }) =>
-                        Queue.offer(batches, { namespace, events: admissions.length }).pipe(Effect.asVoid),
+                        Queue.offer(batches, { namespace, events: admissions.length }),
                     ),
                 ],
                 eventProcessing,
@@ -122,38 +118,39 @@ describe('Channels.make', () => {
         }),
     );
 
-    it.effect('a program that uses routes and layer builds storage and the event processors once', ({ expect }) =>
-        Effect.gen(function* () {
-            const storageBuilds = yield* Ref.make(0);
-            const processorBuilds = yield* Ref.make(0);
-            const memory = ChannelsMemory.make({ polling: { intervalMs: 1_000 } });
-            const provider = makeExampleProvider(() => Effect.void);
+    layer(NodeCrypto.layer)((it) => {
+        it.effect('a program that uses routes and layer builds storage and the event processors once', ({ expect }) =>
+            Effect.gen(function* () {
+                const storageBuilds = yield* Ref.make(0);
+                const processorBuilds = yield* Ref.make(0);
+                const memory = ChannelsMemory.make({ polling: { intervalMs: 1_000 } });
+                const provider = makeExampleProvider(() => Effect.void);
 
-            const countedProvider: ChannelsProvider = {
-                ...provider,
-                eventProcessor: (input) =>
-                    Ref.update(processorBuilds, (n) => n + 1).pipe(Effect.andThen(provider.eventProcessor(input))),
-            };
+                const countedProvider: ChannelsProvider = {
+                    ...provider,
+                    eventProcessor: (input) =>
+                        Ref.update(processorBuilds, (n) => n + 1).pipe(Effect.andThen(provider.eventProcessor(input))),
+                };
 
-            const bot = Channels.make({
-                namespace: 'channels-test',
-                providers: [countedProvider],
-                eventProcessing,
-                storage: {
-                    polling: memory.polling,
-                    layer: Layer.merge(memory.layer, Layer.effectDiscard(Ref.update(storageBuilds, (n) => n + 1))),
-                },
-            });
+                const bot = Channels.make({
+                    namespace: 'channels-test',
+                    providers: [countedProvider],
+                    eventProcessing,
+                    storage: {
+                        polling: memory.polling,
+                        layer: Layer.merge(memory.layer, Layer.effectDiscard(Ref.update(storageBuilds, (n) => n + 1))),
+                    },
+                });
 
-            yield* HttpRouter.toHttpEffect(Layer.merge(bot.routes, bot.layer)).pipe(
-                Effect.provide(NodeCrypto.layer),
-                Effect.asVoid,
-            );
+                const app = yield* HttpRouter.toHttpEffect(Layer.merge(bot.routes, bot.layer));
 
-            expect(yield* Ref.get(storageBuilds)).toBe(1);
-            expect(yield* Ref.get(processorBuilds)).toBe(1);
-        }),
-    );
+                expect(Effect.isEffect(app)).toBe(true);
+
+                expect(yield* Ref.get(storageBuilds)).toBe(1);
+                expect(yield* Ref.get(processorBuilds)).toBe(1);
+            }),
+        );
+    });
 
     it.live('start serves plain requests and polls without an Effect program', ({ expect }) =>
         Effect.gen(function* () {

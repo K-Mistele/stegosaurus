@@ -1,5 +1,5 @@
 import { describe, it } from '@effect/vitest';
-import { DeliveryHandoff, type DeliveryContext } from '@stegosaurus/channels-delivery';
+import { DeliveryHandoff, type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { Cause, Context, Effect, Exit, Layer, Ref, Schema } from 'effect';
 
 import { makeTestDeliveryExecution } from '../../channels-delivery/test/delivery-execution';

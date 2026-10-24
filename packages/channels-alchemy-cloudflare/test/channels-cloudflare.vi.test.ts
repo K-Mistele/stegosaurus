@@ -1,30 +1,34 @@
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { it } from '@effect/vitest';
+import { ProviderWebhookEvent } from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { DeliveryOutputApplied, type ProviderOutputOperation } from '@stegosaurus/channels-delivery/ProviderOutput';
 import {
-    type Channels,
-    DeliveryAdmission,
-    DeliveryMessageConflict,
-    DeliveryMutationReceipt,
-    DeliveryNotFound,
-    DeliveryOutcome,
-    DeliveryOutputApplied,
-    DeliveryStatus,
-    MessageId,
-    PreparedDeliveryInvocation,
     ProviderEventHandled,
+    type DeliveryAdmissionBatch,
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { QueueDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { DeliveryAdmission, deliveryMailboxKey } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { DeliveryOutcome } from '@stegosaurus/channels-delivery/DeliveryOutcome';
+import { MessageId } from '@stegosaurus/channels-delivery/DeliveryMessage';
+import {
     type SetActivityPayload,
-    deliveryMailboxKey,
-    type ProviderDeliveryExecution,
-    ProviderWebhookEvent,
-    QueueDeliveryMode,
-    type ChannelsProvider,
     type AddLinkPayload,
     type CompleteDeliveryPayload,
     type CreateMessagePayload,
-    type DeliveryAdmissionBatch,
-    type ProviderOutputOperation,
     type UpdateMessagePayload,
-} from '@stegosaurus/channels-delivery';
+} from '@stegosaurus/channels-delivery/DeliveryHttpApi';
+import {
+    DeliveryMessageConflict,
+    DeliveryMutationReceipt,
+    DeliveryNotFound,
+    DeliveryStatus,
+} from '@stegosaurus/channels-delivery/DeliveryControl';
+import {
+    PreparedDeliveryInvocation,
+    type ProviderDeliveryExecution,
+} from '@stegosaurus/channels-delivery/DeliveryContext';
+import { type ChannelsProvider } from '@stegosaurus/channels-delivery/ChannelsProvider';
+import type * as Channels from '@stegosaurus/channels-delivery/Channels';
 import { Clock, Context, Effect, Layer, Option, Predicate, Redacted, Ref, Schema } from 'effect';
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http';
 

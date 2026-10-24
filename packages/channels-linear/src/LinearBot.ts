@@ -1,4 +1,5 @@
-import { type ChannelsProvider, SerialDeliveryMode } from '@stegosaurus/channels-delivery';
+import { SerialDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import { type ChannelsProvider } from '@stegosaurus/channels-delivery/ChannelsProvider';
 import { Effect, Match, Option, Schema } from 'effect';
 import type { Config, Redacted } from 'effect';
 

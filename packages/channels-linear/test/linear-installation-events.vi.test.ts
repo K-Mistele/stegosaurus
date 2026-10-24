@@ -1,11 +1,8 @@
 import { describe, it } from '@effect/vitest';
-import {
-    DeliveryAdmission,
-    MailboxSubscriptions,
-    ProviderEventInvalid,
-    ProviderWebhookEvent,
-    ProviderWebhookResponse,
-} from '@stegosaurus/channels-delivery';
+import { ProviderWebhookEvent, ProviderWebhookResponse } from '@stegosaurus/channels-delivery/ProviderWebhooks';
+import { ProviderEventInvalid } from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import { MailboxSubscriptions } from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { Effect, Layer, Schema } from 'effect';
 
 import { LinearApi } from '../src/LinearApi';

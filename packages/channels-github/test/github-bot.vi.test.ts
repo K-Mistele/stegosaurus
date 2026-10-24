@@ -1,12 +1,10 @@
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { describe, it } from '@effect/vitest';
-import {
-    Channels,
-    ChannelsMemory,
-    QueueDeliveryMode,
-    makeDeliveryClient,
-    type DeliveryContext,
-} from '@stegosaurus/channels-delivery';
+import { QueueDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
+import * as DeliveryHttpClient from '@stegosaurus/channels-delivery/DeliveryHttpClient';
+import { type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
+import * as Channels from '@stegosaurus/channels-delivery/Channels';
+import * as ChannelsMemory from '@stegosaurus/channels-delivery/ChannelsMemory';
 import { Config, ConfigProvider, Deferred, Effect, Layer, Queue, Redacted, Schema, Scope } from 'effect';
 import {
     HttpClient,
@@ -115,7 +113,7 @@ describe('GitHubBot.make', () => {
                         ),
                     );
 
-                    const client = yield* makeDeliveryClient({
+                    const client = yield* DeliveryHttpClient.make({
                         baseUrl: 'http://localhost',
                         basePath: '/api/channels',
                     }).pipe(Effect.provideService(HttpClient.HttpClient, http));

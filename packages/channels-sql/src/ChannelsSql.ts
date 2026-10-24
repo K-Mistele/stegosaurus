@@ -1,7 +1,8 @@
 /**
  * This file defines `ChannelsSql.make`: Postgres mailbox storage as `Channels.make` takes it.
  */
-import type { ChannelsStorage, DeliveryControlBackend } from '@stegosaurus/channels-delivery';
+import type { DeliveryControlBackend } from '@stegosaurus/channels-delivery/DeliveryControl';
+import type { ChannelsStorage } from '@stegosaurus/channels-delivery/ChannelsStorage';
 import { Layer } from 'effect';
 
 import { DeliveryControlBackendSql } from './DeliveryControlBackend';
