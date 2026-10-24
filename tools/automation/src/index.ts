@@ -14,7 +14,6 @@ import noGlobalJson from "./rules/no-global-json.ts";
 import noInOperator from "./rules/no-in-operator.ts";
 import noJsxStyle from "./rules/no-jsx-style.ts";
 import noFixedHeightOnContent from "./rules/no-fixed-height-on-content.ts";
-import noMultipleFunctionParams from "./rules/no-multiple-function-params.ts";
 import noMultipleXstateHooks from "./rules/no-multiple-xstate-hooks.ts";
 import noNestedEffectArrayMethods from "./rules/no-nested-effect-array-methods.ts";
 import noNestedLayerProvide from "./rules/no-nested-layer-provide.ts";
@@ -39,7 +38,6 @@ import noTryCatch from "./rules/no-try-catch.ts";
 import pipeMaxArguments from "./rules/pipe-max-arguments.ts";
 import preferEffectMatch from "./rules/prefer-effect-match.ts";
 import preferOptionFromNullable from "./rules/prefer-option-from-nullable.ts";
-import privateFunctionPrefix from "./rules/private-function-prefix.ts";
 import requireApprovedUiPrimitives from "./rules/require-approved-ui-primitives.ts";
 import requireCnForClassnameComposition from "./rules/require-cn-for-classname-composition.ts";
 import requireContextServiceInServices from "./rules/require-context-service-in-services.ts";
@@ -78,7 +76,6 @@ const plugin: Plugin = {
     "no-in-operator": noInOperator,
     "no-jsx-style": noJsxStyle,
     "no-fixed-height-on-content": noFixedHeightOnContent,
-    "no-multiple-function-params": noMultipleFunctionParams,
     "no-multiple-xstate-hooks": noMultipleXstateHooks,
     "no-nested-effect-array-methods": noNestedEffectArrayMethods,
     "no-nested-layer-provide": noNestedLayerProvide,
@@ -104,7 +101,6 @@ const plugin: Plugin = {
     "pipe-max-arguments": pipeMaxArguments,
     "prefer-effect-match": preferEffectMatch,
     "prefer-option-from-nullable": preferOptionFromNullable,
-    "private-function-prefix": privateFunctionPrefix,
     "require-approved-ui-primitives": requireApprovedUiPrimitives,
     "require-cn-for-classname-composition": requireCnForClassnameComposition,
     "require-context-service-in-services": requireContextServiceInServices,

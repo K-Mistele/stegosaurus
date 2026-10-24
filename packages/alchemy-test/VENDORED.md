@@ -9,6 +9,7 @@ Upstream never publishes this package (it is `private`), yet the published `alch
 Local changes:
 - `package.json`: exports point at `src/` (no build step); dropped the build scripts, which call alchemy's repo scripts.
 - `package.json`: renamed `alchemy-test` to `@stegosaurus/alchemy-test`. The `bin` key stays `alchemy-test`, and the tests still import `alchemy-test`, which resolves through the root alias.
+- `package.json`: added a `typecheck` script so `pnpm typecheck` covers this package.
 - `tsconfig.json`: inlines the settings of alchemy's `tsconfig.base.json` that matter here.
 - Relative imports drop the `.ts` extension (`./Api`, not `./Api.ts`), and `tsconfig.json` drops `allowImportingTsExtensions`. The root typecheck reaches this package through `alchemy/Test/Alchemy` and no longer allows `.ts` imports. Path strings in tests (`../bin/alchemy-test.ts`) keep the extension.
 

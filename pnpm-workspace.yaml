@@ -7,8 +7,13 @@ catalogMode: prefer
 
 catalog:
   "@alchemy.run/pkg": 2.0.0-beta.83
+  "@durable-streams/cli": 0.2.7
+  "@durable-streams/server-conformance-tests": 0.3.7
   "@effect/platform-bun": 4.0.6
   "@effect/platform-node": 4.0.6
+  "@effect/sql-pglite": 4.0.6
+  "@effect/sql-sqlite-do": 4.0.6
+  "@effect/sql-sqlite-node": 4.0.6
   "@effect/tsgo": 0.56.0
   "@effect/vitest": 4.0.6
   "@opentui/core": 0.6.8
@@ -60,3 +65,5 @@ minimumReleaseAgeExclude:
   - "@opentui/core-win32-x64@0.6.8"
   - "@opentui/core@0.6.8"
   - "@types/bun@1.4.4"
+patchedDependencies:
+  "@durable-streams/server-conformance-tests@0.3.7": patches/@durable-streams__server-conformance-tests@0.3.7.patch

@@ -54,6 +54,8 @@ jobs:
         with:
           name: "${{ steps.pack.outputs.artifact-name }}"
           path: .pkg
+          include-hidden-files: true
+          if-no-files-found: error
 
       - name: Publish preview packages
         if: steps.pack.outputs.package-count != '0'

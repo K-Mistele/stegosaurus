@@ -1,0 +1,24 @@
+{
+  "name": "@stegosaurus/durable-streams-server",
+  "version": "0.0.0",
+  "description": "Protocol engine, SQL storage, HttpApi handlers and the Streams service.",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@stegosaurus/durable-streams-protocol": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

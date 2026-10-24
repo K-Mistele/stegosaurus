@@ -13,32 +13,56 @@ pnpm format        # oxfmt, writes files
 pnpm format:check  # oxfmt, no writes (CI)
 pnpm lint          # oxlint with type-aware rules; does not type check
 pnpm lint:fix
-pnpm typecheck     # tsc over root tsconfig and each apps/* tsconfig
+pnpm typecheck     # tsc at the root, then `vp run -r typecheck`: every package's `typecheck` script, 4 at a time
 pnpm typed:check   # typed-lint: TypeScript-API rules from typed-lint.config.json (Bun)
 pnpm test          # `vp run -r test`: every package's `test` script
 pnpm test:stack    # test/stack.test.ts: runs the alchemy stack in local workerd (Bun)
-pnpm dev           # alchemy dev
-pnpm deploy        # alchemy deploy
-pnpm destroy       # alchemy destroy
+pnpm test:conformance  # Durable Streams conformance suite against the Worker in local workerd
+pnpm alchemy:dev       # alchemy dev
+pnpm alchemy:deploy    # alchemy deploy --stage prod (not `pnpm deploy`, a pnpm built-in)
+pnpm alchemy:destroy   # alchemy destroy
 ```
 
-- Without pnpm: `vp run <script>` (or `./node_modules/.bin/vp run <script>`).
+- `vp run <script>` runs any root script.
 - One package's tests: `vp run <pkg>#test` or `vp run --filter <pkg> test`.
 - `vp run` caches results. Pass `--no-cache` to force a run.
 - Built-in `vp check` does not type check (lint `typeCheck` is off). Use `pnpm check`.
 - Bun must be on PATH: `pnpm test` runs packages/alchemy-test under Bun, and `typed:check` and `test:stack` use Bun.
-- `test:stack`, `dev`, and `deploy` need `GH_APP_ID` and `GH_APP_PRIVATE_KEY` set (read by the pkg registry in `alchemy.run.ts`).
+- `test:stack`, `alchemy:dev`, and `alchemy:deploy` read `GH_APP_ID` and `GH_APP_PRIVATE_KEY` from Infisical (see Secrets).
+- `pnpm alchemy:deploy` deploys stage `prod`. Deploy a personal stage with `pnpm exec alchemy deploy` (defaults to `live_$USER`).
 - The pre-commit hook runs `vp staged`, which runs `vp check --fix` on staged files.
+
+## Secrets
+
+- The stack's `secrets` option in `alchemy.run.ts` loads config from Infisical. Set the project ID in `INFISICAL_PROJECT`.
+- Stage `prod` reads Infisical environment `prod`. Every other stage (`dev_$USER`, `live_$USER`, `test_$USER`) reads `dev`.
+- Outside `prod`, a local `.env` overrides Infisical. Shell variables override both.
+- `--env-file` fails on this stack. List the file with `Alchemy.Secrets.DotEnv({ path })` instead.
+- Log in locally with an Infisical machine identity (Universal Auth). Pipe in the client secret to keep it out of shell history:
+  `printf %s "$SECRET" | pnpm exec alchemy profile edit --add Infisical --method universal-auth --set clientId=<client-id> --set clientSecret=-`
+  Run `pnpm exec alchemy profile edit --add Infisical` to be prompted instead.
+- CI logs in with GitHub OIDC: set `INFISICAL_IDENTITY_ID` and grant `id-token: write`. `INFISICAL_TOKEN` also works.
+- The stack copies both values into the Cloudflare account's Secrets Store as `GH_APP_ID_<stage>` and `GH_APP_PRIVATE_KEY_<stage>`. Bind those in new Workers. The pkg registry still gets plain Worker secrets.
+
+## Domains
+
+- Prod Workers use custom domains on `stegosaurus.tech`, such as `api.stegosaurus.tech`. Set the Worker `domain` prop with `zoneName: "stegosaurus.tech"`, and set `workersDev: false`.
+- Every other stage uses workers.dev at `<name>-<stage>.stegosaurus.workers.dev`. workers.dev allows one label before the account subdomain, so put the stage in the Worker name, lowercased, with `_` replaced by `-`.
+- The pkg registry runs only in `prod`, at `pkg.stegosaurus.tech`.
 
 ## Layout
 
-- `alchemy.run.ts` - the one alchemy stack: a pkg registry Worker. State lives on Cloudflare.
+- `alchemy.run.ts` - the one alchemy stack: Secrets Store copies of the GitHub App secrets in every stage, plus the pkg registry Worker in `prod`. State lives on Cloudflare.
 - `apps/` - apps. Empty for now.
+- `packages/durable-streams-*` - Durable Streams server, from github.com/K-Mistele/durable-object-durable-streams: `protocol` (wire schemas), `server` (protocol engine), `cloudflare` (Workers + Durable Objects host, with its own local-state stack in `alchemy.run.ts`), and empty `cluster` and `client` stubs.
+- `patches/` - pnpm patches, listed under `patchedDependencies` in `pnpm-workspace.yaml`. Edit one with `pnpm patch <pkg>@<version>`, then `pnpm patch-commit <dir>`. The conformance-suite patch lets its SSE tests accept `data: ` (upstream PR #285).
 - `packages/alchemy-test` - vendored copy of alchemy's test harness. Runs on Bun. See its `VENDORED.md`.
 - `tools/anti-slop` - vendored custom oxlint rules, loaded as JS plugins. Tests run with `vp test`.
 - `tools/automation` - vendored TypeOnce oxlint rules (Effect, React, xstate, UI), loaded as a JS plugin. See its `POLICY.md`.
 - `tools/typed-lint` - vendored type-aware rules oxlint can't express. Config in `typed-lint.config.json`.
 - `.agents/skills/effect-program-design` - Effect design skill for agents. `.claude` is a symlink to `.agents`.
+- `.agents/skills/create-{research-questions,research,design-discussion,structure-outline}` - RPI skills, copied from riptide-rpi 0.41.3. They call the helper agents in `.agents/agents` (from the riptide daemon in `~/projects/synclayer`).
+- `.agents/skills/show-me` - visual explainer skill, copied from riptide-humanlayer 0.1.8.
 - `.vscode/` - oxc as formatter, format and fix-all on save.
 - `tooling/` - config modules for `vite.config.ts`: `ignores.ts` (fmt and lint ignores), `lint/anti-slop.ts`, `lint/automation.ts`, `lint/builtin.ts` (oxlint categories and core rules), `lint/tailwind.ts` (better-tailwindcss), `lint/effect-tsgo.ts`, `lint/overrides.ts`, `lint/types.ts`.
 - `test/` - root stack tests, run by `test:stack`, not by `pnpm test`.
@@ -54,8 +78,8 @@ pnpm destroy       # alchemy destroy
 - Lint treats every `@effect/tsgo` diagnostic and every anti-slop and automation rule as an error. Fix the code; don't disable the rule.
 - Put per-package lint overrides in `tooling/lint/overrides.ts`, not in a package's `vite.config.ts`.
 - `pnpm install` runs `prepare`, which patches TypeScript (`effect-tsgo patch --oxlint`). Lint needs that patch.
-- fmt, lint, and typecheck skip `packages/alchemy-test`, `tools/anti-slop`, `tools/automation`, and `tools/typed-lint` (`tooling/ignores.ts`). Typecheck also skips the rest of `packages/*` and `tools/*`.
-- A new app needs its own `tsconfig.json` (extend `../../tsconfig.json`) to get type checked, and a `test` script to run under `pnpm test`.
+- fmt and lint skip `packages/alchemy-test`, `tools/anti-slop`, `tools/automation`, and `tools/typed-lint` (`tooling/ignores.ts`). Typecheck skips any package without a `typecheck` script; `alchemy-test` and `anti-slop` have one.
+- A new app or package needs a `tsconfig.json` (extend `../../tsconfig.json`) and a `"typecheck": "tsc"` script to get type checked, and a `test` script to run under `pnpm test`.
 - Keep `packages/alchemy-test` close to upstream and log any local change in its `VENDORED.md`.
 - `tools/anti-slop`, `tools/automation`, and `tools/typed-lint` are ours to change; edit rules in place and note the change in the tool's `VENDORED.md`.
 
@@ -67,3 +91,7 @@ Ask before turning off any other rule.
 - `effecttsgo/unstable-api-usage` and `effecttsgo/api-stability-leak`: we build on Effect APIs marked unstable (`effect/http`, `@effect/vitest`, alchemy).
 - `vitest/no-standalone-expect` in `*.test.ts`: `@effect/vitest` and alchemy's harness call `expect` inside Effects.
 - Built-ins set to `off` in `tooling/lint/builtin.ts` (`require-yield`, `no-shadow`, and others): kept from the TypeOnce policy; see `tools/automation/POLICY.md`.
+
+## Skills
+
+- `effect-program-design`: guidelines for writing effect code. you should use this skill any time you're working on effect code.

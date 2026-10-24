@@ -4,6 +4,6 @@
 - Template commit: d49b5894004679cb82c311ec486eecd08b718afb (2026-10-02)
 - Upstream of that copy: https://github.com/typeonce-dev/ai-automation at 0bca096fe6fe9878cd15303a623dd2cd85915ddd
 
-Copied into `src/`, minus `no-comments` (removed from `rules/`, `index.ts`, and `catalog.ts`). `README.md` and `POLICY.md` come from the template too; `POLICY.md` covers the built-in and Tailwind rules in `tooling/lint/builtin.ts` and `tooling/lint/tailwind.ts`.
+Copied into `src/`, minus `no-comments`, `private-function-prefix`, and `no-multiple-function-params` (removed from `rules/`, `index.ts`, and `catalog.ts`). `export` already marks a function public, so the `_` prefix adds nothing; and the one-object-parameter rule fights code written to other conventions. `README.md` and `POLICY.md` come from the template too; `POLICY.md` covers the built-in and Tailwind rules in `tooling/lint/builtin.ts` and `tooling/lint/tailwind.ts`.
 
 This copy is ours to change.

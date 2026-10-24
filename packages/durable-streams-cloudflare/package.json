@@ -1,0 +1,32 @@
+{
+  "name": "@stegosaurus/durable-streams-cloudflare",
+  "version": "0.0.0",
+  "description": "Cloudflare Workers + Durable Objects host.",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "DURABLE_STREAMS_LONG_POLL_TIMEOUT='2 seconds' alchemy-test tests/round-trip.test.ts tests/reads.test.ts tests/forks.test.ts tests/expiry.test.ts",
+    "test:conformance": "vp test --testTimeout 15000 tests/conformance.test.ts"
+  },
+  "dependencies": {
+    "@effect/sql-sqlite-do": "catalog:",
+    "@stegosaurus/durable-streams-protocol": "workspace:*",
+    "@stegosaurus/durable-streams-server": "workspace:*",
+    "alchemy": "catalog:",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@durable-streams/cli": "catalog:",
+    "@durable-streams/server-conformance-tests": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "alchemy-test": "workspace:@stegosaurus/alchemy-test@*",
+    "vite-plus": "catalog:"
+  }
+}

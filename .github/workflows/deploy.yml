@@ -1,0 +1,52 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      INFISICAL_IDENTITY_ID: ${{ vars.INFISICAL_IDENTITY_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy stack
+        shell: bash
+        run: |
+          : "${INFISICAL_IDENTITY_ID:?set the INFISICAL_IDENTITY_ID repository variable}"
+          pnpm run alchemy:deploy --yes 2>&1 | tee deploy.log
+
+      - name: Write job summary
+        if: success()
+        shell: bash
+        run: |
+          url=$(sed -E 's/\x1b\[[0-9;]*m//g' deploy.log | grep -oE "pkgUrl: '[^']+'" | tail -n 1 | cut -d "'" -f 2 || true)
+          if [ -n "$url" ]; then
+            echo "Deployed stage \`prod\`: pkg registry at $url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Deployed stage \`prod\`." >> "$GITHUB_STEP_SUMMARY"
+          fi

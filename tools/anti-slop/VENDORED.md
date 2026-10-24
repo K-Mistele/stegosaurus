@@ -15,3 +15,4 @@ Tests run with `vp test` (Vitest globals); upstream runs each test file with `ts
 ## Local changes
 
 - `tsconfig.json` sets `allowImportingTsExtensions`: the root tsconfig doesn't, and upstream source imports `./x.ts`.
+- `package.json` has a `typecheck` script so `pnpm typecheck` covers this package.

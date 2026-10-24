@@ -1,0 +1,23 @@
+{
+  "name": "@stegosaurus/durable-streams-protocol",
+  "version": "0.0.0",
+  "description": "Durable Streams wire protocol: schemas, headers, offsets, errors, HttpApi and owner RPC definitions.",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

@@ -10,6 +10,7 @@
     "./effect": "./src/effect/index.ts"
   },
   "scripts": {
+    "typecheck": "tsc",
     "test": "vp test && bun src/rules/require-readable-spacing-cli.test.ts"
   },
   "dependencies": {

@@ -36,11 +36,9 @@ const profileRules: Readonly<Record<RuleProfile, ReadonlyArray<string>>> = {
   ],
   core: [
     "no-banned-type-assertions",
-    "no-multiple-function-params",
     "no-optional-function-parameters",
     "no-single-use-private-functions",
     "no-type-assertion",
-    "private-function-prefix",
   ],
   effect: [
     "no-ambient-nondeterminism",
@@ -97,7 +95,6 @@ const configurableRules: Readonly<Record<string, string>> = {
   "no-direct-xstate-use-selector": "selectorModules, preferredModule",
   "no-fixed-height-on-content": "allowedHeightUtilities, ignoredPathMarkers",
   "no-jsx-style": "ignoredPathMarkers",
-  "no-multiple-function-params": "exemptRouteBasenames, exemptFunctionNames",
   "no-non-route-layout-files": "routeDirectoryNames, allowedLayoutFilenames",
   "no-reexport-only-modules": "routeDirectoryNames, allowedFilenames",
   "no-react-non-component-function-exports":
