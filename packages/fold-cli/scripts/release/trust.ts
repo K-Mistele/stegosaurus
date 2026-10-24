@@ -6,7 +6,7 @@
  * The first call asks for 2FA in the browser; choose "skip 2FA for the next 5 minutes" there so the rest go
  * through. Calls are 2 seconds apart, as npm recommends for bulk setup.
  *
- * Usage: `bun packages/fold-cli/scripts/release/trust.ts [--dry-run]` (root script: `pnpm release:trust`).
+ * Usage: `bun packages/fold-cli/scripts/release/trust.ts [--dry-run]` (run once per new package, so not a package script).
  */
 import { tmpdir } from 'node:os';
 
