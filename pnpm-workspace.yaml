@@ -38,7 +38,7 @@ catalog:
     solid-js: 1.9.12
     tailwindcss: 4.3.3
     turndown: 7.2.4
-    typescript: ^7.0.2
+    typescript: 7.1.0-beta
     typescript-api: npm:typescript@5.9.3
     vite: npm:@voidzero-dev/vite-plus-core@1.4.0
     vite-plus: 1.4.0
