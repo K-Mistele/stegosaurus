@@ -14,10 +14,10 @@ import { type ChannelsProviderRequirements } from '@stegosaurus/channels-deliver
 import * as Channels from '@stegosaurus/channels-delivery/Channels';
 import { Effect } from 'effect';
 
-import { DeliveryControlAlchemyCloudflare, makeDeliveryRequestHandler } from './DeliveryControl';
+import { DeliveryControlAlchemyCloudflare, deliveryRequestHandler } from './DeliveryControl';
 import { DeliveryControlBackendFromDurableObjectStorage } from './DeliveryControlBackend';
-import { makeMailboxAlarmHandler, type MailboxAlarmHandlerOptions } from './MailboxAlarm';
-import { MailboxDeliveryAlchemyCloudflare, makeDeliverFromDurableObjectStorage } from './MailboxDelivery';
+import { mailboxAlarmHandler, type MailboxAlarmHandlerOptions } from './MailboxAlarm';
+import { MailboxDeliveryAlchemyCloudflare, deliverFromDurableObjectStorage } from './MailboxDelivery';
 import { MailboxProcessingBackendFromDurableObjectStorage } from './MailboxProcessingBackend';
 import { MailboxStorage } from './MailboxStorage';
 import { MailboxSubscriptionsFromDurableObjectStorage } from './MailboxSubscriptions';
@@ -25,15 +25,16 @@ import { MailboxSubscriptionsFromDurableObjectStorage } from './MailboxSubscript
 /** Build a mailbox's RPC and alarm handlers from the services supplied by its program entrypoint. */
 export const makeMailbox = (alarmOptions: MailboxAlarmHandlerOptions) =>
     Effect.gen(function* () {
-        const deliver = yield* makeDeliverFromDurableObjectStorage;
-        const deliveryRequest = yield* makeDeliveryRequestHandler;
-        const processing = yield* MailboxProcessing;
-        const runMailboxAlarm = yield* makeMailboxAlarmHandler(alarmOptions);
+        const deliver = yield* deliverFromDurableObjectStorage;
+        const deliveryRequest = yield* deliveryRequestHandler;
+        /** The alarm runs with only the Worker's services, so it keeps the entrypoint's `MailboxProcessing`. */
+        const processing = yield* Effect.context<MailboxProcessing>();
+        const runMailboxAlarm = yield* mailboxAlarmHandler(alarmOptions);
 
         return {
             deliver,
             deliveryRequest,
-            alarm: () => runMailboxAlarm().pipe(Effect.provideService(MailboxProcessing, processing)),
+            alarm: () => runMailboxAlarm().pipe(Effect.provide(processing)),
         };
     });
 
@@ -48,10 +49,10 @@ export const make = <const Requirements extends ReadonlyArray<ChannelsProviderRe
     const mailbox = (alarmOptions: MailboxAlarmHandlerOptions) =>
         Effect.gen(function* () {
             const processing = yield* Channels.makeProcessing(options);
-            const deliver = yield* makeDeliverFromDurableObjectStorage;
-            const deliveryRequest = yield* makeDeliveryRequestHandler;
-            const subscriptions = yield* MailboxSubscriptions;
-            const runAlarm = yield* makeMailboxAlarmHandler(alarmOptions);
+            const deliver = yield* deliverFromDurableObjectStorage;
+            const deliveryRequest = yield* deliveryRequestHandler;
+            const subscriptions = yield* Effect.context<MailboxSubscriptions>();
+            const runAlarm = yield* mailboxAlarmHandler(alarmOptions);
 
             const processingForThisCall = Effect.map(
                 Effect.context<Requirements[number]['process'] | MailboxSubscriptions>(),
@@ -64,7 +65,7 @@ export const make = <const Requirements extends ReadonlyArray<ChannelsProviderRe
             const alarm = () =>
                 runAlarm().pipe(
                     Effect.provideServiceEffect(MailboxProcessing, processingForThisCall),
-                    Effect.provideService(MailboxSubscriptions, subscriptions),
+                    Effect.provide(subscriptions),
                 );
 
             return { deliver, deliveryRequest, alarm };

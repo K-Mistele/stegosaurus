@@ -21,19 +21,18 @@ const unavailable = <A, E, R>(operation: MailboxSubscriptionOperation, effect: E
                 Effect.annotateLogs({ operation }),
             ),
         ),
-        Effect.mapError(
-            () =>
-                new MailboxSubscriptionError({
-                    operation,
-                    reason: 'cloudflare_unavailable',
-                }),
+        Effect.mapError(() =>
+            MailboxSubscriptionError.make({
+                operation,
+                reason: 'cloudflare_unavailable',
+            }),
         ),
         Effect.catchDefect((defect) =>
             Effect.logError('Cloudflare mailbox subscription operation failed', defect).pipe(
                 Effect.annotateLogs({ operation }),
                 Effect.andThen(
                     Effect.fail(
-                        new MailboxSubscriptionError({
+                        MailboxSubscriptionError.make({
                             operation,
                             reason: 'cloudflare_unavailable',
                         }),
@@ -98,7 +97,7 @@ export const MailboxSubscriptionsFromDurableObjectStorage = Layer.effect(
                 storage
                     .delete(subscriptionStorageKey(mailboxKey))
                     .pipe(
-                        Effect.asVoid,
+                        Effect.andThen(Effect.void),
                         (effect) => unavailable('unsubscribe', effect),
                         Effect.withSpan('delivery.cloudflare.subscriptions.unsubscribe'),
                     ),

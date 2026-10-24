@@ -22,7 +22,7 @@ import { changeDeliveries, decodeMailboxState } from './MailboxTransaction';
 /** Log a stored mailbox that cannot be decoded, where it is read, then narrow it to `DeliveryControlUnavailable`. */
 const undecodable = (message: string) => (error: Schema.SchemaError) =>
     Effect.logError(message, error).pipe(
-        Effect.andThen(Effect.fail(new DeliveryControlUnavailable({ reason: 'cloudflare_unavailable' }))),
+        Effect.andThen(Effect.fail(DeliveryControlUnavailable.make({ reason: 'cloudflare_unavailable' }))),
     );
 
 /**
@@ -35,7 +35,7 @@ const narrowStorageDefect =
         effect.pipe(
             Effect.catchDefect((defect) =>
                 Effect.logError(message, defect).pipe(
-                    Effect.andThen(Effect.fail(new DeliveryControlUnavailable({ reason: 'cloudflare_unavailable' }))),
+                    Effect.andThen(Effect.fail(DeliveryControlUnavailable.make({ reason: 'cloudflare_unavailable' }))),
                 ),
             ),
         );
@@ -65,7 +65,7 @@ export const makeDeliveryControlBackendFromDurableObjectStorage = Effect.gen(fun
 
             const mailbox = Option.filter(stored, ({ mailboxKey }) => mailboxKey === input.reference.mailboxKey);
 
-            if (Option.isNone(mailbox)) return yield* new DeliveryNotFound();
+            if (Option.isNone(mailbox)) return yield* DeliveryNotFound.make();
 
             return yield* readDeliverySlotStatus(mailbox.value.deliveries, { ...input, now });
         }),
@@ -76,7 +76,7 @@ export const makeDeliveryControlBackendFromDurableObjectStorage = Effect.gen(fun
             const now = yield* Clock.currentTimeMillis;
 
             return yield* changeDeliveries(storage, {
-                onMissing: new DeliveryNotFound(),
+                onMissing: DeliveryNotFound.make(),
                 change: (current) =>
                     current.mailboxKey === input.reference.mailboxKey
                         ? applyDeliverySlotMutation(current.deliveries, {
@@ -84,7 +84,7 @@ export const makeDeliveryControlBackendFromDurableObjectStorage = Effect.gen(fun
                               now,
                               hasWaiting: Arr.isReadonlyArrayNonEmpty(current.waiting),
                           }).pipe(Effect.map(({ slot, receipt }) => ({ slot, value: receipt })))
-                        : Effect.fail(new DeliveryNotFound()),
+                        : Effect.fail(DeliveryNotFound.make()),
                 onUndecodable: undecodable('Cloudflare delivery mutation failed'),
             }).pipe(narrowStorageDefect('Cloudflare delivery mutation failed'));
         }),

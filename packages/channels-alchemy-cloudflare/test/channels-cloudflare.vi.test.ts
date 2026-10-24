@@ -1,7 +1,11 @@
 import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { it } from '@effect/vitest';
 import { ProviderWebhookEvent } from '@stegosaurus/channels-delivery/ProviderWebhooks';
-import { DeliveryOutputApplied, type ProviderOutputOperation } from '@stegosaurus/channels-delivery/ProviderOutput';
+import {
+    DeliveryOutputApplied,
+    ProviderPresentOutcome,
+    type ProviderOutputOperation,
+} from '@stegosaurus/channels-delivery/ProviderOutput';
 import {
     ProviderEventHandled,
     type DeliveryAdmissionBatch,
@@ -9,7 +13,14 @@ import {
 import { QueueDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
 import { DeliveryAdmission, deliveryMailboxKey } from '@stegosaurus/channels-delivery/MailboxDelivery';
 import { DeliveryOutcome } from '@stegosaurus/channels-delivery/DeliveryOutcome';
-import { MessageId } from '@stegosaurus/channels-delivery/DeliveryMessage';
+import {
+    CreateMessage,
+    MessageId,
+    ProviderDeleteMessage,
+    ProviderUpdateMessage,
+} from '@stegosaurus/channels-delivery/DeliveryMessage';
+import { AddExternalLink, ExternalLink } from '@stegosaurus/channels-delivery/DeliveryLink';
+import { DeliveryActivity, SetActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
 import {
     type SetActivityPayload,
     type AddLinkPayload,
@@ -29,7 +40,7 @@ import {
 } from '@stegosaurus/channels-delivery/DeliveryContext';
 import { type ChannelsProvider } from '@stegosaurus/channels-delivery/ChannelsProvider';
 import type * as Channels from '@stegosaurus/channels-delivery/Channels';
-import { Clock, Context, Effect, Layer, Option, Predicate, Redacted, Ref, Schema } from 'effect';
+import { Array as Arr, Clock, Context, Effect, Layer, Option, Predicate, Redacted, Ref, Schema } from 'effect';
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http';
 
 import { ChannelsCloudflare, DeliveryMailboxes } from '../src';
@@ -130,6 +141,12 @@ const makeHandOffProvider = (
         }),
 });
 
+/** A request body as JSON text, or none. */
+const encodeJsonBody = (body: Schema.Json | undefined) =>
+    Predicate.isUndefined(body)
+        ? Effect.undefined
+        : Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(body).pipe(Effect.orDie);
+
 /** Parse a delivery API response body as the schema the route answers with. */
 const decodeBody = <S extends Schema.Decoder<unknown>>(schema: S, text: string) =>
     Schema.decodeEffect(Schema.fromJsonString(schema))(text);
@@ -146,16 +163,17 @@ const makeOptions = (
 it.effect('ChannelsCloudflare mailbox: deliver sets the alarm and the alarm runs the provider callback', ({ expect }) =>
     Effect.gen(function* () {
         const batchSizes = yield* Ref.make<ReadonlyArray<number>>([]);
-        const bot = ChannelsCloudflare.make(makeOptions(makeExampleProvider(batchSizes)));
+        const bot = batchSizes.pipe(makeExampleProvider, makeOptions, ChannelsCloudflare.make);
         const durableObject = yield* Layer.build(DurableObjectFake);
 
         const { processing, deliveryControl, processingBackend, subscriptions, deliveryControlBackend } =
             bot.layers.mailbox;
 
-        const MailboxLive = Layer.merge(processing, deliveryControl).pipe(
-            Layer.provideMerge(Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend)),
+        const MailboxBackendsLive = Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend).pipe(
             Layer.provideMerge(Layer.succeedContext(durableObject)),
         );
+
+        const MailboxLive = Layer.merge(processing, deliveryControl).pipe(Layer.provideMerge(MailboxBackendsLive));
 
         /** The mailbox object's services, which Alchemy gives its constructor. Its methods get only the Worker's. */
         const mailboxServices = yield* Layer.build(MailboxLive.pipe(Layer.provideMerge(NodeCrypto.layer)));
@@ -188,9 +206,8 @@ it.effect(
         Effect.gen(function* () {
             const delivered = yield* Ref.make<ReadonlyArray<string>>([]);
 
-            const bot = ChannelsCloudflare.make(
-                makeOptions(makeExampleProvider(yield* Ref.make<ReadonlyArray<number>>([]))),
-            );
+            const batchSizes = yield* Ref.make<ReadonlyArray<number>>([]);
+            const bot = batchSizes.pipe(makeExampleProvider, makeOptions, ChannelsCloudflare.make);
 
             const mailboxes = DeliveryMailboxes.of({
                 getByName: (mailboxKey) => ({
@@ -235,10 +252,11 @@ it.effect(
             const { processing, deliveryControl, processingBackend, subscriptions, deliveryControlBackend } =
                 bot.layers.mailbox;
 
-            const MailboxLive = Layer.merge(processing, deliveryControl).pipe(
-                Layer.provideMerge(Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend)),
+            const MailboxBackendsLive = Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend).pipe(
                 Layer.provideMerge(Layer.succeedContext(durableObject)),
             );
+
+            const MailboxLive = Layer.merge(processing, deliveryControl).pipe(Layer.provideMerge(MailboxBackendsLive));
 
             /** The mailbox object's services, which Alchemy gives its constructor. Its methods get only the Worker's. */
             const mailboxServices = yield* Layer.build(MailboxLive.pipe(Layer.provideMerge(NodeCrypto.layer)));
@@ -291,34 +309,35 @@ it.effect(
                     | CreateMessagePayload
                     | UpdateMessagePayload
                     | typeof SetActivityPayload.Encoded;
-            }) => {
-                const url = `http://localhost/api/channels/deliveries/${deliveryId}${input.path}`;
+            }) =>
+                Effect.gen(function* () {
+                    const url = `http://localhost/api/channels/deliveries/${deliveryId}${input.path}`;
 
-                const headers = {
-                    authorization: `Bearer ${input.token}`,
-                    'content-type': 'application/json',
-                };
+                    const headers = {
+                        authorization: `Bearer ${input.token}`,
+                        'content-type': 'application/json',
+                    };
 
-                const body = Predicate.isUndefined(input.payload) ? undefined : JSON.stringify(input.payload);
+                    const body = yield* encodeJsonBody(input.payload);
 
-                const method = input.method ?? (Predicate.isUndefined(body) ? 'GET' : 'POST');
+                    const method = input.method ?? (Predicate.isUndefined(body) ? 'GET' : 'POST');
 
-                const request = new Request(
-                    url,
-                    Predicate.isUndefined(body) ? { method, headers } : { method, headers, body },
-                );
+                    const request = new Request(
+                        url,
+                        Predicate.isUndefined(body) ? { method, headers } : { method, headers, body },
+                    );
 
-                return fetch.pipe(
-                    Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(request)),
-                    Effect.flatMap((response) => {
-                        const web = HttpServerResponse.toWeb(response);
+                    return yield* fetch.pipe(
+                        Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(request)),
+                        Effect.flatMap((response) => {
+                            const web = HttpServerResponse.toWeb(response);
 
-                        return Effect.promise(() => web.text()).pipe(
-                            Effect.map((text) => ({ status: web.status, text })),
-                        );
-                    }),
-                );
-            };
+                            return Effect.promise(() => web.text()).pipe(
+                                Effect.map((text) => ({ status: web.status, text })),
+                            );
+                        }),
+                    );
+                });
 
             const token = Redacted.value(accessToken);
 
@@ -333,7 +352,7 @@ it.effect(
             const link = { label: 'Run', url: 'https://example.com/run/1' };
             expect((yield* call({ path: '/links', token, payload: link })).status).toEqual(202);
             expect(yield* alarm.scheduledAt).toEqual(0);
-            const activity = { activity: { _tag: 'Working', message: 'Running tests' } } as const;
+            const activity = { activity: DeliveryActivity.cases.Working.make({ message: 'Running tests' }) };
             expect((yield* call({ path: '/activity', token, method: 'PUT', payload: activity })).status).toEqual(202);
             const progress = MessageId.make('progress');
 
@@ -377,24 +396,23 @@ it.effect(
             for (let pass = 0; pass < 6; pass++) yield* mailbox.alarm();
             const reference = { posted: 'CreateMessage' };
             expect(yield* Ref.get(sent)).toEqual([
-                { _tag: 'AddExternalLink', link: { _tag: 'ExternalLink', ...link } },
-                { _tag: 'SetActivity', ...activity },
-                { _tag: 'CreateMessage', messageId: progress, markdown: 'Working' },
-                { _tag: 'UpdateMessage', messageId: progress, markdown: 'Almost', reference },
-                { _tag: 'DeleteMessage', messageId: progress, reference },
-                {
-                    _tag: 'PresentOutcome',
-                    outcome: { _tag: 'Completed' },
+                AddExternalLink.make({ link: ExternalLink.make(link) }),
+                SetActivity.make(activity),
+                CreateMessage.make({ messageId: progress, markdown: 'Working' }),
+                ProviderUpdateMessage.make({ messageId: progress, markdown: 'Almost', reference }),
+                ProviderDeleteMessage.make({ messageId: progress, reference }),
+                ProviderPresentOutcome.make({
+                    outcome: DeliveryOutcome.cases.Completed.make({}),
                     markdown: 'done',
                     clearActivity: true,
-                },
+                }),
             ]);
             expect(yield* alarm.scheduledAt).toEqual(null);
 
             const retired = yield* decodeBody(DeliveryStatus, (yield* call({ path: '', token })).text);
             expect(retired.stage).toEqual('Retired');
             expect(retired.outcome).toEqual(DeliveryOutcome.cases.Completed.make({}));
-            expect(retired.output.map(({ state }) => state)).toEqual(Array.from({ length: 6 }, () => 'Delivered'));
+            expect(Arr.map(retired.output, ({ state }) => state)).toEqual(Array.from({ length: 6 }, () => 'Delivered'));
 
             const wrongToken = yield* call({ path: '', token: 'wrong-token' });
             expect(wrongToken.status).toEqual(404);
@@ -458,7 +476,11 @@ const makeInterleavingProvider = (
         }),
 });
 
-const interleaving = (request: { readonly path: string; readonly method: 'POST' | 'PUT'; readonly body: unknown }) =>
+const interleaving = (request: {
+    readonly path: string;
+    readonly method: 'POST' | 'PUT';
+    readonly body: Schema.Json;
+}) =>
     Effect.gen(function* () {
         const handedOff = yield* Ref.make<ReadonlyArray<HandedOff>>([]);
         const sent = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -470,10 +492,11 @@ const interleaving = (request: { readonly path: string; readonly method: 'POST' 
         const { processing, deliveryControl, processingBackend, subscriptions, deliveryControlBackend } =
             bot.layers.mailbox;
 
-        const MailboxLive = Layer.merge(processing, deliveryControl).pipe(
-            Layer.provideMerge(Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend)),
+        const MailboxBackendsLive = Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend).pipe(
             Layer.provideMerge(Layer.succeedContext(durableObject)),
         );
+
+        const MailboxLive = Layer.merge(processing, deliveryControl).pipe(Layer.provideMerge(MailboxBackendsLive));
 
         /** The mailbox object's services, which Alchemy gives its constructor. Its methods get only the Worker's. */
         const mailboxServices = yield* Layer.build(MailboxLive.pipe(Layer.provideMerge(NodeCrypto.layer)));
@@ -504,28 +527,31 @@ const interleaving = (request: { readonly path: string; readonly method: 'POST' 
 
         const call = (
             target: HandedOff,
-            input: { readonly path: string; readonly method: string; readonly body?: unknown },
-        ) => {
-            const url = `http://localhost/api/channels/deliveries/${target.deliveryId}${input.path}`;
+            input: { readonly path: string; readonly method: string; readonly body?: Schema.Json },
+        ) =>
+            Effect.gen(function* () {
+                const url = `http://localhost/api/channels/deliveries/${target.deliveryId}${input.path}`;
 
-            const headers = {
-                authorization: `Bearer ${Redacted.value(target.accessToken)}`,
-                'content-type': 'application/json',
-            };
+                const headers = {
+                    authorization: `Bearer ${Redacted.value(target.accessToken)}`,
+                    'content-type': 'application/json',
+                };
 
-            const init = Predicate.isUndefined(input.body)
-                ? { method: input.method, headers }
-                : { method: input.method, headers, body: JSON.stringify(input.body) };
+                const body = yield* encodeJsonBody(input.body);
 
-            return fetch.pipe(
-                Effect.provideService(
-                    HttpServerRequest.HttpServerRequest,
-                    HttpServerRequest.fromWeb(new Request(url, init)),
-                ),
-                Effect.map((response) => HttpServerResponse.toWeb(response).status),
-                Effect.orDie,
-            );
-        };
+                const init = Predicate.isUndefined(body)
+                    ? { method: input.method, headers }
+                    : { method: input.method, headers, body };
+
+                return yield* fetch.pipe(
+                    Effect.provideService(
+                        HttpServerRequest.HttpServerRequest,
+                        HttpServerRequest.fromWeb(new Request(url, init)),
+                    ),
+                    Effect.map((response) => HttpServerResponse.toWeb(response).status),
+                    Effect.orDie,
+                );
+            });
 
         yield* mailbox.deliver(admission('channels-cloudflare-test'));
         yield* mailbox.alarm();
@@ -580,7 +606,7 @@ it.effect(
             const { created, statuses, sent, handedOff } = yield* interleaving({
                 path: '/activity',
                 method: 'PUT',
-                body: { activity: { _tag: 'Working', message: 'Running tests' } },
+                body: { activity: DeliveryActivity.cases.Working.make({ message: 'Running tests' }) },
             });
 
             expect([created, ...(yield* Ref.get(statuses))]).toEqual([202, 202]);

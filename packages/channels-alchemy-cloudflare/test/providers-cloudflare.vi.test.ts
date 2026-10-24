@@ -7,10 +7,12 @@ import * as NodeCrypto from '@effect/platform-node/NodeCrypto';
 import { it } from '@effect/vitest';
 import { QueueDeliveryMode } from '@stegosaurus/channels-delivery/MailboxPolicy';
 import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { DeliveryActivity } from '@stegosaurus/channels-delivery/DeliveryActivity';
 import { type DeliveryContext } from '@stegosaurus/channels-delivery/DeliveryContext';
 import {
     GitHubApi,
     GitHubBot,
+    GitHubDiscussionRef,
     GitHubId,
     GitHubIssueComment,
     type GitHubReactionTarget,
@@ -25,7 +27,20 @@ import {
     LinearBot,
 } from '@stegosaurus/channels-linear';
 import { SlackApi, SlackBot } from '@stegosaurus/channels-slack';
-import { Config, Context, Effect, Layer, Match, Option, Predicate, Queue, Redacted, Ref, Schema } from 'effect';
+import {
+    Config,
+    Context,
+    Effect,
+    Layer,
+    Match,
+    Option,
+    Predicate,
+    Queue,
+    Redacted,
+    Ref,
+    Schema,
+    String as Str,
+} from 'effect';
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http';
 
 import { githubWebhookSecret, issueCommentPayload, signedGitHubInput } from '../../channels-github/test/fixtures';
@@ -39,6 +54,9 @@ import {
 } from '../../channels-linear/test/fixtures';
 import { ChannelsCloudflare, DeliveryMailboxes } from '../src';
 import { DurableObjectFake, DurableObjectFakeAlarm } from './DurableObjectFake';
+
+const encodeJsonBody = (body: Schema.Json) =>
+    Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(body).pipe(Effect.orDie);
 
 /** What a callback saw. */
 type Seen = { readonly event: unknown; readonly delivery: DeliveryContext };
@@ -78,16 +96,16 @@ const makeOptions = (input: {
                 yield* Queue.offer(input.shown, `comment: ${content.markdown}`);
 
                 return GitHubIssueComment.make({
-                    ref: { discussion: { _tag: 'Issue', ref: issue }, id: GitHubId.make(900) },
+                    ref: { discussion: GitHubDiscussionRef.cases.Issue.make({ ref: issue }), id: GitHubId.make(900) },
                     body: content.markdown,
                     url: 'https://github.com/alice/project/issues/42#issuecomment-900',
                     author: null,
                 });
             }),
         addReaction: ({ target }) =>
-            Queue.offer(input.shown, `eyes on ${reactionTargetName(target)}`).pipe(Effect.asVoid),
+            Queue.offer(input.shown, `eyes on ${reactionTargetName(target)}`).pipe(Effect.andThen(Effect.void)),
         removeReaction: ({ target }) =>
-            Queue.offer(input.shown, `eyes off ${reactionTargetName(target)}`).pipe(Effect.asVoid),
+            Queue.offer(input.shown, `eyes off ${reactionTargetName(target)}`).pipe(Effect.andThen(Effect.void)),
     });
 
     const github = GitHubBot.make({
@@ -106,7 +124,7 @@ const makeOptions = (input: {
             Effect.gen(function* () {
                 if (request.content.body === 'Summary')
                     yield* Effect.flatten(Ref.getAndSet(input.duringSummary, Effect.void));
-                const kind = request.ephemeral ? 'thought~' : request.content._tag.toLowerCase();
+                const kind = request.ephemeral ? 'thought~' : Str.toLowerCase(request.content._tag);
                 yield* Queue.offer(input.shown, `${kind}: ${request.content.body}`);
 
                 return LinearAgentActivityReceipt.make({
@@ -127,7 +145,7 @@ const makeOptions = (input: {
             onAgentSessionCreated: (event, delivery) =>
                 Queue.offer(input.seen, { event, delivery }).pipe(Effect.andThen(delivery.handoff())),
             onAgentSessionPrompted: (event, delivery) =>
-                Queue.offer(input.seen, { event, delivery }).pipe(Effect.asVoid),
+                Queue.offer(input.seen, { event, delivery }).pipe(Effect.andThen(Effect.void)),
         },
     });
 
@@ -154,10 +172,11 @@ const setUp = Effect.gen(function* () {
     /** As in a split Durable Object, which builds its processing in `mailbox()`, not from `layers.mailbox.processing`. */
     const { deliveryControl, processingBackend, subscriptions, deliveryControlBackend } = bot.layers.mailbox;
 
-    const MailboxLive = deliveryControl.pipe(
-        Layer.provideMerge(Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend)),
+    const MailboxBackendsLive = Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend).pipe(
         Layer.provideMerge(Layer.succeedContext(durableObject)),
     );
+
+    const MailboxLive = deliveryControl.pipe(Layer.provideMerge(MailboxBackendsLive));
 
     /**
      * The mailbox object's services, which Alchemy gives its constructor with the Worker's (here the fake
@@ -232,18 +251,19 @@ const setUp = Effect.gen(function* () {
         });
     };
 
-    const callDelivery = (delivery: DeliveryContext, path: string, method: string, body?: Schema.Json) => {
-        const headers = {
-            authorization: `Bearer ${Redacted.value(delivery.accessToken)}`,
-            'content-type': 'application/json',
-        };
+    const callDelivery = (delivery: DeliveryContext, path: string, method: string, body: Schema.Json | undefined) =>
+        Effect.gen(function* () {
+            const headers = {
+                authorization: `Bearer ${Redacted.value(delivery.accessToken)}`,
+                'content-type': 'application/json',
+            };
 
-        const init: RequestInit = { method, headers };
+            const init: RequestInit = { method, headers };
 
-        if (Predicate.isNotUndefined(body)) init.body = JSON.stringify(body);
+            if (Predicate.isNotUndefined(body)) init.body = yield* encodeJsonBody(body);
 
-        return request(`/deliveries/${delivery.deliveryId}${path}`, init);
-    };
+            return yield* request(`/deliveries/${delivery.deliveryId}${path}`, init);
+        });
 
     return {
         seen,
@@ -288,7 +308,7 @@ it.effect(
             const { delivery } = Option.getOrThrow(yield* Queue.poll(seen));
             expect(yield* Queue.take(shown)).toEqual('thought~: Working on this…');
 
-            const working = { activity: { _tag: 'Working', message: 'Running tests' } };
+            const working = { activity: DeliveryActivity.cases.Working.make({ message: 'Running tests' }) };
             expect(yield* callDelivery(delivery, '/activity', 'PUT', working)).toEqual(202);
             expect(
                 yield* callDelivery(delivery, '/messages', 'POST', {
@@ -316,7 +336,7 @@ it.effect(
             ]);
             const next = Option.getOrThrow(yield* Queue.poll(seen));
             expect(next.delivery.deliveryId === delivery.deliveryId).toBe(false);
-            expect(yield* callDelivery(delivery, '', 'GET')).toEqual(200);
+            expect(yield* callDelivery(delivery, '', 'GET', undefined)).toEqual(200);
         }),
 );
 
@@ -330,7 +350,7 @@ it.effect(
             yield* mailbox.alarm();
             const { delivery } = Option.getOrThrow(yield* Queue.poll(seen));
 
-            const working = { activity: { _tag: 'Working', message: 'Running tests' } };
+            const working = { activity: DeliveryActivity.cases.Working.make({ message: 'Running tests' }) };
             expect(yield* callDelivery(delivery, '/activity', 'PUT', working)).toEqual(202);
             expect(
                 yield* callDelivery(delivery, '/messages', 'POST', {
@@ -344,7 +364,11 @@ it.effect(
             yield* Ref.set(
                 duringSummary,
                 Effect.gen(function* () {
-                    yield* record(yield* callDelivery(delivery, '/activity', 'PUT', { activity: { _tag: 'Idle' } }));
+                    yield* record(
+                        yield* callDelivery(delivery, '/activity', 'PUT', {
+                            activity: DeliveryActivity.cases.Idle.make({}),
+                        }),
+                    );
                     yield* record(yield* callDelivery(delivery, '/complete', 'POST', { markdown: 'Done.' }));
                 }).pipe(Effect.scoped),
             );
@@ -360,6 +384,6 @@ it.effect(
             ]);
             const next = Option.getOrThrow(yield* Queue.poll(seen));
             expect(next.delivery.deliveryId === delivery.deliveryId).toBe(false);
-            expect(yield* callDelivery(delivery, '', 'GET')).toEqual(200);
+            expect(yield* callDelivery(delivery, '', 'GET', undefined)).toEqual(200);
         }),
 );

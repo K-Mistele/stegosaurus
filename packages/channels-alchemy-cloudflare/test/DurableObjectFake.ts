@@ -22,7 +22,7 @@ export class DurableObjectFakeAlarm extends Context.Service<
         /** What Cloudflare does right before it calls the alarm handler: the alarm is cleared. */
         readonly clearAsCloudflareDoesBeforeTheHandler: Effect.Effect<void>;
     }
->()('@stegosaurus/channels-alchemy-cloudflare/test/DurableObjectFakeAlarm') {}
+>()('@stegosaurus/channels-alchemy-cloudflare/test/DurableObjectFake/DurableObjectFakeAlarm') {}
 
 const makeTransaction = (stored: Ref.Ref<Stored>): MailboxStorageTransaction => ({
     get: (key) => Ref.get(stored).pipe(Effect.map(({ entries }) => entries.get(key))),
@@ -54,7 +54,9 @@ export const DurableObjectFake = Layer.effectContext(
                 Effect.gen(function* () {
                     const working = yield* Ref.make(yield* Ref.get(committed));
 
-                    const result = yield* Effect.promise(() => Effect.runPromise(closure(makeTransaction(working))));
+                    const result = yield* Effect.promise(() =>
+                        Effect.runPromiseWith(Context.empty())(closure(makeTransaction(working))),
+                    );
 
                     yield* Ref.set(committed, yield* Ref.get(working));
 

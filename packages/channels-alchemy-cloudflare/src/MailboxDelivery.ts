@@ -17,16 +17,16 @@ import { writeMailboxState } from './MailboxTransaction';
 const unavailable = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
         Effect.tapError((error) => Effect.logError('Cloudflare mailbox admission failed', error)),
-        Effect.mapError(() => new MailboxDeliveryUnavailable({ reason: 'cloudflare_unavailable' })),
+        Effect.mapError(() => MailboxDeliveryUnavailable.make({ reason: 'cloudflare_unavailable' })),
         Effect.catchDefect((defect) =>
             Effect.logError('Cloudflare mailbox admission failed', defect).pipe(
-                Effect.andThen(Effect.fail(new MailboxDeliveryUnavailable({ reason: 'cloudflare_unavailable' }))),
+                Effect.andThen(Effect.fail(MailboxDeliveryUnavailable.make({ reason: 'cloudflare_unavailable' }))),
             ),
         ),
     );
 
 /** Build the admission RPC over the current Durable Object's persistent storage. */
-export const makeDeliverFromDurableObjectStorage = Effect.gen(function* () {
+export const deliverFromDurableObjectStorage = Effect.gen(function* () {
     const storage = yield* MailboxStorage;
 
     return Effect.fn('delivery.cloudflare_durable_object.deliver')(function* (input: DeliveryAdmission) {
@@ -99,7 +99,7 @@ export type DeliveryMailboxNamespace = {
 
 /** The application's mailbox Durable Object namespace, as the Worker's routes reach it. */
 export class DeliveryMailboxes extends Context.Service<DeliveryMailboxes, DeliveryMailboxNamespace>()(
-    '@stegosaurus/channels-alchemy-cloudflare/DeliveryMailboxes',
+    '@stegosaurus/channels-alchemy-cloudflare/MailboxDelivery/DeliveryMailboxes',
 ) {}
 
 /** Route host-level MailboxDelivery calls to the application-owned DO namespace. */

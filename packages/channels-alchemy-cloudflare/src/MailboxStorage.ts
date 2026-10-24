@@ -26,14 +26,6 @@ type MailboxStorageOperations = MailboxStorageTransaction & {
 };
 
 /**
- * Alchemy marks native Durable Object storage effects with `RuntimeContext` to prevent them from
- * running outside an active runtime, but its storage adapter closes over native storage and never
- * reads that service. This removes the type-only marker at our Durable Object storage boundary.
- */
-const eraseAlchemyRuntimeContext = <A, E>(effect: Effect.Effect<A, E, RuntimeContext>): Effect.Effect<A, E> =>
-    effect.pipe(Effect.provide(RuntimeContext.phantom));
-
-/**
  * The type of {@link MailboxStorage.layer}, named so declaration files refer to it rather than to the
  * Durable Object state's path inside Alchemy.
  */
@@ -47,11 +39,18 @@ export class MailboxStorage extends Context.Service<MailboxStorage, MailboxStora
             const { storage } = yield* Cloudflare.DurableObjectState;
 
             /**
+             * Alchemy marks native Durable Object storage effects with `RuntimeContext` to prevent them from
+             * running outside an active runtime, but its storage adapter closes over native storage and never
+             * reads that service. Its empty phantom layer removes the type-only marker at this boundary.
+             */
+            const alchemyRuntimeContext = yield* Layer.build(RuntimeContext.phantom);
+
+            /**
              * A storage call can fail with `DurableObjectStorageError`. Make it a defect, so it can never pass
              * for a typed error such as a lifecycle refusal; callers capture defects as storage failures.
              */
             const run = <A, E>(effect: Effect.Effect<A, E, RuntimeContext>) =>
-                eraseAlchemyRuntimeContext(effect).pipe(Effect.orDie);
+                effect.pipe(Effect.provide(alchemyRuntimeContext), Effect.orDie);
 
             const fromTransaction = (transaction: Cloudflare.DurableObjectTransaction): MailboxStorageTransaction => ({
                 get: (key) => run(transaction.get(key)),
@@ -63,7 +62,7 @@ export class MailboxStorage extends Context.Service<MailboxStorage, MailboxStora
             return {
                 get: (key) => run(storage.get(key)),
                 put: (key, value) => run(storage.put(key, value)),
-                delete: (key) => run(storage.delete(key)).pipe(Effect.asVoid),
+                delete: (key) => run(storage.delete(key)).pipe(Effect.andThen(Effect.void)),
                 getAlarm: run(storage.getAlarm()),
                 setAlarm: (scheduledTime) => run(storage.setAlarm(scheduledTime)),
                 deleteAlarm: run(storage.deleteAlarm()),

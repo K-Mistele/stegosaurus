@@ -17,7 +17,7 @@ import {
     DeliveryStatus,
     DeliveryStatusError,
 } from '@stegosaurus/channels-delivery/DeliveryControl';
-import { Data, Effect, Layer, Match, Redacted, Schema } from 'effect';
+import { Effect, Layer, Match, Redacted, Schema } from 'effect';
 
 import { DeliveryMailboxes } from './MailboxDelivery';
 
@@ -63,14 +63,17 @@ export const DeliveryResponse = Schema.Union([DeliveryStatusResponse, DeliveryMu
 export type DeliveryResponse = typeof DeliveryResponse.Type;
 
 /** The mailbox object was sent a request it cannot read. Only a Worker built from other code can cause it. */
-class DeliveryRequestInvalid extends Data.TaggedError('DeliveryRequestInvalid')<{}> {}
+class DeliveryRequestInvalid extends Schema.TaggedError<DeliveryRequestInvalid, { readonly brand: unique symbol }>()(
+    'DeliveryRequestInvalid',
+    {},
+) {}
 
 /**
  * Build the `deliveryRequest` RPC over the mailbox object's own `DeliveryControl`.
  *
  * The decode error is not logged: it can quote the request, and the request carries the token.
  */
-export const makeDeliveryRequestHandler = Effect.gen(function* () {
+export const deliveryRequestHandler = Effect.gen(function* () {
     const control = yield* DeliveryControl;
 
     return Effect.fn('delivery.cloudflare_durable_object.delivery_request')(function* (
@@ -79,7 +82,7 @@ export const makeDeliveryRequestHandler = Effect.gen(function* () {
         const request = yield* Schema.decodeEffect(DeliveryRequest)(input).pipe(
             Effect.catchTag('SchemaError', () =>
                 Effect.logError('Cloudflare mailbox delivery request decode failed').pipe(
-                    Effect.andThen(Effect.die(new DeliveryRequestInvalid())),
+                    Effect.andThen(Effect.die(DeliveryRequestInvalid.make())),
                 ),
             ),
         );
@@ -111,17 +114,17 @@ export const makeDeliveryRequestHandler = Effect.gen(function* () {
 const unavailable = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
         Effect.tapError((error) => Effect.logError('Cloudflare delivery request failed', error)),
-        Effect.mapError(() => new DeliveryControlUnavailable({ reason: 'cloudflare_unavailable' })),
+        Effect.mapError(() => DeliveryControlUnavailable.make({ reason: 'cloudflare_unavailable' })),
         Effect.catchDefect((defect) =>
             Effect.logError('Cloudflare delivery request failed', defect).pipe(
-                Effect.andThen(Effect.fail(new DeliveryControlUnavailable({ reason: 'cloudflare_unavailable' }))),
+                Effect.andThen(Effect.fail(DeliveryControlUnavailable.make({ reason: 'cloudflare_unavailable' }))),
             ),
         ),
     );
 
 /** An ID that is not a delivery ID names no delivery. */
 const referenceOrNotFound = (deliveryId: string) =>
-    Effect.fromOption(parseDeliveryId(deliveryId), () => new DeliveryNotFound());
+    Effect.fromOption(parseDeliveryId(deliveryId), () => DeliveryNotFound.make());
 
 /** `DeliveryControl` in the Worker: each request goes to the mailbox object named by the delivery ID. */
 export const DeliveryControlAlchemyCloudflare = Layer.effect(

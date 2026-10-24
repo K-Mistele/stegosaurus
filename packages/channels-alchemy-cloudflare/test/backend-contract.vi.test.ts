@@ -18,7 +18,7 @@ import {
 import { formatDeliveryId, parseDeliveryId } from '@stegosaurus/channels-delivery/DeliveryReference';
 import { DeliveryOutputSettlement } from '@stegosaurus/channels-delivery/DeliveryOperation';
 import { DeliveryControlBackend, CompleteDelivery } from '@stegosaurus/channels-delivery/DeliveryControl';
-import { Clock, Effect, Layer, Option, Schema } from 'effect';
+import { Array as Arr, Clock, Effect, Layer, Option, Schema } from 'effect';
 import { TestClock } from 'effect/testing';
 
 import { mailboxBackendContract, nextBatchIdentity, preparation } from '../../channels-delivery/test/backend-contract';
@@ -27,9 +27,9 @@ import { sequentialCallbackContract } from '../../channels-sql/test-backends/seq
 import {
     DeliveryControlBackendFromDurableObjectStorage,
     MailboxProcessingBackendFromDurableObjectStorage,
-    makeDeliverFromDurableObjectStorage,
+    deliverFromDurableObjectStorage,
     MailboxStorage,
-    makeMailboxAlarmHandler,
+    mailboxAlarmHandler,
 } from '../src';
 import { DurableObjectFake, DurableObjectFakeAlarm } from './DurableObjectFake';
 
@@ -37,7 +37,7 @@ import { DurableObjectFake, DurableObjectFakeAlarm } from './DurableObjectFake';
 const MailboxDeliveryFromDurableObjectStorage = Layer.effect(
     MailboxDelivery,
     Effect.gen(function* () {
-        const deliver = yield* makeDeliverFromDurableObjectStorage;
+        const deliver = yield* deliverFromDurableObjectStorage;
 
         return MailboxDelivery.of({
             deliver: (admission) =>
@@ -89,7 +89,7 @@ it.effect('Durable Object: keeps the alarm on the time the mailbox is next due',
         yield* delivery.deliver(event('a'));
         expect(yield* alarm.scheduledAt).toEqual(100);
 
-        const [waiting] = (yield* backend.findReadyMailboxes).filter(Schema.is(WaitingMailbox));
+        const [waiting] = Arr.filter(yield* backend.findReadyMailboxes, Schema.is(WaitingMailbox));
 
         if (waiting === undefined) return yield* Effect.die(new Error('expected one waiting mailbox'));
         expect(yield* alarm.scheduledAt).toEqual(100);
@@ -262,7 +262,7 @@ const processingThatSkipsEverything = Layer.succeed(
 const processingThatFails = Layer.succeed(
     MailboxProcessing,
     MailboxProcessing.of({
-        processReady: Effect.fail(new MailboxProcessingUnavailable({ reason: 'simulated_look_failure' })),
+        processReady: Effect.fail(MailboxProcessingUnavailable.make({ reason: 'simulated_look_failure' })),
     }),
 );
 
@@ -270,7 +270,7 @@ const alarmHandlerOver = (processing: Layer.Layer<MailboxProcessing>) =>
     Effect.gen(function* () {
         const delivery = yield* MailboxDelivery;
         const alarm = yield* DurableObjectFakeAlarm;
-        const runAlarm = yield* makeMailboxAlarmHandler({ rearmAfterMs: 1_000 });
+        const runAlarm = yield* mailboxAlarmHandler({ rearmAfterMs: 1_000 });
         const services = yield* Effect.context<MailboxProcessing>();
         const runMailboxAlarm = () => runAlarm().pipe(Effect.provideContext(services));
         const storage = yield* MailboxStorage;

@@ -58,7 +58,7 @@ const makeClaimId = Effect.gen(function* () {
 /** Log a stored mailbox that cannot be decoded, where it is read, then narrow it to the one error callers can act on. */
 const undecodable = (message: string) => (error: Schema.SchemaError) =>
     Effect.logError(message, error).pipe(
-        Effect.andThen(Effect.fail(new MailboxProcessingUnavailable({ reason: 'cloudflare_unavailable' }))),
+        Effect.andThen(Effect.fail(MailboxProcessingUnavailable.make({ reason: 'cloudflare_unavailable' }))),
     );
 
 /**
@@ -71,13 +71,15 @@ const narrowStorageDefect =
         effect.pipe(
             Effect.catchDefect((defect) =>
                 Effect.logError(message, defect).pipe(
-                    Effect.andThen(Effect.fail(new MailboxProcessingUnavailable({ reason: 'cloudflare_unavailable' }))),
+                    Effect.andThen(
+                        Effect.fail(MailboxProcessingUnavailable.make({ reason: 'cloudflare_unavailable' })),
+                    ),
                 ),
             ),
         );
 
 const toBatch = (entries: ReadonlyArray<WaitingAdmission>) => {
-    const [first, ...rest] = entries.map(({ admission }) => admission);
+    const [first, ...rest] = Arr.map(entries, ({ admission }) => admission);
 
     return Predicate.isUndefined(first) ? null : DeliveryAdmissionBatch.make([first, ...rest]);
 };
@@ -127,7 +129,7 @@ const claimTransition = (input: {
     return Match.value(claim).pipe(
         Match.tagsExhaustive({
             ClaimWaitingEvents: ({ upToSequence, batchId, accessToken, leaseMs }) => {
-                const admissions = toBatch(current.waiting.filter(({ sequence }) => sequence <= upToSequence));
+                const admissions = toBatch(Arr.filter(current.waiting, ({ sequence }) => sequence <= upToSequence));
 
                 if (Predicate.isNull(admissions)) return unchanged(Option.none());
 
@@ -153,7 +155,7 @@ const claimTransition = (input: {
                     next: Option.some(
                         DurableMailboxState.make({
                             ...current,
-                            waiting: current.waiting.filter(({ sequence }) => sequence > upToSequence),
+                            waiting: Arr.filter(current.waiting, ({ sequence }) => sequence > upToSequence),
                             deliveries: started.slot,
                         }),
                     ),
@@ -235,7 +237,7 @@ export const makeMailboxProcessingBackendFromDurableObjectStorage = Effect.gen(f
     const storage = yield* MailboxStorage;
 
     const claimLost = (claim: { readonly mailboxKey: string; readonly claimId: string }) =>
-        new MailboxProcessingClaimLost({ mailboxKey: claim.mailboxKey, claimId: claim.claimId });
+        MailboxProcessingClaimLost.make({ mailboxKey: claim.mailboxKey, claimId: claim.claimId });
 
     /**
      * A change to a claimed batch. A mailbox that is not the claim's own is a lost claim. `message` is
@@ -331,7 +333,7 @@ export const makeMailboxProcessingBackendFromDurableObjectStorage = Effect.gen(f
                         ClaimNotOwned: () => Effect.fail(claimLost(input)),
                         PreparationMismatch: ({ batchId }) =>
                             Effect.fail(
-                                new DeliveryPreparationConflict({
+                                DeliveryPreparationConflict.make({
                                     deliveryId: formatDeliveryId({
                                         mailboxKey: input.mailboxKey,
                                         batchId,

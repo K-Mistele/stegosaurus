@@ -29,7 +29,7 @@ export const MAX_PASSES_PER_ALARM = 20;
  * Build the alarm handler over the current Durable Object's storage. Each alarm runs the
  * `MailboxProcessing` it is given while it runs.
  */
-export const makeMailboxAlarmHandler = (options: MailboxAlarmHandlerOptions) =>
+export const mailboxAlarmHandler = (options: MailboxAlarmHandlerOptions) =>
     Effect.gen(function* () {
         const storage = yield* MailboxStorage;
 
