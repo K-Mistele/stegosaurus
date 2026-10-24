@@ -59,7 +59,7 @@ export const Stack = Alchemy.Stack(
                 privateKey: Config.succeed(privateKey),
               },
               policy: {
-                repos: ["K-Mistele/everything"],
+                repos: ["K-Mistele/stegosaurus"],
               },
             })).url.as<string>(),
           }
