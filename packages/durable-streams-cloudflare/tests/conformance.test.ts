@@ -11,15 +11,18 @@ import * as Cloudflare from '@alchemy.run/cloudflare';
 import * as Test from 'alchemy/Test/Vitest';
 import { Effect, String as Str } from 'effect';
 import Stack from '../alchemy.run';
+import { destroyWithStorage } from './local-storage';
 
 // its own stage, so its local state is its own
-const { beforeAll, beforeEach, deploy } = Test.make({
+const { beforeAll, afterAll, beforeEach, deploy, destroy } = Test.make({
     providers: Cloudflare.providers(),
     dev: true,
     stage: `${Test.defaultStage()}-conformance`,
 });
 
 const stack = beforeAll(deploy(Stack));
+
+afterAll(destroyWithStorage(stack, destroy(Stack)));
 
 // vite.config.ts gives the Worker the same 2s long-poll timeout
 const config = { baseUrl: '', longPollTimeoutMs: 2_000 };
