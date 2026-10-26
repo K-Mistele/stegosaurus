@@ -34,7 +34,7 @@ pnpm alchemy:destroy   # alchemy destroy
 - `vp run` caches results. Pass `--no-cache` to force a run.
 - Built-in `vp check` does not type check (lint `typeCheck` is off). Use `pnpm check`.
 - Bun must be on PATH: `pnpm test` runs packages/alchemy-test under Bun, and `typed:check` and `test:stack` use Bun.
-- `test:stack`, `alchemy:dev`, and `alchemy:deploy` read `GH_APP_ID` and `GH_APP_PRIVATE_KEY` from Infisical (see Secrets).
+- `test:stack`, `alchemy:dev`, and `alchemy:deploy` read `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `STEGOSAURUS_GITHUB_WEBHOOK_SECRET` and `STEGOSAURUS_OPENAI_API_KEY` from Infisical (see Secrets).
 - `pnpm alchemy:deploy` deploys stage `prod`. Deploy a personal stage with `pnpm exec alchemy deploy` (defaults to `live_$USER`).
 - The pre-commit hook runs `vp staged`, which runs `vp check --fix` on staged files.
 - Opt-in tests: fold-cli's real-terminal TUI tests run only with `FOLD_TUI_TERMINAL_TEST=1` and never when `CI` is set (`vp run @stegosaurus/fold-cli#test:tui`, needs Bun), and fold-agent's live Codex tests only with `FOLD_CODEX_LIVE=1`.
@@ -59,8 +59,8 @@ pnpm alchemy:destroy   # alchemy destroy
 
 ## Layout
 
-- `alchemy.run.ts` - the one alchemy stack: Secrets Store copies of the GitHub App secrets in every stage, plus the pkg registry Worker in `prod`. State lives on Cloudflare.
-- `apps/` - apps. Empty for now.
+- `alchemy.run.ts` - the one alchemy stack: Secrets Store copies of the GitHub App secrets and the agent in every stage, plus the pkg registry Worker in `prod`. State lives on Cloudflare.
+- `apps/agent` - the GitHub coding agent (`@stegosaurus/agent`), from channels' `examples/alchemy-cloudflare`: an Ingress Worker (webhooks, delivery, session Durable Objects) and a Computer Worker (`@cloudflare/computer` workspaces with a container, from the K-Mistele/computer fork). The root stack yields it in every stage, under the `Agent` namespace. Prod serves `agent.stegosaurus.tech`.
 - `packages/durable-streams-*` - Durable Streams server, from github.com/K-Mistele/durable-object-durable-streams: `protocol` (wire schemas), `server` (protocol engine), `cloudflare` (Workers + Durable Objects host, with its own local-state stack in `alchemy.run.ts`), and empty `cluster` and `client` stubs.
 - `packages/channels-*` - Channels, copied from github.com/humanlayer/channels at 9b74803 (MIT, `LICENSE` in each package): `delivery` (mailbox delivery engine and `DeliveryHttpApi`; every other package depends on it), the `github`, `linear` and `slack` providers, `redis` and `sql` backends, and `alchemy-cloudflare` (Durable Object mailbox host). The `sql` and `redis` suites in `test-backends/` need Postgres and Redis, so `pnpm test` skips them; run `pnpm test:backends`.
 - `scripts/` - root scripts. `test-backends.ts` starts the channels backend containers and runs their suites.

@@ -1,0 +1,8 @@
+{
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "lib": ["es2024", "WebWorker"],
+        "types": ["node", "@cloudflare/workers-types"]
+    },
+    "include": ["src", "test", "vite.config.ts"]
+}

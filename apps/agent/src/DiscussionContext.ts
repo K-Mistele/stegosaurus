@@ -1,0 +1,224 @@
+/**
+ * What the agent is shown of its GitHub discussion before each request. The first request shows the issue or
+ * pull request and everything said on it; later ones show only what is new since the agent's last turn. GitHub
+ * IDs only grow, so "new" means an ID above the highest one the agent has been shown.
+ */
+import {
+    GitHubId,
+    type GitHubApi,
+    type GitHubApiError,
+    type GitHubIssue,
+    type GitHubIssueCommentRecord,
+    type GitHubParticipant,
+    type GitHubPullRequest,
+    type GitHubReview,
+    type GitHubReviewCommentRecord,
+} from '@stegosaurus/channels-github';
+import { Array as Arr, Effect, Match, Option, Order, Predicate, Schema, String as Str } from 'effect';
+
+/** Longest comment body shown in full. */
+const MAX_BODY_LENGTH = 4_000;
+
+/** Most text shown at once; the oldest comments are left out past this. */
+const MAX_CONTEXT_LENGTH = 60_000;
+
+/** A comment the request is made of; it is shown as the request, so it is not repeated as context. */
+export const RequestComment = Schema.TaggedUnion({
+    Comment: { id: GitHubId },
+    ReviewComment: { id: GitHubId },
+});
+
+export type RequestComment = typeof RequestComment.Type;
+
+/** The highest comment, review, and line comment IDs the agent has been shown. */
+export const DiscussionSeen = Schema.Struct({
+    comment: Schema.Int,
+    review: Schema.Int,
+    reviewComment: Schema.Int,
+});
+
+export type DiscussionSeen = typeof DiscussionSeen.Type;
+
+/** What the agent is shown, and the IDs it has seen once it has been shown it. */
+export interface DiscussionContext {
+    readonly text: string;
+    readonly seen: DiscussionSeen;
+}
+
+interface Entry {
+    readonly id: number;
+    readonly text: string;
+}
+
+const author = (participant: GitHubParticipant | null) =>
+    participant === null ? 'a deleted user' : `@${participant.login}`;
+
+const clip = (body: string) =>
+    body.length <= MAX_BODY_LENGTH
+        ? body
+        : `${Str.slice(0, MAX_BODY_LENGTH)(body)}\n[Cut off at ${MAX_BODY_LENGTH} of ${body.length} characters.]`;
+
+const commentEntry = (comment: GitHubIssueCommentRecord): Entry => ({
+    id: comment.ref.id,
+    text: `${author(comment.author)} commented (comment ${comment.ref.id}):\n${clip(comment.body)}`,
+});
+
+const reviewEntry = (review: GitHubReview): Entry => ({
+    id: review.ref.id,
+    text: `${author(review.author)} reviewed (${Str.replace('_', ' ')(review.state)})${review.body !== null && review.body.length > 0 ? `:\n${clip(review.body)}` : '.'}`,
+});
+
+const reviewCommentEntry = (comment: GitHubReviewCommentRecord): Entry => {
+    const line = comment.line ?? comment.startLine;
+    const where = line === null || line === undefined ? comment.path : `${comment.path}:${line}`;
+    const thread = comment.inReplyToId ?? comment.ref.id;
+
+    return {
+        id: comment.ref.id,
+        text: `${author(comment.author)} commented on ${where} (line comment ${comment.ref.id}, thread ${thread}):\n${clip(comment.body)}`,
+    };
+};
+
+const highest = (ids: ReadonlyArray<number>, floor: number) => Math.max(floor, ...ids);
+
+/** Entries by ID, lowest first. */
+const byId = Order.mapInput(Order.Number, (entry: Entry) => entry.id);
+
+/** The section's entries newer than `after`, oldest first. */
+const newer = (entries: ReadonlyArray<Entry>, after: number) =>
+    Arr.sort(
+        Arr.filter(entries, (entry) => entry.id > after),
+        byId,
+    );
+
+/** The newest entries whose text fits in `budget` characters, oldest first, and how many were left out. */
+const newestThatFit = (entries: ReadonlyArray<Entry>, budget: number) => {
+    const totals = Arr.scan(Arr.reverse(entries), 0, (used, entry) => used + entry.text.length).slice(1);
+
+    const count = Option.getOrElse(
+        Arr.findFirstIndex(totals, (used) => used > budget),
+        () => entries.length,
+    );
+
+    return { kept: entries.slice(entries.length - count), omitted: entries.length - count };
+};
+
+/**
+ * The heading, then each section that has entries. A section past its share of {@link MAX_CONTEXT_LENGTH}
+ * keeps its newest entries, with a note of how many older ones were left out.
+ */
+const render = (heading: string, sections: ReadonlyArray<readonly [string, ReadonlyArray<Entry>]>) => {
+    const filled = Arr.filter(sections, ([, entries]) => Arr.isReadonlyArrayNonEmpty(entries));
+    const budget = MAX_CONTEXT_LENGTH / Math.max(filled.length, 1);
+
+    return Arr.join(
+        [
+            heading,
+            ...Arr.map(filled, ([title, entries]) => {
+                const { kept, omitted } = newestThatFit(entries, budget);
+
+                const note =
+                    omitted === 0 ? [] : [`[${omitted} older entries left out. Use the GitHub tools to read them.]`];
+
+                return Arr.join([title, ...note, ...Arr.map(kept, (entry) => entry.text)], '\n\n');
+            }),
+        ],
+        '\n\n',
+    );
+};
+
+/**
+ * Read the discussion and show the agent what it has not seen: everything when `seen` is empty, otherwise
+ * what is new. The bot's own comments and the request's comments are left out of the text but count as
+ * seen. The text is empty when nothing is new.
+ */
+export const readDiscussionContext = Effect.fn('agent_session.read_discussion')(function* (input: {
+    readonly discussion: GitHubIssue | GitHubPullRequest;
+    readonly seen: Option.Option<DiscussionSeen>;
+    readonly botUserId: number;
+    readonly requestComments: ReadonlyArray<RequestComment>;
+}) {
+    const { discussion, botUserId, requestComments } = input;
+
+    const seen = Option.getOrElse(input.seen, (): DiscussionSeen => ({
+        comment: 0,
+        review: 0,
+        reviewComment: 0,
+    }));
+
+    const first = Option.isNone(input.seen);
+    const notBot = (participant: GitHubParticipant | null) => participant?.id !== botUserId;
+
+    const isMention = (tag: RequestComment['_tag'], id: number) =>
+        Arr.some(requestComments, (comment) => Predicate.isTagged(comment, tag) && comment.id === id);
+
+    const allComments = yield* discussion.listComments();
+
+    const comments = Arr.filter(
+        allComments,
+        (comment) => notBot(comment.author) && !isMention('Comment', comment.ref.id),
+    );
+
+    const pullRequestActivity = yield* Match.value(discussion).pipe(
+        Match.tagsExhaustive({
+            GitHubIssue: () => Effect.succeed({ reviews: [], reviewComments: [] }),
+            GitHubPullRequest: (pullRequest) =>
+                Effect.all({
+                    reviews: pullRequest.listReviews(),
+                    reviewComments: pullRequest.listReviewComments(),
+                }),
+        }),
+    );
+
+    const reviews = Arr.filter(pullRequestActivity.reviews, (review) => notBot(review.author));
+
+    const reviewComments = Arr.filter(
+        pullRequestActivity.reviewComments,
+        (comment) => notBot(comment.author) && !isMention('ReviewComment', comment.ref.id),
+    );
+
+    const sections = [
+        ['Comments:', newer(Arr.map(comments, commentEntry), seen.comment)],
+        ['Reviews:', newer(Arr.map(reviews, reviewEntry), seen.review)],
+        ['Line comments:', newer(Arr.map(reviewComments, reviewCommentEntry), seen.reviewComment)],
+    ] as const;
+
+    const nextSeen: DiscussionSeen = {
+        comment: highest(
+            Arr.map(allComments, (comment) => comment.ref.id),
+            seen.comment,
+        ),
+        review: highest(
+            Arr.map(pullRequestActivity.reviews, (review) => review.ref.id),
+            seen.review,
+        ),
+        reviewComment: highest(
+            Arr.map(pullRequestActivity.reviewComments, (comment) => comment.ref.id),
+            seen.reviewComment,
+        ),
+    };
+
+    if (first) {
+        const { kind, info } = yield* Match.value(discussion).pipe(
+            Match.tagsExhaustive({
+                GitHubIssue: (issue) => Effect.map(issue.fetchInfo(), (info) => ({ kind: 'Issue', info })),
+                GitHubPullRequest: (pullRequest) =>
+                    Effect.map(pullRequest.fetchInfo(), (info) => ({ kind: 'Pull request', info })),
+            }),
+        );
+
+        const heading = `${kind} #${info.ref.number} "${info.title}" (${info.state}), opened by ${author(info.author)}:\n${clip(info.body ?? '(no description)')}`;
+
+        return {
+            text: `<github-discussion>\n${render(heading, sections)}\n</github-discussion>\n\n`,
+            seen: nextSeen,
+        } satisfies DiscussionContext;
+    }
+
+    if (Arr.every(sections, ([, entries]) => Arr.isReadonlyArrayEmpty(entries))) return { text: '', seen: nextSeen };
+
+    return {
+        text: `<github-discussion>\n${render('New since your last turn:', sections)}\n</github-discussion>\n\n`,
+        seen: nextSeen,
+    } satisfies DiscussionContext;
+}) satisfies (...args: ReadonlyArray<never>) => Effect.Effect<DiscussionContext, GitHubApiError, GitHubApi>;

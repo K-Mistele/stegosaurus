@@ -9,6 +9,9 @@ catalog:
     '@alchemy.run/cloudflare': 2.0.0-beta.84
     '@alchemy.run/infisical': 2.0.0-beta.84
     '@alchemy.run/pkg': 2.0.0-beta.84
+    # K-Mistele/computer, the fork with the filesystem patches. Pin computerd in apps/agent's Dockerfile to the same commit.
+    '@cloudflare/computer': https://github.com/K-Mistele/computer/releases/download/fold-fb24f898cb46/cloudflare-computer-0.7.0.tgz
+    '@cloudflare/workers-types': 5.20261022.1
     '@durable-streams/cli': 0.2.7
     '@durable-streams/server-conformance-tests': 0.3.7
     '@effect/platform-bun': 4.0.6
@@ -40,6 +43,7 @@ catalog:
     emulate: 0.11.2
     eslint-plugin-better-tailwindcss: 4.10.0
     fast-glob: 3.3.3
+    just-bash: 3.6.0
     mdast-util-from-markdown: 2.1.0
     mdast-util-gfm: 3.1.0
     micromark-extension-gfm: 3.0.0
@@ -70,6 +74,8 @@ peerDependencyRules:
         bun-ffi-structs>typescript: '*'
 allowBuilds:
     workerd: true
+    '@mongodb-js/zstd': false
+    node-liblzma: false
 minimumReleaseAgeExclude:
     - '@voidzero-dev/vite-plus-core@1.4.0'
     - '@voidzero-dev/vite-plus-darwin-arm64@1.4.0'

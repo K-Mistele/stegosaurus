@@ -32,6 +32,7 @@
         "@alchemy.run/infisical": "catalog:",
         "@alchemy.run/pkg": "catalog:",
         "@effect/platform-node": "catalog:",
+        "@stegosaurus/agent": "workspace:*",
         "alchemy": "catalog:",
         "effect": "catalog:"
     },
