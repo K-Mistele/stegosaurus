@@ -1,7 +1,7 @@
 import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
 import { expect, it } from '@effect/vitest';
 import { Array as Arr, Predicate, Effect, Layer, Option, Schema } from 'effect';
-import { Tool, Toolkit } from 'effect/ai';
+import { Tool } from 'effect/ai';
 import type { LanguageModel } from 'effect/ai';
 
 import {
@@ -30,7 +30,7 @@ import {
 } from '../../src/index';
 import { layerDeterministicRuntime } from '../TestLayers/DeterministicRuntime';
 import { makeScriptedLanguageModel, textTurn, type ScriptedRequest } from '../TestLayers/ScriptedLanguageModel';
-import { layerEchoTool, makeEchoRecorder } from '../TestLayers/TestTools';
+import { erasedHandler, erasedToolkit, layerEchoTool, makeEchoRecorder } from '../TestLayers/TestTools';
 import { collectEntries } from '../ToolRuntime/ToolRuntimeTestHelpers';
 import { agentId, agentRuntimeBaseLayer, runInput, startInput, testModel } from './AgentRuntimeTestHelpers';
 
@@ -158,13 +158,13 @@ const ApplyPatchTool = Tool.make('apply_patch', {
     failureMode: 'return',
 });
 
-const FamilyToolkit = Toolkit.make(WriteTool, EditTool, ApplyPatchTool);
+const FamilyToolkit = erasedToolkit(WriteTool, EditTool, ApplyPatchTool);
 
 const familyToolkitLayer = FamilyToolkit.toLayer(
     FamilyToolkit.of({
-        write: () => Effect.succeed('ok'),
-        edit: () => Effect.succeed('ok'),
-        apply_patch: () => Effect.succeed('ok'),
+        write: erasedHandler(WriteTool.parametersSchema, () => Effect.succeed('ok')),
+        edit: erasedHandler(EditTool.parametersSchema, () => Effect.succeed('ok')),
+        apply_patch: erasedHandler(ApplyPatchTool.parametersSchema, () => Effect.succeed('ok')),
     }),
 );
 

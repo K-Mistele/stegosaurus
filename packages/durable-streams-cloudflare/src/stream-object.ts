@@ -131,7 +131,6 @@ export const StreamObjectLive = StreamObject.make(
         const scope = yield* Cloudflare.DurableObjectScope;
         // SAFETY: DurableObjectScope is this class's own namespace, so its objects have this
         // class's methods; alchemy types it without them, and its Git Durable Object casts it the same way.
-        // oxlint-disable-next-line automation/no-type-assertion, typescript/no-unsafe-type-assertion -- see SAFETY
         const objects = scope as Cloudflare.DurableObject<EncodedStreamOperations>;
 
         // alchemy's Durable Object form: this Effect runs once per isolate and returns the one

@@ -4,8 +4,7 @@
  * Session composition root lowers a descriptor to a LanguageModel context when it builds or switches a
  * runtime, so no client or provider layer wiring appears in caller code (D15's provisioning seam).
  */
-import { Data, Redacted } from 'effect';
-import type { Effect, Scope } from 'effect';
+import { Context, Data, Effect, Redacted, Scope } from 'effect';
 import type { LanguageModel } from 'effect/ai';
 import type { HttpClient } from 'effect/http';
 
@@ -47,6 +46,17 @@ export type FoldModel<R = never> = {
      */
     readonly make: Effect.Effect<LanguageModel.LanguageModel, never, Scope.Scope | R>;
 };
+
+/**
+ * Give a model the host services it needs, so a session can hold it as a `FoldModel` that needs only a
+ * Scope. They override any of the same services where the model is later built.
+ */
+export const bindModelServices = <R>(model: FoldModel<R>, services: Context.Context<R>): FoldModel => ({
+    ...model,
+    make: model.make.pipe(
+        Effect.updateContext((context: Context.Context<Scope.Scope>) => Context.merge(context, services)),
+    ),
+});
 
 const redact = (apiKey: string | Redacted.Redacted): Redacted.Redacted =>
     Redacted.isRedacted(apiKey) ? apiKey : Redacted.make(apiKey);
@@ -142,8 +152,6 @@ export type CustomModelOptions<R = never> = {
 export const customModel = <R = never>(options: CustomModelOptions<R>): FoldModel<Exclude<R, Scope.Scope>> => ({
     activeModel: options.activeModel,
     provider: FoldModelProvider.custom(),
-    // SAFETY: `Scope | R` and `Scope | Exclude<R, Scope>` are the same set of services; TypeScript cannot
-    // see that for a generic R.
-    // oxlint-disable-next-line typescript/consistent-type-assertions, automation/no-type-assertion, effecttsgo/unsafe-effect-type-assertion
-    make: options.make as Effect.Effect<LanguageModel.LanguageModel, never, Scope.Scope | Exclude<R, Scope.Scope>>,
+    // Inference puts `Scope` in `R` when `make` needs only a Scope; run it in the runtime's own scope to drop it.
+    make: Effect.flatMap(Effect.scope, (scope) => options.make.pipe(Scope.provide(scope))),
 });

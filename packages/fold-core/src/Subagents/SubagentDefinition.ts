@@ -10,7 +10,7 @@ import type { Effect, Scope } from 'effect';
  */
 import type { SystemPromptInput } from '../Api/AgentDefinition';
 import type { FoldModel } from '../Api/ModelDescriptor';
-import { toolsNeedingAll, type FoldTool, type FoldToolServices } from '../Api/ToolDefinition';
+import { type FoldTool, type FoldToolServices, type ToolsNeedingAll } from '../Api/ToolDefinition';
 import type { HookConfig } from '../HookRunner/Types';
 import type { ProfileRole } from '../Session/Profiles';
 
@@ -57,7 +57,7 @@ export type SubagentDefinition<R = never> = {
 /** {@link SubagentDefinition} as written by a caller: its tools keep their own types. */
 export type SubagentDefinitionInput<T extends FoldTool<unknown>, RM> = Omit<SubagentDefinition, 'tools' | 'model'> & {
     readonly model: SubagentModelBinding<RM>;
-    readonly tools?: ReadonlyArray<T>;
+    readonly tools?: ToolsNeedingAll<T>;
 };
 
 /** The host services a model binding needs; a profile role needs none of its own. */
@@ -79,18 +79,10 @@ export type SubagentDefinitionServices<D> = D extends {
  */
 export const defineSubagent = <T extends FoldTool<unknown> = FoldTool, RM = never>(
     definition: SubagentDefinitionInput<T, RM>,
-): SubagentDefinition<FoldToolServices<T> | RM> => {
-    const { tools, ...rest } = definition;
+): SubagentDefinition<FoldToolServices<T> | RM> => definition;
 
-    return tools === undefined ? rest : { ...rest, tools: toolsNeedingAll(tools) };
-};
-
-/** View a list of subagent definitions as definitions needing the union of their services. */
-export const subagentsNeedingAll = <D extends SubagentDefinition<unknown>>(
-    definitions: ReadonlyArray<D>,
-): ReadonlyArray<SubagentDefinition<SubagentDefinitionServices<D>>> =>
-    // SAFETY: each element is a SubagentDefinition<R> whose R is one member of SubagentDefinitionServices<D>,
-    // and SubagentDefinition is covariant in R. TypeScript cannot see through the conditional type for a
-    // generic D.
-    // oxlint-disable-next-line typescript/consistent-type-assertions, automation/no-type-assertion
-    definitions as ReadonlyArray<SubagentDefinition<SubagentDefinitionServices<D>>>;
+/**
+ * A subagent roster, each definition also checked as one needing the union of the roster's services (see
+ * {@link ToolsNeedingAll}).
+ */
+export type SubagentsNeedingAll<D> = ReadonlyArray<D & SubagentDefinition<SubagentDefinitionServices<D>>>;

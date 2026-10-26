@@ -112,7 +112,7 @@ type OriginatingConfig = Data.TaggedEnum<{ entry: { readonly entry: RegisteredAg
 const OriginatingConfig = Data.taggedEnum<OriginatingConfig>();
 
 type AgentConfigurationSnapshot = {
-    readonly model: FoldModel<unknown>;
+    readonly model: FoldModel;
     readonly promptCacheKey: string | null;
     readonly tools: ReadonlyArray<FoldTool<unknown>>;
     readonly hooks: HookConfig;
@@ -130,7 +130,7 @@ type LaunchSubagentParams = {
     readonly toolCallId: ToolCallId;
     readonly mode: AgentLaunchMode;
     readonly fork: AgentFork | null;
-    readonly model: FoldModel<unknown>;
+    readonly model: FoldModel;
     readonly promptCacheKey: string | null;
     readonly tools: ReadonlyArray<RealizedFoldTool>;
     readonly hooks: HookConfig;
@@ -245,9 +245,7 @@ const collectEntries: Effect.Effect<ReadonlyArray<LogEntry>, never, EventLog> = 
 );
 
 /** Resolve one registry entry's model binding: a role name reads the current profiles map. */
-const resolveModelBinding = (
-    binding: SubagentModelBinding<unknown>,
-): Effect.Effect<FoldModel<unknown>, never, Profiles> =>
+const resolveModelBinding = (binding: SubagentModelBinding): Effect.Effect<FoldModel, never, Profiles> =>
     isProfileRole(binding) ? Profiles.use((profiles) => profiles.resolve(binding)) : Effect.succeed(binding);
 
 /** Atomically claim a subagent id in the session registry; already-running means Busy. */

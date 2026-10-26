@@ -94,6 +94,14 @@ export const overrides = [
         },
     },
     {
+        // alchemy types `DurableObjectScope` as `DurableObject<unknown>`, so reaching this class's own methods takes a cast.
+        files: ['packages/durable-streams-cloudflare/src/stream-object.ts'],
+        rules: {
+            'automation/no-type-assertion': 'off',
+            'typescript/no-unsafe-type-assertion': 'off',
+        },
+    },
+    {
         // Effect types `HttpRouter.asHttpEffect()` with an `unknown` error; the router renders its own error responses.
         files: ['packages/channels-delivery/src/Channels.ts'],
         rules: {

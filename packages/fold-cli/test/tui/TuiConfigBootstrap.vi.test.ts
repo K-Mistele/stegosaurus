@@ -71,10 +71,12 @@ it.effect('does not rewrite an old commented config while virtual provider rows 
 it.effect('surfaces bootstrap failure while canonical virtual rows remain available', () =>
     Effect.gen(function* () {
         const base = memoryFileSystem({});
-        const fs = { ...base, writeFileString: () => Effect.die(new Error('fixture write failure')) };
+        const fs: FileSystem.FileSystem = {
+            ...base,
+            writeFileString: () => Effect.die(new Error('fixture write failure')),
+        };
         const result = yield* bootstrapTuiConfig({ foldHome: '/blocked' }).pipe(
-            // oxlint-disable-next-line typescript/consistent-type-assertions
-            Effect.provideService(FileSystem.FileSystem, fs as FileSystem.FileSystem),
+            Effect.provideService(FileSystem.FileSystem, fs),
             Effect.provide(Path.layer),
         );
 

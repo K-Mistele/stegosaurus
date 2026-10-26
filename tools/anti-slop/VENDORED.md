@@ -17,3 +17,4 @@ Tests run with `vp test` (Vitest globals); upstream runs each test file with `ts
 - `tsconfig.json` sets `allowImportingTsExtensions`: the root tsconfig doesn't, and upstream source imports `./x.ts`.
 - `package.json` has a `typecheck` script so `pnpm typecheck` covers this package; it runs `tsrs`, like every package.
 - `no-manual-tagged-construction` skips `_tag: Schema.tag…(...)` fields (`Schema.tag`, `Schema.tagDefaultOmit`): they declare a schema's tag field, not a hand-built value.
+- `no-disabled-type-assertion-rules` is ours: it reports inline `oxlint-disable`/`eslint-disable` comments that turn off a type-assertion rule, and disable comments that name no rule. Put a real exception in a file override instead.

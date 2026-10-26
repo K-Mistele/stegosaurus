@@ -104,6 +104,7 @@ Ask before turning off any other rule.
 - `effecttsgo/missing-pipeable-signature`: demands Effect-style data-last overloads on every exported multi-argument function.
 - `effecttsgo/unstable-api-usage` and `effecttsgo/api-stability-leak`: we build on Effect APIs marked unstable (`effect/http`, `@effect/vitest`, alchemy).
 - `automation/no-single-use-private-functions`: demands inlining every helper with one caller, even ones named to keep a long function readable.
+- `typescript/consistent-return`: flags Effect's `if (bad) return yield* Err.make(...)` followed by an implicit void return.
 - `vitest/no-standalone-expect` in `*.test.ts`: `@effect/vitest` and alchemy's harness call `expect` inside Effects.
 - `effecttsgo/strict-effect-provide` in test files and `test/` directories: each test is its own entry point, and a fresh layer per test gives it isolated state.
 - `automation/no-reexport-only-modules` in the fold and channels packages' `src/index.ts`: they are the public entry points.
@@ -112,6 +113,7 @@ Ask before turning off any other rule.
 - `automation/no-ambient-nondeterminism` in channels-github's `GitHubAppSigner.ts`: RS256 signing needs Web Crypto, and Effect's `Crypto` has no RSA signing. The service is the seam tests replace.
 - `effecttsgo/node-builtin-import` in channels-github's and channels-linear's `test/fixtures.ts`: they sign test webhooks with `node:crypto` HMAC, an independent check on the packages' own HMAC.
 - `effecttsgo/any-unknown-in-error-context` in channels-delivery's `Channels.ts`: Effect types `HttpRouter.asHttpEffect()` with an `unknown` error. Narrowing it means changing `start`'s signature or turning the router's 4xx responses into 500s.
+- `automation/no-type-assertion` and `typescript/no-unsafe-type-assertion` in durable-streams-cloudflare's `stream-object.ts`: alchemy types `DurableObjectScope` as `DurableObject<unknown>`, so the object casts it to its own methods. Fixing it means patching alchemy.
 - `automation/no-service-option` in test files: test fakes check whether a service was provided.
 - `vitest/valid-expect` allows a second argument (`maxArgs: 2`): Vitest takes a failure message there.
 - Built-ins set to `off` in `tooling/lint/builtin.ts` (`require-yield`, `no-shadow`, and others): kept from the TypeOnce policy; see `tools/automation/POLICY.md`.

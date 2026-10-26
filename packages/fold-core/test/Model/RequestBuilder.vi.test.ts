@@ -480,9 +480,8 @@ it.effect('fails with PromptDecodeError carrying the source seq for undecodable 
             ProjectedMessage['user-message']({
                 sourceSeq: 7,
                 messageId,
-                // Intentionally invalid encoded payload: this test exercises the decode-failure path.
-                // oxlint-disable-next-line typescript/consistent-type-assertions, automation/no-banned-type-assertions, automation/no-type-assertion, anti-slop/require-safety-comment-for-type-assertion -- intentionally invalid payload to test the decode-failure path
-                message: { role: 'user', content: 42 } as never,
+                // Well typed, but NaN is not JSON, so decoding the message fails.
+                message: { role: 'user', content: [{ type: 'text', text: 'hi', options: { probe: Number.NaN } }] },
             }),
         ];
 

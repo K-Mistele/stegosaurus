@@ -19,7 +19,7 @@ import { shortAgentId } from './AgentIdRef';
 import type { SubagentBusyError, SubagentNotFoundError, SubagentTypeNotInRosterError } from './Errors';
 import type { ForkAgentDefinition } from './ForkAgentDefinition';
 import { parseSubagentCommand, type SubagentResult } from './Schemas';
-import { subagentsNeedingAll, type SubagentDefinition, type SubagentDefinitionServices } from './SubagentDefinition';
+import type { SubagentDefinition, SubagentDefinitionServices, SubagentsNeedingAll } from './SubagentDefinition';
 import { dispatchSubagent, forkSubagent, resumeSubagent } from './SubagentEngine';
 
 /** Runtime capabilities attached to a model-visible delegation tool. */
@@ -145,7 +145,7 @@ const rosterDescriptionSuffix = (agents: ReadonlyArray<SubagentDefinition<unknow
  * agents sharing one roster should share one value.
  */
 export const subagentTool = <D extends SubagentDefinition<unknown>, RF = never>(
-    agents: ReadonlyArray<D>,
+    agents: SubagentsNeedingAll<D>,
     options: { readonly forkAgent?: ForkAgentDefinition<RF> } | undefined,
 ): FoldTool<SubagentDefinitionServices<D> | RF> => {
     const allowedAgents = Arr.map(agents, (agent) => agent.name);
@@ -212,10 +212,8 @@ export const subagentTool = <D extends SubagentDefinition<unknown>, RF = never>(
             }),
     });
 
-    const roster = subagentsNeedingAll(agents);
-
     const capabilities: SubagentToolCapabilities<SubagentDefinitionServices<D> | RF> =
-        options?.forkAgent === undefined ? { agents: roster } : { agents: roster, forkAgent: options.forkAgent };
+        options?.forkAgent === undefined ? { agents } : { agents, forkAgent: options.forkAgent };
 
     return withSubagentCapabilities(tool, capabilities);
 };

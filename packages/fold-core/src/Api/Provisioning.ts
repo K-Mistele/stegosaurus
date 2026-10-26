@@ -17,7 +17,6 @@
 import { Array as Arr, Context, Effect, Layer, Record as Rec } from 'effect';
 import type { Scope } from 'effect';
 import { LanguageModel, Toolkit } from 'effect/ai';
-import type { Tool } from 'effect/ai';
 
 import { liveAgentRuntimeLayer } from '../AgentRuntime/AgentRuntimeLayer';
 import { AgentRuntime } from '../AgentRuntime/AgentRuntimeService';
@@ -29,6 +28,7 @@ import { liveToolRuntimeLayer } from '../ToolRuntime/ToolRuntimeLayer';
 import { toolsetLayerFromToolkit } from '../ToolRuntime/ToolsetFactory';
 import { layerToolsetResolver } from '../ToolRuntime/ToolsetResolverLayer';
 import type { FoldModel } from './ModelDescriptor';
+import type { AnyTool, Toolset } from '../ToolRuntime/ToolsetService';
 import type { RealizedFoldTool, FoldTool } from './ToolDefinition';
 
 /** The LanguageModel layer for a model: its `make`, run in the layer's scope. */
@@ -38,10 +38,10 @@ export const languageModelLayerFor = <R>(
     Layer.effect(LanguageModel.LanguageModel, model.make);
 
 /** Assemble realized tool descriptors into the installed Toolset layer for one provisioned runtime. */
-export const toolsetLayerFor = (tools: ReadonlyArray<RealizedFoldTool>) => {
+export const toolsetLayerFor = (tools: ReadonlyArray<RealizedFoldTool>): Layer.Layer<Toolset> => {
     const toolkit = Toolkit.make(...Arr.map(tools, (foldTool) => foldTool.tool));
 
-    const handlers: Toolkit.HandlersFrom<Record<string, Tool.Any>> = Rec.fromEntries(
+    const handlers: Toolkit.HandlersFrom<Record<string, AnyTool>> = Rec.fromEntries(
         Arr.map(tools, (foldTool) => [foldTool.name, foldTool.handler] as const),
     );
 
@@ -60,7 +60,8 @@ export const validateToolNames = (tools: ReadonlyArray<FoldTool<unknown>>): Effe
 
 /** One agent's runtime configuration: which provider to talk to, with which tools and hooks. */
 export type ProvisionAgentRuntimeInput = {
-    readonly model: FoldModel<unknown>;
+    /** Bound to the session's host services when it entered the session ({@link bindHostServices}). */
+    readonly model: FoldModel;
     /**
      * The tools installed for this agent, already realized (session-initialized values resolved to
      * their contributions); the family resolver picks the advertised subset per turn.
@@ -84,12 +85,7 @@ export const provisionAgentRuntime = Effect.fnUntraced(function* (input: Provisi
     // Tool handlers run with the context their toolkit was built in (Effect AI merges it under each call's
     // per-call services), so building here gives every handler the session's and the host's services.
     const toolsetLayer = toolsetLayerFor(input.tools);
-    // SAFETY: every model reaching a session came through Session.open, switchModel, or
-    // setProfile, whose types require the model's services to be among the session's host services - and
-    // the host services are part of the surroundings this runs in.
-    // oxlint-disable-next-line typescript/consistent-type-assertions, automation/no-type-assertion
-    const model = input.model as FoldModel;
-    const languageModelLayer = languageModelLayerFor(model);
+    const languageModelLayer = languageModelLayerFor(input.model);
 
     const epochServicesLayer = Layer.mergeAll(
         toolsetLayer,

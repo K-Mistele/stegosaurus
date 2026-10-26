@@ -30,7 +30,7 @@ ses_f9d2kg5np8xm3qw7vc1t4yah
 import { makeBrandedId, type BrandedIdOf } from '@stegosaurus/effect-branded-id';
 
 // Create a branded ID schema
-const UserId = makeBrandedId('usr');
+const UserId = makeBrandedId('usr', { brand: 'UserId' });
 type UserId = BrandedIdOf<typeof UserId>;
 
 // Generate new IDs
@@ -57,10 +57,10 @@ Schema.decodeUnknownSync(UserId)('invalid');
 Different ID types are incompatible at compile time:
 
 ```typescript
-const UserId = makeBrandedId('usr');
+const UserId = makeBrandedId('usr', { brand: 'UserId' });
 type UserId = BrandedIdOf<typeof UserId>;
 
-const OrderId = makeBrandedId('ord');
+const OrderId = makeBrandedId('ord', { brand: 'OrderId' });
 type OrderId = BrandedIdOf<typeof OrderId>;
 
 function getUser(id: UserId) {
@@ -76,7 +76,7 @@ getUser(orderId); // Type error: OrderId is not assignable to UserId
 
 ## API
 
-### `makeBrandedId(prefix, options?)`
+### `makeBrandedId(prefix, options)`
 
 Creates a branded ID schema with factory methods.
 
@@ -85,7 +85,7 @@ Creates a branded ID schema with factory methods.
 | Name            | Type     | Description                                                                                                                         |
 | --------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `prefix`        | `string` | The prefix for generated IDs (e.g., `"usr"`, `"ord"`, `"ses"`). Must be 1-63 lowercase letters/underscores, starting with a letter. |
-| `options.brand` | `string` | Optional custom brand name. Defaults to PascalCase of prefix + "Id" (e.g., `"usr"` → `"UsrId"`).                                    |
+| `options.brand` | `string` | The brand name for the ID type (e.g., `"UserId"`). It becomes the TypeScript brand and appears in error messages.                   |
 
 **Returns:** A branded ID schema with the following properties and methods:
 
@@ -104,34 +104,22 @@ The schema also supports all standard Effect Schema operations like `decodeUnkno
 Type helper to extract the branded ID type from a schema:
 
 ```typescript
-const UserId = makeBrandedId('usr');
+const UserId = makeBrandedId('usr', { brand: 'UserId' });
 type UserId = BrandedIdOf<typeof UserId>;
-// => string & Brand<"UsrId">
+// => string & Brand<"UserId">
 ```
 
 ## Examples
 
 ### Multi-word Prefixes
 
-Underscores in prefixes are converted to PascalCase for the brand:
+Prefixes may contain underscores:
 
 ```typescript
-const UserAccountId = makeBrandedId('user_account');
-// brand: "UserAccountId"
-// prefix: "user_account"
+const UserAccountId = makeBrandedId('user_account', { brand: 'UserAccountId' });
 
 const id = UserAccountId.create();
 // => "user_account_m7k2hx9qp3wn1jc8vb4t6rae"
-```
-
-### Custom Brand Names
-
-Override the auto-generated brand name:
-
-```typescript
-const Id = makeBrandedId('cst', { brand: 'CustomerId' });
-// brand: "CustomerId"
-// prefix: "cst"
 ```
 
 ### Validation with Effect
@@ -139,7 +127,7 @@ const Id = makeBrandedId('cst', { brand: 'CustomerId' });
 ```typescript
 import { Effect, Schema } from 'effect';
 
-const UserId = makeBrandedId('usr');
+const UserId = makeBrandedId('usr', { brand: 'UserId' });
 
 // Sync validation
 try {
@@ -162,10 +150,10 @@ const program = Effect.gen(function* () {
 import { makeBrandedId, type BrandedIdOf } from '@stegosaurus/effect-branded-id';
 import { Schema } from 'effect';
 
-const UserId = makeBrandedId('usr');
+const UserId = makeBrandedId('usr', { brand: 'UserId' });
 type UserId = BrandedIdOf<typeof UserId>;
 
-const PostId = makeBrandedId('pst');
+const PostId = makeBrandedId('pst', { brand: 'PostId' });
 type PostId = BrandedIdOf<typeof PostId>;
 
 const Post = Schema.Struct({
@@ -187,7 +175,7 @@ const newPost = {
 ### Type Guards in Conditionals
 
 ```typescript
-const UserId = makeBrandedId('usr');
+const UserId = makeBrandedId('usr', { brand: 'UserId' });
 
 function processId(id: string) {
     if (UserId.is(id)) {
