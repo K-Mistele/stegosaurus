@@ -1,0 +1,33 @@
+{
+    "name": "@stegosaurus/channels-slack",
+    "version": "0.0.0",
+    "description": "Channels Slack provider: Events API, Web API client, files, threads and stream chunks.",
+    "files": [
+        "src"
+    ],
+    "type": "module",
+    "sideEffects": false,
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "scripts": {
+        "typecheck": "tsrs",
+        "test": "vp test",
+        "smoke:live": "bun --env-file=../../.env run scripts/slack-api-live-smoke.ts"
+    },
+    "dependencies": {
+        "@stegosaurus/channels-delivery": "workspace:*"
+    },
+    "devDependencies": {
+        "@effect/platform-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@emulators/core": "catalog:",
+        "@emulators/slack": "catalog:",
+        "effect": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:"
+    },
+    "peerDependencies": {
+        "effect": "catalog:"
+    }
+}

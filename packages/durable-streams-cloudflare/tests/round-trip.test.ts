@@ -1,20 +1,23 @@
 import { expect } from 'alchemy-test';
-import * as Cloudflare from 'alchemy/Cloudflare';
+import * as Cloudflare from '@alchemy.run/cloudflare';
 import * as Test from 'alchemy/Test/Alchemy';
 import { Arbitrary, Array as Arr, Clock, Duration, Effect, Option, Random, Schema, String as Str } from 'effect';
 import { Base64 } from 'effect/encoding';
 import * as HttpBody from 'effect/http/HttpBody';
 import * as HttpClient from 'effect/http/HttpClient';
 import Stack from '../alchemy.run';
+import { destroyWithStorage } from './local-storage';
 
 // its own stage, so its local state is its own
-const { test, beforeAll, deploy } = Test.make({
+const { test, beforeAll, afterAll, deploy, destroy } = Test.make({
     providers: Cloudflare.providers(),
     dev: true,
     stage: `${Test.defaultStage()}-round-trip`,
 });
 
 const stack = beforeAll(deploy(Stack));
+
+afterAll(destroyWithStorage(stack, destroy(Stack)));
 
 // a new path per call, since local Durable Object storage outlives the test
 const streamUrlFor = (name: string) =>

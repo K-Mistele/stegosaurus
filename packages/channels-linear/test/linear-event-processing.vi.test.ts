@@ -1,0 +1,83 @@
+import { describe, it } from '@effect/vitest';
+import {
+    ProviderEventHandled,
+    ProviderEventIgnored,
+    ProviderEventInvalid,
+} from '@stegosaurus/channels-delivery/ProviderEventProcessing';
+import {
+    MailboxSubscriptionCreatedResult,
+    MailboxSubscriptions,
+} from '@stegosaurus/channels-delivery/MailboxSubscriptions';
+import { DeliveryAdmission } from '@stegosaurus/channels-delivery/MailboxDelivery';
+import { Effect, Layer } from 'effect';
+import { vi } from 'vite-plus/test';
+
+import { LinearApi } from '../src/LinearApi';
+import type { LinearCallbackHandler } from '../src/LinearCallbacks';
+import { makeLinearEventProcessor } from '../src/LinearEventProcessor';
+import { firstAttempt, linearIssueCreateAdmission } from './fixtures';
+
+const namespace = 'linear-processing-test';
+
+const processor = <E, R>(handler: LinearCallbackHandler<'onIssueCreated', E, R> | null) =>
+    makeLinearEventProcessor({
+        namespace,
+        handlers: handler === null ? {} : { onIssueCreated: handler },
+    });
+
+const services = Layer.mergeAll(
+    Layer.mock(LinearApi, {}),
+    Layer.mock(MailboxSubscriptions, {
+        subscribe: () => Effect.succeed(MailboxSubscriptionCreatedResult.make({})),
+        isSubscribed: () => Effect.succeed(false),
+        unsubscribe: () => Effect.void,
+    }),
+);
+
+describe('Linear event processing', () => {
+    it.effect('decodes stored payloads and dispatches onIssueCreated', ({ expect }) =>
+        Effect.gen(function* () {
+            const admission = linearIssueCreateAdmission(namespace);
+            const callback = vi.fn<LinearCallbackHandler<'onIssueCreated'>>(() => Effect.void);
+
+            const result = yield* processor(callback)
+                .process([admission], yield* firstAttempt())
+                .pipe(Effect.provide(services));
+
+            expect(result).toEqual(ProviderEventHandled.make({}));
+            expect(callback).toHaveBeenCalledOnce();
+            const event = callback.mock.calls[0]?.[0];
+            expect(event?.issue.ref.issueId).toBe('b33fb278-fbe0-45e4-b4eb-94b0839f51b9');
+            expect(event?.issue.mailboxKey).toContain('linear:v1:issue:');
+        }),
+    );
+
+    it.effect('returns an explicit ignore when the callback is absent', ({ expect }) =>
+        Effect.gen(function* () {
+            const admission = linearIssueCreateAdmission(namespace);
+
+            const result = yield* processor<never, never>(null)
+                .process([admission], yield* firstAttempt())
+                .pipe(Effect.provide(services));
+
+            expect(result).toEqual(ProviderEventIgnored.make({ reason: 'callback_not_configured' }));
+        }),
+    );
+
+    it.effect('rejects mailbox and payload identity disagreement', ({ expect }) =>
+        Effect.gen(function* () {
+            const admission = linearIssueCreateAdmission(namespace);
+
+            const mismatched = DeliveryAdmission.make({
+                ...admission,
+                installationId: 'another-workspace',
+            });
+
+            const error = yield* processor<never, never>(null)
+                .process([mismatched], yield* firstAttempt())
+                .pipe(Effect.provide(services), Effect.flip);
+
+            expect(error).toEqual(ProviderEventInvalid.make({ provider: 'linear', reason: 'identity_mismatch' }));
+        }),
+    );
+});

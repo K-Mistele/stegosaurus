@@ -15,7 +15,7 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsc",
+    "typecheck": "tsrs",
     "test": "bun ./bin/alchemy-test.ts --exclude test/DevCli.test.ts --exclude test/Tags.test.ts --exclude test/forwardSignals.test.ts && bun test ./test/DevCli.test.ts ./test/Tags.test.ts ./test/forwardSignals.test.ts"
   },
   "dependencies": {

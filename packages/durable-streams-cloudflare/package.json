@@ -10,11 +10,12 @@
         "./*": "./src/*.ts"
     },
     "scripts": {
-        "typecheck": "tsc",
+        "typecheck": "tsrs",
         "test": "DURABLE_STREAMS_LONG_POLL_TIMEOUT='2 seconds' alchemy-test tests/round-trip.test.ts tests/reads.test.ts tests/forks.test.ts tests/expiry.test.ts",
         "test:conformance": "vp test --testTimeout 15000 tests/conformance.test.ts"
     },
     "dependencies": {
+        "@alchemy.run/cloudflare": "catalog:",
         "@effect/sql-sqlite-do": "catalog:",
         "@stegosaurus/durable-streams-protocol": "workspace:*",
         "@stegosaurus/durable-streams-server": "workspace:*",

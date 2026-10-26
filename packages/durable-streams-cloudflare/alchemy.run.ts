@@ -1,5 +1,5 @@
 import * as Alchemy from 'alchemy';
-import * as Cloudflare from 'alchemy/Cloudflare';
+import * as Cloudflare from '@alchemy.run/cloudflare';
 import { Effect } from 'effect';
 import DurableStreamsWorker from './src/worker';
 
@@ -9,6 +9,6 @@ export default Alchemy.Stack(
     Effect.gen(function* () {
         const worker = yield* DurableStreamsWorker;
 
-        return { url: worker.url };
+        return { url: worker.url, workerName: worker.workerName };
     }),
 );

@@ -1,0 +1,11 @@
+# Delivery
+
+`@stegosaurus/channels-delivery` is the core of [Channels](https://github.com/humanlayer/effect-channels#readme). It saves provider webhooks into mailboxes, runs your callbacks in order with retries, and lets a callback hand its delivery to a remote worker that finishes it over the delivery API.
+
+```sh
+npm install @stegosaurus/channels-delivery effect
+```
+
+It includes `Channels.make`, the delivery modes, in-memory storage for tests (`ChannelsMemory.make`), the delivery API routes, and `DeliveryHttpClient.make` for remote workers. Add a provider ([Slack](https://www.npmjs.com/package/@stegosaurus/channels-slack), [GitHub](https://www.npmjs.com/package/@stegosaurus/channels-github), [Linear](https://www.npmjs.com/package/@stegosaurus/channels-linear)) and a store ([Postgres](https://www.npmjs.com/package/@stegosaurus/channels-sql), [Redis](https://www.npmjs.com/package/@stegosaurus/channels-redis), [Cloudflare](https://www.npmjs.com/package/@stegosaurus/channels-alchemy-cloudflare)).
+
+See the [main README](https://github.com/humanlayer/effect-channels#readme) for a full walkthrough.

@@ -12,7 +12,7 @@ pnpm ready         # check, then test
 pnpm format        # oxfmt, writes files
 pnpm lint          # oxlint with type-aware rules; does not type check
 pnpm lint:fix
-pnpm typecheck     # tsc at the root, then `vp run -r typecheck`: every package's `typecheck` script, 4 at a time
+pnpm typecheck     # tsrs at the root, then `vp run -r typecheck`: every package's `typecheck` script, 4 at a time
 pnpm typed:check   # typed-lint: TypeScript-API rules from typed-lint.config.json (Bun)
 pnpm test          # `vp run -r test`: every package's `test` script
 pnpm build:packages  # build the fold packages' publishable dist/ (Bun); preview-packages runs it before pkg pack
@@ -51,6 +51,8 @@ pnpm test:conformance  # Durable Streams conformance suite against the Worker in
 - `alchemy.run.ts` - the one alchemy stack: Secrets Store copies of the GitHub App secrets in every stage, plus the pkg registry Worker in `prod`. State lives on Cloudflare.
 - `apps/` - apps. Empty for now.
 - `packages/durable-streams-*` - Durable Streams server, from github.com/K-Mistele/durable-object-durable-streams: `protocol` (wire schemas), `server` (protocol engine), `cloudflare` (Workers + Durable Objects host, with its own local-state stack in `alchemy.run.ts`), and empty `cluster` and `client` stubs.
+- `packages/channels-*` - Channels, copied from github.com/humanlayer/channels at 9b74803 (MIT, `LICENSE` in each package): `delivery` (mailbox delivery engine and `DeliveryHttpApi`; every other package depends on it), the `github`, `linear` and `slack` providers, `redis` and `sql` backends, and `alchemy-cloudflare` (Durable Object mailbox host). The `sql` and `redis` suites in `test-backends/` need Postgres and Redis, so `pnpm test` skips them; run `pnpm test:backends`.
+- `scripts/` - root scripts. `test-backends.ts` starts the channels backend containers and runs their suites.
 - `patches/` - pnpm patches, listed under `patchedDependencies` in `pnpm-workspace.yaml`. Edit one with `pnpm patch <pkg>@<version>`, then `pnpm patch-commit <dir>`. The conformance-suite patch lets its SSE tests accept `data: ` (upstream PR #285).
 - `packages/alchemy-test` - vendored copy of alchemy's test harness. Runs on Bun. See its `VENDORED.md`.
 - `packages/effect-ai-{anthropic,openai,openai-compat}` - vendored Effect AI providers with fold's fixes. Each `UPSTREAM.md` lists the source and local changes. Their `typecheck` also writes `.d.ts` files to `dist/`, which consumers type against, so `vp run -r` must build them first.
@@ -73,9 +75,10 @@ pnpm test:conformance  # Durable Streams conformance suite against the Worker in
 - Lint treats every `@effect/tsgo` diagnostic and every anti-slop and automation rule as an error. Fix the code; don't disable the rule.
 - use the `effect-program-design` skill when working on effect code for best practices; when in doubt (or if it conflicts with rules), ask the user
 - Put per-package lint overrides in `tooling/lint/overrides.ts`, not in a package's `vite.config.ts`.
+- Typecheck runs tsrs (oxc's Rust port of the TypeScript 7 compiler), not `tsc`: same errors and `.d.ts` output, about 3x faster with less than half the memory. It reads the same tsconfigs and takes `tsc`'s flags (`tsrs -p <dir>`). The `typescript` package stays for the editor and for effect-tsgo. Effect diagnostics run only in lint, so tsrs loses none.
 - `pnpm install` runs `prepare`, which patches TypeScript (`effect-tsgo patch --oxlint`). Lint needs that patch.
 - fmt and lint skip `packages/alchemy-test`, `packages/effect-ai-*`, `tools/anti-slop`, `tools/automation`, and `tools/typed-lint` (`tooling/ignores.ts`). Typecheck skips any package without a `typecheck` script; `alchemy-test` and `anti-slop` have one. Lint alone also skips `packages/fold-cli`, `packages/fold-tui-theme` and `packages/fold` (an install script that runs before any dependency exists). `typed:check` skips `effect-ai-*`, `fold-cli` and `fold-tui-theme` too (`typed-lint.config.json`).
-- A new app or package needs a `tsconfig.json` (extend `../../tsconfig.json`) and a `"typecheck": "tsc"` script to get type checked, and a `test` script to run under `pnpm test`.
+- A new app or package needs a `tsconfig.json` (extend `../../tsconfig.json`) and a `"typecheck": "tsrs"` script to get type checked, and a `test` script to run under `pnpm test`.
 - Keep `packages/alchemy-test` close to upstream and log any local change in its `VENDORED.md`.
 - `tools/anti-slop`, `tools/automation`, and `tools/typed-lint` are ours to change; edit rules in place and note the change in the tool's `VENDORED.md`.
-- some lint rules are intentionally turned off; always ask the user before turning a rule off or adding an exclusion.
+
