@@ -19,6 +19,21 @@ const isSchemaTagField = (property: ESTree.ObjectProperty): boolean =>
 	property.value.callee.property.type === "Identifier" &&
 	property.value.callee.property.name.startsWith("tag");
 
+// `PlatformError.systemError({ _tag: "NotFound", ... })` is Effect's constructor for a SystemError: its
+// options name the error's kind with `_tag`, and nothing else takes the kind.
+const isSystemErrorOptions = (node: ESTree.ObjectExpression): boolean => {
+	const parent = node.parent;
+	return (
+		parent?.type === "CallExpression" &&
+		parent.arguments[0] === node &&
+		parent.callee.type === "MemberExpression" &&
+		parent.callee.object.type === "Identifier" &&
+		parent.callee.object.name === "PlatformError" &&
+		parent.callee.property.type === "Identifier" &&
+		parent.callee.property.name === "systemError"
+	);
+};
+
 export const noManualTaggedConstructionRule = defineRule({
 	meta: {
 		type: "problem",
@@ -41,7 +56,11 @@ export const noManualTaggedConstructionRule = defineRule({
 						property.type === "Property" &&
 						propertyName(property) === "_tag",
 				);
-				if (tag !== undefined && !(tag.type === "Property" && isSchemaTagField(tag))) {
+				if (
+					tag !== undefined &&
+					!(tag.type === "Property" && isSchemaTagField(tag)) &&
+					!isSystemErrorOptions(node)
+				) {
 					context.report({ node: tag, messageId: "manualConstruction" });
 				}
 			},
