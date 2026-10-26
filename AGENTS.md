@@ -13,7 +13,7 @@ pnpm format        # oxfmt, writes files
 pnpm format:check  # oxfmt, no writes (CI)
 pnpm lint          # oxlint with type-aware rules; does not type check
 pnpm lint:fix
-pnpm typecheck     # tsrs at the root, then `vp run -r typecheck`: every package's `typecheck` script, 4 at a time
+pnpm typecheck     # `vp run -r typecheck` (every package's `typecheck` script, 4 at a time), then tsrs at the root
 pnpm typed:check   # typed-lint: TypeScript-API rules from typed-lint.config.json (Bun)
 pnpm test          # `vp run -r test`: every package's `test` script
 pnpm build:packages  # build the fold packages' publishable dist/ (Bun); preview-packages runs it before pkg pack
