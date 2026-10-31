@@ -11,7 +11,7 @@ import type { HookConfig } from '../HookRunner/Types';
 import type { ModelFamily } from '../Model/ModelFamily';
 import type { StopConditionConfig } from '../StopConditions/StopConditions';
 import type { FoldModel } from './ModelDescriptor';
-import { toolsNeedingAll, type FoldTool, type FoldToolServices } from './ToolDefinition';
+import { type FoldTool, type FoldToolServices, type ToolsNeedingAll } from './ToolDefinition';
 
 /** A leading system prompt as a host writes it: one block or an ordered set of blocks. */
 export type SystemPromptInput = string | ReadonlyArray<string>;
@@ -68,7 +68,7 @@ export type AgentDefinition<R = never> = {
 /** {@link AgentDefinition} as written by a caller: its tools keep their own types. */
 export type AgentDefinitionInput<T extends FoldTool<unknown>, RM> = Omit<AgentDefinition, 'tools' | 'model'> & {
     readonly model: FoldModel<RM>;
-    readonly tools?: ReadonlyArray<T>;
+    readonly tools?: ToolsNeedingAll<T>;
 };
 
 /**
@@ -77,8 +77,4 @@ export type AgentDefinitionInput<T extends FoldTool<unknown>, RM> = Omit<AgentDe
  */
 export const defineAgent = <T extends FoldTool<unknown> = FoldTool, RM = never>(
     definition: AgentDefinitionInput<T, RM>,
-): AgentDefinition<FoldToolServices<T> | RM> => {
-    const { tools, ...rest } = definition;
-
-    return tools === undefined ? rest : { ...rest, tools: toolsNeedingAll(tools) };
-};
+): AgentDefinition<FoldToolServices<T> | RM> => definition;

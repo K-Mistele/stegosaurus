@@ -24,19 +24,17 @@ const toolStartupFailureOutput = (name: string, reason: string): ToolHandlerOutp
     preliminary: false,
 });
 
-/** Build the Toolset layer that exposes one concrete Effect AI Toolkit to ToolRuntime. */
-export const toolsetLayerFromToolkit = <Tools extends Record<string, Tool.Any>>(
-    toolkit: Toolkit.Toolkit<Tools>,
-): Layer.Layer<Toolset, never, Tool.HandlersFor<Tools>> =>
+/**
+ * Build the Toolset layer that exposes one Effect AI Toolkit to ToolRuntime. The toolkit is over erased
+ * {@link AnyTool}s, so it can dispatch the model-supplied tool names it gets at runtime.
+ */
+export const toolsetLayerFromToolkit = (
+    toolkit: Toolkit.Toolkit<Record<string, AnyTool>>,
+): Layer.Layer<Toolset, never, Tool.HandlersFor<Record<string, AnyTool>>> =>
     Layer.effect(
         Toolset,
         Effect.gen(function* () {
-            // SAFETY: Toolkit's `handle` is typed for statically-known tool names, but this seam
-            // dispatches model-supplied names at runtime (guarded by `names.includes` below). TypeScript
-            // cannot express dynamic dispatch over a heterogeneous toolkit; the library erases internally
-            // for the same reason (Toolkit.ts: `handle: handle as any`). The one sanctioned assertion.
-            // oxlint-disable-next-line typescript/consistent-type-assertions, automation/no-type-assertion, automation/no-banned-type-assertions, anti-slop/no-chained-type-assertions
-            const withHandlers = (yield* toolkit) as unknown as Toolkit.WithHandler<Record<string, AnyTool>>;
+            const withHandlers = yield* toolkit;
             const names: ReadonlyArray<string> = Rec.keys(toolkit.tools);
 
             return {

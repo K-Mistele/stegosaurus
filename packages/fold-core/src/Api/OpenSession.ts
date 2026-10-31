@@ -50,6 +50,7 @@ import { liveModelRequestSettingsLayer } from '../Model/ModelRequestSettings';
 import { runtimeForAgent } from '../Projection/Projection';
 import { AgentNotRunningError } from '../Session/Errors';
 import {
+    bindProfileServices,
     isProfileRole,
     layerProfiles,
     profileModelFor,
@@ -80,7 +81,7 @@ import { continueSubagent, type ContinueSubagentInput } from '../Subagents/Subag
 import { layerSystemPrompt } from '../SystemPrompt/SystemPromptLayer';
 import { SystemPrompt, type SystemPromptService } from '../SystemPrompt/SystemPromptService';
 import { systemPromptBlocks, type AgentDefinition, type SystemPromptInput } from './AgentDefinition';
-import type { FoldModel } from './ModelDescriptor';
+import { bindModelServices, type FoldModel } from './ModelDescriptor';
 import { provisionAgentRuntime, validateToolNames } from './Provisioning';
 import type { RealizedFoldTool, SessionToolContribution, FoldTool } from './ToolDefinition';
 
@@ -236,21 +237,6 @@ type SessionAgentConfig<R> = {
     readonly tools: ReadonlyArray<FoldTool<R>>;
 };
 
-/**
- * Run a tool's handler with the session's host services over whatever is in scope where the turn runs.
- * Effect AI merges the turn's services over the toolkit's, so a host whose request handling carries its
- * own FileSystem (Alchemy's Worker runtime provides Node's) would otherwise shadow the session's.
- */
-const withHostServices = <R>(
-    contribution: SessionToolContribution,
-    hostServices: Context.Context<R>,
-): SessionToolContribution => ({
-    ...contribution,
-    handler: (params) =>
-        // oxlint-disable-next-line effecttsgo/any-unknown-in-error-context -- the stored handler is erased by design
-        contribution.handler(params).pipe(Effect.updateContext((context) => Context.merge(context, hostServices))),
-});
-
 const activeModelsEquivalent = Schema.toEquivalence(Schema.NullOr(ActiveModel));
 
 const promptBlocksEquivalent = Schema.toEquivalence(Schema.Array(Schema.String));
@@ -258,6 +244,8 @@ const promptBlocksEquivalent = Schema.toEquivalence(Schema.Array(Schema.String))
 /** The assembled service graph shared by initialization and adoption. */
 type SessionGraph<R> = {
     readonly agent: AgentDefinition<R>;
+    /** The host services taken from `Session.open`'s caller; models entering the session are bound to them. */
+    readonly hostServices: Context.Context<R>;
     readonly session: SessionService;
     readonly eventLog: EventLogService;
     readonly ids: IdsService;
@@ -314,7 +302,7 @@ const assembleSessionGraph = <R>(options: {
         // definitions recursively, flattening them into the session's registries (§1a).
         const agentDefinitions = yield* collectAgentDefinitions(rootTools);
         const subagentDefinitions = agentDefinitions.subagents;
-        const registry = agentRegistryFromDefinitions(agentDefinitions);
+        const registry = agentRegistryFromDefinitions(agentDefinitions, hostServices);
 
         // Profiles slice: every role-bound registry entry must resolve against the INITIAL bindings
         // (`orchestrator` -> `smart` fallback counts, D25), so an uncovered role is a configuration
@@ -350,36 +338,9 @@ const assembleSessionGraph = <R>(options: {
             discard: true,
         });
 
-        // Run each distinct tool value's init exactly once per session (for ordinary tools that is a
-        // constant; for the skill tool it is the roster scan): the contribution - realized tool,
-        // leading-prompt block, skill source - is reused by every agent listing that value, across
-        // epochs, and by every subagent dispatch (D20's one-snapshot law).
-        // Tool inits may acquire services (a tool's own layer); they live as long as the session, including
-        // tools first introduced by a later agent switch.
         const sessionScope = yield* Effect.scope;
+        // Filled below, once the session's services exist: each tool's contribution, by tool value.
         const toolContributions = new Map<FoldTool<unknown>, SessionToolContribution>();
-
-        const ensureToolContributions = (tools: ReadonlyArray<FoldTool<R>>): Effect.Effect<void> =>
-            Effect.forEach(
-                Arr.filter(tools, (tool) => !toolContributions.has(tool)),
-                (tool) =>
-                    tool.init.pipe(
-                        Effect.provideContext(hostServices),
-                        Scope.provide(sessionScope),
-                        Effect.map((contribution) =>
-                            toolContributions.set(tool, withHostServices(contribution, hostServices)),
-                        ),
-                    ),
-                { discard: true },
-            );
-
-        yield* ensureToolContributions(rootTools);
-        yield* Effect.forEach(subagentDefinitions, (definition) => ensureToolContributions(definition.tools ?? []), {
-            discard: true,
-        });
-        yield* Effect.forEach(agentDefinitions.forkAgents, (definition) => ensureToolContributions(definition.tools), {
-            discard: true,
-        });
 
         /** Realize one agent's configured tools against the session-start contributions (§2.5). */
         const realizeAgentTools = (tools: ReadonlyArray<FoldTool<unknown>>): RealizedAgentTools => {
@@ -428,7 +389,7 @@ const assembleSessionGraph = <R>(options: {
 
         const currentRootAgent: Effect.Effect<RootAgentSnapshot> = Ref.get(configRef).pipe(
             Effect.map((config) => ({
-                model: config.model,
+                model: bindModelServices(config.model, hostServices),
                 promptCacheKey: config.promptCacheKey,
                 tools: config.tools,
                 hooks: rootHooks,
@@ -467,7 +428,7 @@ const assembleSessionGraph = <R>(options: {
             layerSessionControls(options.steering === undefined ? {} : { steeringMode: options.steering }),
             // Session-wide role->model bindings (profiles slice): one mutable map shared by the facade's
             // setProfile and the subagent operations' per-dispatch/resume resolution.
-            layerProfiles(initialProfiles),
+            layerProfiles(bindProfileServices(initialProfiles, hostServices)),
         );
 
         // Builds use session-fresh memo maps, never the ambient CurrentMemoMap: layers are memoized by
@@ -482,6 +443,32 @@ const assembleSessionGraph = <R>(options: {
 
         const sessionServicesLayer = Layer.succeedContext(sessionServices);
 
+        // Run each distinct tool value's init exactly once per session (for ordinary tools that is a
+        // constant; for the skill tool it is the roster scan): the contribution - realized tool,
+        // leading-prompt block, skill source - is reused by every agent listing that value, across
+        // epochs, and by every subagent dispatch (D20's one-snapshot law). Inits run inside the session's
+        // services, which their handlers keep. Tool inits may acquire services (a tool's own layer); they live
+        // as long as the session, including tools first introduced by a later agent switch.
+        const ensureToolContributions = (tools: ReadonlyArray<FoldTool<R>>): Effect.Effect<void> =>
+            Effect.forEach(
+                Arr.filter(tools, (tool) => !toolContributions.has(tool)),
+                (tool) =>
+                    tool.init.pipe(
+                        Effect.provideContext(sessionServices),
+                        Scope.provide(sessionScope),
+                        Effect.map((contribution) => toolContributions.set(tool, contribution)),
+                    ),
+                { discard: true },
+            );
+
+        yield* ensureToolContributions(rootTools);
+        yield* Effect.forEach(subagentDefinitions, (definition) => ensureToolContributions(definition.tools ?? []), {
+            discard: true,
+        });
+        yield* Effect.forEach(agentDefinitions.forkAgents, (definition) => ensureToolContributions(definition.tools), {
+            discard: true,
+        });
+
         // Provision one runtime slice per epoch: the installed Toolset, its family resolver, the root's
         // HookRunner, the ToolRuntime executing against it, and the AgentRuntime bound to the model's
         // provider (Provisioning.ts owns the fresh-memo-map and ambient-scope invariants). The delegating
@@ -494,10 +481,11 @@ const assembleSessionGraph = <R>(options: {
             model: FoldModel<R>,
             tools: ReadonlyArray<FoldTool<R>>,
         ): Effect.Effect<AgentRuntimeService> =>
-            provisionAgentRuntime({ model, tools: realizeAgentTools(tools).tools, hooks: rootHooks }).pipe(
-                Scope.provide(sessionScope),
-                Effect.provideContext(sessionServices),
-            );
+            provisionAgentRuntime({
+                model: bindModelServices(model, hostServices),
+                tools: realizeAgentTools(tools).tools,
+                hooks: rootHooks,
+            }).pipe(Scope.provide(sessionScope), Effect.provideContext(sessionServices));
 
         const runtimeRef = yield* Ref.make(yield* provisionRootRuntime(agent.model, rootTools));
 
@@ -518,6 +506,7 @@ const assembleSessionGraph = <R>(options: {
 
         return {
             agent,
+            hostServices,
             session: Context.get(sessionContext, Session),
             eventLog: Context.get(sessionServices, EventLog),
             ids: Context.get(sessionServices, Ids),
@@ -902,7 +891,7 @@ const makeSessionHandle = <R>(graph: SessionGraph<R>, identity: StartedSession):
                 }
 
                 graph.extendSubagentRegistry(introduced);
-                yield* profiles.replace(candidateProfiles);
+                yield* profiles.replace(bindProfileServices(candidateProfiles, graph.hostServices));
                 yield* Ref.set(configRef, next);
             }),
         );
@@ -912,7 +901,8 @@ const makeSessionHandle = <R>(graph: SessionGraph<R>, identity: StartedSession):
 
     // Deliberately un-gated (unlike switchModel): role bindings are read at dispatch/resume time, so a
     // racing dispatch coherently gets the old or the new binding and nothing mid-run ever rebinds.
-    const setProfile = (role: ProfileRole, model: FoldModel<R>): Effect.Effect<void> => profiles.set(role, model);
+    const setProfile = (role: ProfileRole, model: FoldModel<R>): Effect.Effect<void> =>
+        profiles.set(role, bindModelServices(model, graph.hostServices));
 
     const setTitle: FoldSession['setTitle'] = (title, provenance) =>
         graph.eventLog

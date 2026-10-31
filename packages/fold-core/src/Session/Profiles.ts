@@ -10,7 +10,7 @@
  */
 import { Context, Effect, Layer, Match, Ref, Schema } from 'effect';
 
-import type { FoldModel } from '../Api/ModelDescriptor';
+import { bindModelServices, type FoldModel } from '../Api/ModelDescriptor';
 
 /** The roles a subagent's model binding may name: core's `ModelRole` minus `inherit` (D21/D25). */
 export const ProfileRole = Schema.Literals(['orchestrator', 'smart', 'fast']).annotate({
@@ -38,9 +38,22 @@ export type SessionProfiles<R = never> = {
 export const profileModelFor = <R>(profiles: SessionProfiles<R>, role: ProfileRole): FoldModel<R> | undefined =>
     role === 'orchestrator' ? (profiles.orchestrator ?? profiles.smart) : profiles[role];
 
+/** Bind every model in a profiles map to the host services (see {@link bindModelServices}). */
+export const bindProfileServices = <R>(profiles: SessionProfiles<R>, services: Context.Context<R>): SessionProfiles => {
+    const bound: { -readonly [Role in keyof SessionProfiles]: SessionProfiles[Role] } = {};
+
+    if (profiles.smart !== undefined) bound.smart = bindModelServices(profiles.smart, services);
+
+    if (profiles.fast !== undefined) bound.fast = bindModelServices(profiles.fast, services);
+
+    if (profiles.orchestrator !== undefined) bound.orchestrator = bindModelServices(profiles.orchestrator, services);
+
+    return bound;
+};
+
 /**
  * Session-wide mutable role->model bindings; role-bound agents resolve per dispatch/resume. Models are
- * held as `FoldModel<unknown>`: the session's public API only accepts models whose services it has.
+ * held bound to the session's host services ({@link bindProfileServices}).
  */
 export type ProfilesService = {
     /**
@@ -49,26 +62,26 @@ export type ProfilesService = {
      * against the initial bindings, and `set` can only add or replace bindings - so an unbound role
      * here is an engine invariant violation, never a caller error.
      */
-    readonly resolve: (role: ProfileRole) => Effect.Effect<FoldModel<unknown>>;
+    readonly resolve: (role: ProfileRole) => Effect.Effect<FoldModel>;
     /** Rebind one role; every subsequent dispatch/resume of a role-bound type sees the new model. */
-    readonly set: (role: ProfileRole, model: FoldModel<unknown>) => Effect.Effect<void>;
+    readonly set: (role: ProfileRole, model: FoldModel) => Effect.Effect<void>;
     /** Atomically replace the complete role map at a session configuration commit boundary. */
-    readonly replace: (profiles: SessionProfiles<unknown>) => Effect.Effect<void>;
+    readonly replace: (profiles: SessionProfiles) => Effect.Effect<void>;
     /** The current bindings, as plain data. */
-    readonly snapshot: Effect.Effect<SessionProfiles<unknown>>;
+    readonly snapshot: Effect.Effect<SessionProfiles>;
 };
 
 /** Profiles service tag; one instance per session, shared by the facade and the subagent operations. */
 export class Profiles extends Context.Service<Profiles, ProfilesService>()('@stegosaurus/fold-core/Session/Profiles') {}
 
 /** One session's profiles over the initial bindings from `Session.open`. */
-export const layerProfiles = (initial: SessionProfiles<unknown>): Layer.Layer<Profiles> =>
+export const layerProfiles = (initial: SessionProfiles): Layer.Layer<Profiles> =>
     Layer.effect(
         Profiles,
         Effect.gen(function* () {
-            const state = yield* Ref.make<SessionProfiles<unknown>>(initial);
+            const state = yield* Ref.make<SessionProfiles>(initial);
 
-            const resolve = (role: ProfileRole): Effect.Effect<FoldModel<unknown>> =>
+            const resolve = (role: ProfileRole): Effect.Effect<FoldModel> =>
                 Ref.get(state).pipe(
                     Effect.flatMap((profiles) => {
                         const model = profileModelFor(profiles, role);
@@ -83,7 +96,7 @@ export const layerProfiles = (initial: SessionProfiles<unknown>): Layer.Layer<Pr
                     }),
                 );
 
-            const set = (role: ProfileRole, model: FoldModel<unknown>): Effect.Effect<void> =>
+            const set = (role: ProfileRole, model: FoldModel): Effect.Effect<void> =>
                 Ref.update(state, (profiles) =>
                     Match.value(role).pipe(
                         Match.when('smart', () => ({ ...profiles, smart: model })),

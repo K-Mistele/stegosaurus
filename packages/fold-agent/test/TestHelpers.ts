@@ -10,13 +10,23 @@ import { dirname, normalize } from 'node:path';
 import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import {
+    AgentEvents,
+    agentRegistryFromDefinitions,
     AgentId,
     CurrentAgent,
     CurrentToolCall,
+    EventLog,
+    Ids,
     InterruptNote,
+    ModelRequestSettings,
+    Profiles,
+    SessionAgents,
+    SessionControls,
     StopController,
+    SystemPrompt,
     ToolCallId,
     ToolEvents,
+    ToolEventSink,
     ToolResultFailure,
     ToolResultSuccess,
     ToolState,
@@ -25,8 +35,10 @@ import {
 import {
     Array as Arr,
     ByteSize,
+    Context,
     Effect,
     FileSystem,
+    identity,
     Layer,
     Option,
     type Path,
@@ -109,6 +121,23 @@ export const makeAmbientServices: Effect.Effect<
     };
 });
 
+/** The session's own services a tool init runs inside; the built-in tools use none of them, so each dies if called. */
+const sessionServices = Layer.mergeAll(
+    Layer.mock(EventLog, {}),
+    Layer.mock(Ids, {}),
+    Layer.mock(AgentEvents, {}),
+    Layer.mock(ToolEventSink, {}),
+    Layer.mock(SystemPrompt, {}),
+    Layer.mock(ModelRequestSettings, { wrap: () => identity }),
+    Layer.mock(SessionControls, {}),
+    Layer.mock(Profiles, {}),
+    Layer.mock(SessionAgents, {
+        registry: agentRegistryFromDefinitions({ subagents: [], forkAgents: [] }, Context.empty()),
+        realizeTools: () => ({ tools: [], promptBlocks: [], skillSource: null }),
+        autoCompact: undefined,
+    }),
+);
+
 /** One realized tool call: it needs the per-call services plus the tool's own host services `R`. */
 type ToolCall<R> = Effect.Effect<
     ToolResultSuccess,
@@ -127,7 +156,7 @@ export const realizeTool = <R>(
     Effect.map(
         tool.init,
         (contribution) =>
-            (params): ToolCall<R> =>
+            (params: Tool.Parameters<Tool.Any>): ToolCall<R> =>
                 // oxlint-disable-next-line effecttsgo/any-unknown-in-error-context -- the erased handler is decoded here
                 contribution.handler(params).pipe(
                     Effect.catch((error) =>
@@ -140,7 +169,7 @@ export const realizeTool = <R>(
                         Schema.decodeUnknownEffect(ToolResultSuccess)(result).pipe(Effect.orDie),
                     ),
                 ),
-    );
+    ).pipe(Effect.provide(sessionServices));
 
 /** Call a tool through its init, the way the runtime does. */
 export const callTool = <R>(

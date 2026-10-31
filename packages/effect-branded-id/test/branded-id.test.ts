@@ -3,23 +3,23 @@ import { Effect, Exit, Schema, String as Str } from 'effect';
 
 import { makeBrandedId, type BrandedIdOf, isCuid } from '../src/index';
 
-const UserId = makeBrandedId('usr');
+const UserId = makeBrandedId('usr', { brand: 'UserId' });
 
 type UserId = BrandedIdOf<typeof UserId>;
 
-const OrderId = makeBrandedId('ord');
+const OrderId = makeBrandedId('ord', { brand: 'OrderId' });
 
 type OrderId = BrandedIdOf<typeof OrderId>;
 
 it('creates schema with correct brand', () => {
-    expect(UserId.brand).toBe('UsrId');
+    expect(UserId.brand).toBe('UserId');
     expect(UserId.prefix).toBe('usr');
 });
 
 it('handles multi-word prefixes', () => {
-    const UserAccountId = makeBrandedId('user_account');
-    expect(UserAccountId.brand).toBe('UserAccountId');
+    const UserAccountId = makeBrandedId('user_account', { brand: 'UserAccountId' });
     expect(UserAccountId.prefix).toBe('user_account');
+    expect(Str.startsWith('user_account_')(UserAccountId.create())).toBe(true);
 });
 
 it('accepts custom brand name', () => {
@@ -28,10 +28,10 @@ it('accepts custom brand name', () => {
 });
 
 it('throws on invalid prefix', () => {
-    expect(() => makeBrandedId('')).toThrow('Invalid prefix');
-    expect(() => makeBrandedId('123')).toThrow('Invalid prefix');
-    expect(() => makeBrandedId('UPPER')).toThrow('Invalid prefix');
-    expect(() => makeBrandedId('_starts_underscore')).toThrow('Invalid prefix');
+    expect(() => makeBrandedId('', { brand: 'BadId' })).toThrow('Invalid prefix');
+    expect(() => makeBrandedId('123', { brand: 'BadId' })).toThrow('Invalid prefix');
+    expect(() => makeBrandedId('UPPER', { brand: 'BadId' })).toThrow('Invalid prefix');
+    expect(() => makeBrandedId('_starts_underscore', { brand: 'BadId' })).toThrow('Invalid prefix');
 });
 
 it('generates valid IDs with prefix', () => {

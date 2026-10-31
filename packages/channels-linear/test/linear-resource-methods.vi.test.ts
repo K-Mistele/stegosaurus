@@ -2,6 +2,7 @@ import { describe, it } from '@effect/vitest';
 import { Effect, Layer, Queue, Array as Arr, Option } from 'effect';
 
 import { LinearApi } from '../src/LinearApi';
+import type { LinearApiOperations } from '../src/LinearApiContract';
 import {
     LinearAttachmentId,
     LinearCommentId,
@@ -70,8 +71,11 @@ describe('Linear resource methods', () => {
             const attachment = LinearIssueAttachment.make(attachmentRecord);
 
             const record =
-                <Input, A>(method: string, output: A) =>
-                (input: Input) =>
+                <Method extends keyof LinearApiOperations>(
+                    method: Method,
+                    output: Effect.Success<ReturnType<LinearApiOperations[Method]>>,
+                ) =>
+                (input: Parameters<LinearApiOperations[Method]>[0]) =>
                     Queue.offer(calls, { method, input }).pipe(Effect.as(output));
 
             const layer = Layer.mock(LinearApi, {

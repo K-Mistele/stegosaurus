@@ -1,5 +1,5 @@
 import { createId } from '@paralleldrive/cuid2';
-import { Array as Arr, type Brand, Option, pipe, Schema, String as Str } from 'effect';
+import { type Brand, Option, Schema, String as Str } from 'effect';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -82,6 +82,9 @@ export interface BrandedIdMethods<Name extends string> {
     readonly is: (input: string) => input is BrandedId<Name>;
 }
 
+/** A brand name `Schema.brand` accepts: one literal name, not a union or the whole of `string`. */
+type SingleBrandName<Name extends string> = Parameters<typeof Schema.brand<Name>>[0];
+
 /**
  * Options for creating a branded ID schema
  */
@@ -91,7 +94,7 @@ export interface BrandedIdOptions<Name extends string> {
      * This becomes the TypeScript brand and appears in error messages.
      * @example "UserId", "OrderId", "SessionId"
      */
-    readonly brand: Name;
+    readonly brand: SingleBrandName<Name>;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,29 +116,7 @@ export class BrandedIdError extends Schema.TaggedError<BrandedIdError, { readonl
 // Schema Factory
 // ---------------------------------------------------------------------------
 
-/**
- * Default brand name from prefix: "usr" -> "UsrId", "user_account" -> "UserAccountId"
- */
-type DefaultBrandName<Prefix extends string> = Prefix extends `${infer Head}_${infer Tail}`
-    ? `${Capitalize<Head>}${DefaultBrandName<Tail>}`
-    : `${Capitalize<Prefix>}Id`;
-
-/**
- * Runtime counterpart of {@link DefaultBrandName}. The overloads of {@link makeBrandedId} carry the
- * type-level derivation, so this stays a plain string function with no assertions.
- */
-const defaultBrandName = (prefix: string): string =>
-    `${pipe(
-        prefix,
-        Str.split('_'),
-        Arr.map((part) => `${Str.toUpperCase(part[0] ?? '')}${Str.slice(1)(part)}`),
-        Arr.join(''),
-    )}Id`;
-
 /** Build the branded schema plus static helpers for one (prefix, brand) pair. */
-/** A brand name `Schema.brand` accepts: one literal name, not a union or the whole of `string`. */
-type SingleBrandName<Name extends string> = Parameters<typeof Schema.brand<Name>>[0];
-
 const makeBrandedIdSchema = <const Name extends string>(prefix: string, brand: SingleBrandName<Name>) => {
     // Validation function that checks both prefix and CUID
     const isValid = (input: string): boolean => parseId(input, prefix) !== null;
@@ -190,7 +171,7 @@ export type BrandedIdSchema<Name extends string> = ReturnType<typeof makeBranded
  * @example
  * ```ts
  * // Create a schema for user IDs
- * const UserId = makeBrandedId("usr")
+ * const UserId = makeBrandedId("usr", { brand: "UserId" })
  * type UserId = BrandedIdOf<typeof UserId>
  *
  * // Generate a new ID
@@ -200,7 +181,7 @@ export type BrandedIdSchema<Name extends string> = ReturnType<typeof makeBranded
  * const parsed = Schema.decodeUnknownSync(UserId)("usr_ckopqwo2c0000ql08smxycfk")
  *
  * // Type safety: UserId cannot be used where OrderId is expected
- * const OrderId = makeBrandedId("ord")
+ * const OrderId = makeBrandedId("ord", { brand: "OrderId" })
  * type OrderId = BrandedIdOf<typeof OrderId>
  *
  * function getUser(id: UserId) { ... }
@@ -208,18 +189,13 @@ export type BrandedIdSchema<Name extends string> = ReturnType<typeof makeBranded
  * ```
  *
  * @param prefix - The prefix for generated IDs (e.g., "usr", "ord", "ses")
- * @param options - Optional configuration including custom brand name
+ * @param options - The brand name for the ID type
  * @returns A branded ID schema with create/make/is methods
  */
-export function makeBrandedId<const Prefix extends string, const Name extends string>(
-    prefix: Prefix,
-    options: BrandedIdOptions<Name>,
-): BrandedIdSchema<Name>;
-export function makeBrandedId<const Prefix extends string>(prefix: Prefix): BrandedIdSchema<DefaultBrandName<Prefix>>;
-export function makeBrandedId<const Name extends string>(
+export const makeBrandedId = <const Name extends string>(
     prefix: string,
-    ...[options]: [] | [BrandedIdOptions<Name>]
-): BrandedIdSchema<Name> {
+    options: BrandedIdOptions<Name>,
+): BrandedIdSchema<Name> => {
     // Validate prefix at schema creation time
     if (!isValidPrefix(prefix)) {
         throw new Error(
@@ -227,13 +203,8 @@ export function makeBrandedId<const Name extends string>(
         );
     }
 
-    // SAFETY: `Schema.brand` only labels the type and keeps no name at runtime. Each overload fixes `Name` to the
-    // one literal brand this computes: the given `brand`, or the name derived from the prefix.
-    // oxlint-disable-next-line typescript/consistent-type-assertions, automation/no-type-assertion
-    const brand = (options?.brand ?? defaultBrandName(prefix)) as SingleBrandName<Name>;
-
-    return makeBrandedIdSchema<Name>(prefix, brand);
-}
+    return makeBrandedIdSchema<Name>(prefix, options.brand);
+};
 
 // ---------------------------------------------------------------------------
 // Re-exports for convenience

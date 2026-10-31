@@ -1,7 +1,7 @@
 import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
 import { describe, expect, it } from '@effect/vitest';
 import { Array as Arr, Deferred, Effect, Layer, Predicate, Ref, Schema } from 'effect';
-import { Prompt, Tool, Toolkit } from 'effect/ai';
+import { Prompt, Tool } from 'effect/ai';
 
 import {
     defineToolState,
@@ -21,6 +21,7 @@ import { layerDeterministicRuntime } from '../TestLayers/DeterministicRuntime';
 import { hookRunnerNoop } from '../TestLayers/NoOpHookRunner';
 import { agentId, collectEntries, layerNoopToolEvents } from './ToolRuntimeTestHelpers';
 import { ContinueDecision } from '../TestLayers/HookDecisions';
+import { erasedHandler, erasedToolkit } from '../TestLayers/TestTools';
 
 const toolCallIdA = ToolCallId.make('tool_call_aaaaaaaaaaaaaaaaaaaaaaaa');
 
@@ -42,7 +43,7 @@ const ProbeTool = Tool.make('probe', {
     dependencies: [ToolState],
 });
 
-const ProbeToolkit = Toolkit.make(ProbeTool);
+const ProbeToolkit = erasedToolkit(ProbeTool);
 
 type ProbeHandlers = Tool.HandlersFor<typeof ProbeToolkit.tools>;
 
@@ -94,7 +95,7 @@ describe('ToolRuntime handler state snapshots', () => {
 
             const handlerLayer = ProbeToolkit.toLayer(
                 ProbeToolkit.of({
-                    probe: ({ label }) =>
+                    probe: erasedHandler(ProbeTool.parametersSchema, ({ label }) =>
                         Effect.gen(function* () {
                             if (label === 'a') {
                                 yield* ProbeState.set('shared', 'a');
@@ -120,6 +121,7 @@ describe('ToolRuntime handler state snapshots', () => {
 
                             return { done: true };
                         }),
+                    ),
                 }),
             );
 

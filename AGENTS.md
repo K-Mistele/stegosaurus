@@ -81,3 +81,4 @@ pnpm test:conformance  # Durable Streams conformance suite against the Worker in
 - A new app or package needs a `tsconfig.json` (extend `../../tsconfig.json`) and a `"typecheck": "tsrs"` script to get type checked, and a `test` script to run under `pnpm test`.
 - Keep `packages/alchemy-test` close to upstream and log any local change in its `VENDORED.md`.
 - `tools/anti-slop`, `tools/automation`, and `tools/typed-lint` are ours to change; edit rules in place and note the change in the tool's `VENDORED.md`.
+

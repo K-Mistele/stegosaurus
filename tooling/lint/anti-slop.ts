@@ -11,6 +11,7 @@ export const antiSlopRules = {
     'anti-slop/no-reduce-accumulator-copy': 'error',
     'anti-slop/no-chained-type-assertions': 'error',
     'anti-slop/no-conditional-spread': 'error',
+    'anti-slop/no-disabled-type-assertion-rules': 'error',
     'anti-slop/no-known-value-widening': 'error',
     'anti-slop/no-module-mocking': 'error',
     'anti-slop/no-object-parameters': 'error',

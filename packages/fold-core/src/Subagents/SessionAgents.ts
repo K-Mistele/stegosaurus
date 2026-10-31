@@ -25,7 +25,7 @@ export type RealizedAgentTools = {
 
 /** The root agent's current configuration; model switches move it (read fresh per dispatch). */
 export type RootAgentSnapshot = {
-    readonly model: FoldModel<unknown>;
+    readonly model: FoldModel;
     readonly promptCacheKey: string | null;
     /** The root's tools as configured (system-tool values included). */
     readonly tools: ReadonlyArray<FoldTool<unknown>>;

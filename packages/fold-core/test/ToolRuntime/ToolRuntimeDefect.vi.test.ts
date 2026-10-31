@@ -2,7 +2,7 @@ import { expect, it } from '@effect/vitest';
 import { Array as Arr, Effect, Option, Predicate, Ref, String as Str } from 'effect';
 
 import { layerHookRunner, messagesForAgent, StopController, ToolRuntime } from '../../src/index';
-import { layerEchoTool, makeEchoRecorder, TestToolkit } from '../TestLayers/TestTools';
+import { EchoTool, erasedHandler, layerEchoTool, makeEchoRecorder, TestToolkit } from '../TestLayers/TestTools';
 import { agentId, collectEntries, makeAssistantToolCall, toolRuntimeBaseLayer } from './ToolRuntimeTestHelpers';
 
 const projectedToolResultPart = (projected: ReturnType<typeof messagesForAgent>) => {
@@ -27,12 +27,13 @@ it.effect('projects tool handler defects as model-visible tool failures', () =>
 
         const toolLayer = TestToolkit.toLayer(
             TestToolkit.of({
-                echo: ({ text }) =>
+                echo: erasedHandler(EchoTool.parametersSchema, ({ text }) =>
                     Effect.gen(function* () {
                         yield* Ref.update(recorder.calls, (calls) => [...calls, text]);
 
                         return yield* Effect.die(new Error('boom'));
                     }),
+                ),
             }),
         );
 
