@@ -1,0 +1,34 @@
+{
+    "name": "@stegosaurus/agent",
+    "version": "0.0.0",
+    "private": true,
+    "description": "The stegosaurus GitHub coding agent: channels, fold and @cloudflare/computer on Cloudflare Workers.",
+    "type": "module",
+    "exports": {
+        ".": "./src/Agent.ts"
+    },
+    "scripts": {
+        "typecheck": "tsrs",
+        "test": "vp test"
+    },
+    "dependencies": {
+        "@alchemy.run/cloudflare": "catalog:",
+        "@cloudflare/computer": "catalog:",
+        "@effect/platform-node": "catalog:",
+        "@effect/sql-sqlite-do": "catalog:",
+        "@stegosaurus/channels-alchemy-cloudflare": "workspace:*",
+        "@stegosaurus/channels-delivery": "workspace:*",
+        "@stegosaurus/channels-github": "workspace:*",
+        "@stegosaurus/fold-agent": "workspace:*",
+        "@stegosaurus/fold-core": "workspace:*",
+        "alchemy": "catalog:",
+        "effect": "catalog:",
+        "just-bash": "catalog:"
+    },
+    "devDependencies": {
+        "@cloudflare/workers-types": "catalog:",
+        "@effect/vitest": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:"
+    }
+}

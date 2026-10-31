@@ -12,6 +12,7 @@ new RuleTester().run(
 			"new NotFound({ id });",
 			'Schema.Struct({ _tag: Schema.tag("Ready"), value: Schema.String });',
 			'Schema.Struct({ _tag: Schema.tagDefaultOmit("Granted"), token: Schema.String });',
+			'PlatformError.systemError({ _tag: "NotFound", module: "FileSystem", method: "readFile" });',
 		],
 		invalid: [
 			{
@@ -33,6 +34,10 @@ new RuleTester().run(
 			},
 			{
 				code: 'const value = { _tag: Other.tag("Ready") };',
+				errors: [{ messageId: "manualConstruction" }],
+			},
+			{
+				code: 'PlatformError.badArgument({ _tag: "Ready", module: "FileSystem", method: "readFile" });',
 				errors: [{ messageId: "manualConstruction" }],
 			},
 			{

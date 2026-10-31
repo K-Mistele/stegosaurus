@@ -8,7 +8,7 @@
         "format:check": "vp fmt --check",
         "lint": "vp lint",
         "lint:fix": "vp lint --fix",
-        "typecheck": "tsrs && vp run -r typecheck",
+        "typecheck": "vp run -r typecheck && tsrs",
         "typed:check": "bun tools/typed-lint/src/cli.ts check",
         "check": "vp run format && vp run lint && vp run typecheck && vp run typed:check",
         "test": "vp run -r test",
@@ -32,6 +32,7 @@
         "@alchemy.run/infisical": "catalog:",
         "@alchemy.run/pkg": "catalog:",
         "@effect/platform-node": "catalog:",
+        "@stegosaurus/agent": "workspace:*",
         "alchemy": "catalog:",
         "effect": "catalog:"
     },

@@ -86,6 +86,9 @@ Read only the references relevant to the task; read all matching branches when w
 
 - Compose workflows with `Effect.gen` and named `Effect.fn` operations.
 - Prefer `Context.Service` for application capabilities and `Layer.effect`/`Layer.scoped` for live acquisition.
+  Give each service a `make` effect that yields its dependencies, and `static readonly layer = Layer.effect(this,
+  this.make)`. Never take a service as a function argument, and never define a separate `*Live` constant. See
+  `references/SERVICES_LAYERS.md`.
 - Small services may collocate shape, tag, errors, operations, and layer in one file. Split larger services and
   external adapters by transport, persistence, orchestration, and other meaningful concerns.
 - Keep substantial operation effects independently testable. They may remain beside a small service or move to a

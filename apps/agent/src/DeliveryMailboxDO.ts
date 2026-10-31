@@ -1,0 +1,36 @@
+import * as Cloudflare from '@alchemy.run/cloudflare';
+import { Effect, Layer } from 'effect';
+
+import { bot } from './GithubBot';
+
+/** The mailbox's RPC methods and alarm. */
+type MailboxMethods = Effect.Success<ReturnType<typeof bot.mailbox>>;
+
+/** The application-owned mailbox Durable Object: one per GitHub issue or pull request. */
+export class DeliveryMailbox extends Cloudflare.DurableObject<DeliveryMailbox, MailboxMethods>()('DeliveryMailbox') {}
+
+const { deliveryControl, processingBackend, subscriptions, deliveryControlBackend, storage } = bot.layers.mailbox;
+
+/** The mailbox services for each Durable Object instance. Replace any leaf layer here in tests. */
+const MailboxBackendsLive = Layer.mergeAll(processingBackend, subscriptions, deliveryControlBackend).pipe(
+    Layer.provideMerge(storage),
+);
+
+const MailboxLive = Layer.merge(deliveryControl, MailboxBackendsLive).pipe(Layer.provide(MailboxBackendsLive));
+
+/**
+ * Construct the mailbox once for this Durable Object instance. Alchemy supplies RuntimeContext when
+ * it evaluates the returned inner Effect and when it runs the returned methods. Alchemy takes no
+ * construction error, so a failure is logged with its cause before the object dies.
+ */
+const MailboxImplementation = Layer.build(MailboxLive).pipe(
+    Effect.flatMap((services) => bot.mailbox({ rearmAfterMs: 1_000 }).pipe(Effect.provideContext(services))),
+    Effect.map(Effect.succeed),
+    Effect.tapCause((cause) => Effect.logError('DeliveryMailbox could not start', cause)),
+    Effect.orDie,
+);
+
+/**
+ * The mailbox's implementation. The Worker entrypoint provides MailboxLive's leaf dependencies.
+ */
+export const DeliveryMailboxDOLive = DeliveryMailbox.make(MailboxImplementation);
