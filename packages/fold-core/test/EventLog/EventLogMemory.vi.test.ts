@@ -119,11 +119,21 @@ it.effect('memory append maps invalid input to EventLogInvalidEntryError', () =>
         const error = yield* Effect.gen(function* () {
             const log = yield* EventLog;
 
+            const ids = yield* Ids;
+            const agentId = yield* ids.makeAgentId;
+
+            // Well typed, but it breaks a rule only the schema checks: a parent agent needs a tool call.
             return yield* log
                 .append(
-                    // Intentionally invalid input: this test exercises append's schema-validation failure path.
-                    // oxlint-disable-next-line typescript/consistent-type-assertions, automation/no-type-assertion, anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion, automation/no-banned-type-assertions -- intentionally invalid input to test append's validation failure
-                    { ...(yield* makeSessionStarted('/tmp/bad')), cwd: 42 } as unknown as LogEntryInput,
+                    LogEntryInputs.compaction({
+                        agentId,
+                        parentAgentId: agentId,
+                        toolCallId: null,
+                        compactionId: yield* ids.makeCompactionId,
+                        summary: 'summary',
+                        replacesThroughSeq: 0,
+                        tokensBefore: 1,
+                    }),
                 )
                 .pipe(Effect.flip);
         }).pipe(Effect.provide(testLayer));

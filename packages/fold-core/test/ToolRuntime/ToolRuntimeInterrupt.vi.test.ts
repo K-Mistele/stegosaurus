@@ -1,7 +1,7 @@
 import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
 import { expect, it } from '@effect/vitest';
 import { Array as Arr, Deferred, Effect, Fiber, Layer, Option, Predicate, Schema } from 'effect';
-import { Prompt, Tool, Toolkit } from 'effect/ai';
+import { Prompt, Tool } from 'effect/ai';
 
 import {
     layerInMemoryEventLog,
@@ -13,6 +13,7 @@ import {
 import { layerDeterministicRuntime } from '../TestLayers/DeterministicRuntime';
 import { hookRunnerNoop } from '../TestLayers/NoOpHookRunner';
 import { agentId, collectEntries, layerNoopToolEvents, toolCallId } from './ToolRuntimeTestHelpers';
+import { erasedHandler, erasedToolkit } from '../TestLayers/TestTools';
 
 const BlockingTool = Tool.make('block', {
     description: 'Blocks until the test releases it.',
@@ -22,7 +23,7 @@ const BlockingTool = Tool.make('block', {
     failureMode: 'return',
 });
 
-const BlockingToolkit = Toolkit.make(BlockingTool);
+const BlockingToolkit = erasedToolkit(BlockingTool);
 
 const makeBlockAssistantMessage = (): Prompt.AssistantMessage =>
     Prompt.assistantMessage({
@@ -43,13 +44,14 @@ it.effect('writes a synthetic interrupted tool-result when a running tool fiber 
 
         const handlerLayer = BlockingToolkit.toLayer(
             BlockingToolkit.of({
-                block: ({ text }) =>
+                block: erasedHandler(BlockingTool.parametersSchema, ({ text }) =>
                     Effect.gen(function* () {
                         yield* Deferred.succeed(started, undefined);
                         yield* Deferred.await(release);
 
                         return { done: text };
                     }),
+                ),
             }),
         );
 

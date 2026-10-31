@@ -21,6 +21,7 @@ import {
     type SkillMeta,
     type SkillSourceService,
 } from '../../src/index';
+import { layerStubSessionToolServices } from '../TestLayers/StubSessionToolServices';
 
 /** Ambient per-call services the runtime normally provides; the skill tool uses none of them. */
 const ambientServices = Layer.mergeAll(
@@ -64,7 +65,7 @@ describe('makeSkillTool', () => {
 
             expect(tool.name).toBe('skill');
             expect(realized.tool.description).toContain('Available skills: commit-helper, reviewer.');
-        }).pipe(Effect.provide(NodeServices.layer)),
+        }).pipe(Effect.provide([NodeServices.layer, layerStubSessionToolServices])),
     );
 
     it.effect('loads a skill and wraps its content', () =>
@@ -80,7 +81,7 @@ describe('makeSkillTool', () => {
                     text: '<skill name="commit-helper">\nWrite conventional commits.\n</skill>',
                 }),
             );
-        }).pipe(Effect.provide(NodeServices.layer)),
+        }).pipe(Effect.provide([NodeServices.layer, layerStubSessionToolServices])),
     );
 
     it.effect('returns an instructive failure with the roster for unknown skills', () =>
@@ -97,7 +98,7 @@ describe('makeSkillTool', () => {
                     details: { availableSkills: ['commit-helper', 'reviewer'] },
                 }),
             );
-        }).pipe(Effect.provide(NodeServices.layer)),
+        }).pipe(Effect.provide([NodeServices.layer, layerStubSessionToolServices])),
     );
 
     it.effect('refresh reports skills added after the session-start snapshot', () =>
@@ -129,7 +130,7 @@ describe('makeSkillTool', () => {
             expect(content).toContain('<skill name="commit-helper">');
             expect(content).toContain('<system-information>');
             expect(content).toContain('Skills added since session start:\n- late-arrival: Added mid-session');
-        }).pipe(Effect.provide(NodeServices.layer)),
+        }).pipe(Effect.provide([NodeServices.layer, layerStubSessionToolServices])),
     );
 
     it.effect('refresh reports an unchanged roster', () =>
@@ -142,7 +143,7 @@ describe('makeSkillTool', () => {
             const content = skillContentOf(result);
 
             expect(content).toContain('The skill list has not changed since this session started.');
-        }).pipe(Effect.provide(NodeServices.layer)),
+        }).pipe(Effect.provide([NodeServices.layer, layerStubSessionToolServices])),
     );
 
     it.effect('an empty snapshot steers the model toward refresh', () =>
@@ -151,6 +152,6 @@ describe('makeSkillTool', () => {
             const realized = yield* makeSkillTool({ source, snapshot: [] }).init;
 
             expect(realized.tool.description).toContain('No skills were available when this session started');
-        }).pipe(Effect.provide(NodeServices.layer)),
+        }).pipe(Effect.provide([NodeServices.layer, layerStubSessionToolServices])),
     );
 });

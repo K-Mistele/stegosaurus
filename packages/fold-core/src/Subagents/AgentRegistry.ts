@@ -7,11 +7,13 @@
  * subagent is always resumable by id from one place while only the types in a dispatcher's roster are
  * launchable by it.
  */
-import { Array as Arr, Effect, String as Str } from 'effect';
+import { Array as Arr, type Context, Effect, String as Str } from 'effect';
 
 import { systemPromptBlocks } from '../Api/AgentDefinition';
+import { bindModelServices } from '../Api/ModelDescriptor';
 import type { FoldTool } from '../Api/ToolDefinition';
 import type { HookConfig } from '../HookRunner/Types';
+import { isProfileRole } from '../Session/Profiles';
 import type { ForkAgentDefinition, ForkAgentDefinitionId } from './ForkAgentDefinition';
 import type { SubagentDefinition, SubagentModelBinding } from './SubagentDefinition';
 import { subagentCapabilitiesOf } from './SubagentTool';
@@ -35,8 +37,11 @@ export type RegisteredAgentType = {
      * Every one has already been initialized, so their host services no longer matter here.
      */
     readonly tools: ReadonlyArray<FoldTool<unknown>>;
-    /** Concrete model or profile role name; the subagent operations resolve roles per dispatch/resume. */
-    readonly model: SubagentModelBinding<unknown>;
+    /**
+     * Concrete model, bound to the session's host services, or profile role name; the subagent operations
+     * resolve roles per dispatch/resume.
+     */
+    readonly model: SubagentModelBinding;
     readonly hooks: HookConfig;
 };
 
@@ -48,12 +53,16 @@ export type AgentRegistry = {
     readonly entries: ReadonlyArray<RegisteredAgentType>;
     /** Resolve one host-configured fork toolset by its durable identifier. */
     readonly resolveForkAgentDefinition: (id: ForkAgentDefinitionId) => ForkAgentDefinition<unknown> | null;
+};
+
+/** The registry as the session that owns it sees it: it can add the definitions a switch introduces. */
+export type ExtensibleAgentRegistry<R> = AgentRegistry & {
     /**
      * Add definitions discovered at an explicit session switch boundary. Existing names remain bound
      * to their original session definition; duplicate names within the incoming graph have already
      * been rejected by {@link collectAgentDefinitions}. Returns the specialist definitions actually added.
      */
-    readonly extend: (definitions: CollectedAgentDefinitions<unknown>) => ReadonlyArray<RegisteredAgentType>;
+    readonly extend: (definitions: CollectedAgentDefinitions<R>) => ReadonlyArray<RegisteredAgentType>;
 };
 
 /**
@@ -144,14 +153,20 @@ export const collectSubagentDefinitions = <R>(
 ): Effect.Effect<ReadonlyArray<SubagentDefinition<R>>> =>
     collectAgentDefinitions(rootTools).pipe(Effect.map((definitions) => definitions.subagents));
 
-/** Build the flat registry over pre-collected (validated, deduped) definitions. */
-export const agentRegistryFromDefinitions = (definitions: CollectedAgentDefinitions<unknown>): AgentRegistry => {
-    const registeredFrom = (definition: SubagentDefinition<unknown>): RegisteredAgentType => ({
+/**
+ * Build the flat registry over pre-collected (validated, deduped) definitions, binding each concrete model
+ * to the session's host services.
+ */
+export const agentRegistryFromDefinitions = <R>(
+    definitions: CollectedAgentDefinitions<R>,
+    hostServices: Context.Context<R>,
+): ExtensibleAgentRegistry<R> => {
+    const registeredFrom = (definition: SubagentDefinition<R>): RegisteredAgentType => ({
         name: definition.name,
         description: definition.description,
         systemPrompt: systemPromptBlocks(definition.systemPrompt),
         tools: definition.tools ?? [],
-        model: definition.model,
+        model: isProfileRole(definition.model) ? definition.model : bindModelServices(definition.model, hostServices),
         hooks: definition.hooks ?? {},
     });
 

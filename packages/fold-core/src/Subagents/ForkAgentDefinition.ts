@@ -1,6 +1,6 @@
 import { Schema } from 'effect';
 
-import { toolsNeedingAll, type FoldTool, type FoldToolServices } from '../Api/ToolDefinition';
+import { type FoldTool, type FoldToolServices, type ToolsNeedingAll } from '../Api/ToolDefinition';
 
 /** Stable identifier persisted on forks so their host-configured tools survive replay. */
 export const ForkAgentDefinitionId = Schema.NonEmptyString.annotate({ identifier: 'ForkAgentDefinitionId' });
@@ -16,5 +16,5 @@ export type ForkAgentDefinition<R = never> = {
 /** Define the tools inherited by a configured fork; it needs the union of their services. */
 export const defineForkAgent = <T extends FoldTool<unknown>>(definition: {
     readonly id: ForkAgentDefinitionId;
-    readonly tools: ReadonlyArray<T>;
-}): ForkAgentDefinition<FoldToolServices<T>> => ({ id: definition.id, tools: toolsNeedingAll(definition.tools) });
+    readonly tools: ToolsNeedingAll<T>;
+}): ForkAgentDefinition<FoldToolServices<T>> => definition;

@@ -24,6 +24,7 @@ import {
 } from '../../src/index';
 import { claudeActiveModel, gptActiveModel, scriptedModel } from '../Api/ApiTestHelpers';
 import { textTurn, toolCallTurn } from '../TestLayers/ScriptedLanguageModel';
+import { layerStubSessionToolServices } from '../TestLayers/StubSessionToolServices';
 import { subagentStartedEntries } from './DriveHarness';
 
 const encodeJsonText = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
@@ -41,7 +42,7 @@ it.effect('each subagentTool value advertises exactly its own roster', () =>
         expect(wide.tool.description).toContain('- beta: second specialist');
         expect(narrow.tool.description).not.toContain('alpha');
         expect(narrow.tool.description).toContain('- beta: second specialist');
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide([NodeServices.layer, layerStubSessionToolServices])),
 );
 
 it.effect('nested rosters give depth; out-of-roster dispatch fails instructively; envelopes chain', () =>
